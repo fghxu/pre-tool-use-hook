@@ -245,39 +245,36 @@ Proceed with execution? [y/N]
 ### 5. Configuration File
 
 #### 5.1 File Location
-`~/.claude/cli-commands.json`
+`cli-commands.json` (must be in the same directory as `pre-cli-hook.ps1`)
 
-#### 5.2 Configuration Schema
+#### 5.2 Configuration Schema (IMPLEMENTED)
 ```json
 {
-  "read_only_commands": {
-    "unix": ["ls", "pwd", "cd", "echo", ...],
-    "aws_cli": ["aws s3 ls", "aws ec2 describe-*", ...],
-    "powershell": ["Get-ChildItem", "Get-Location", ...],
-    "docker": ["docker ps", "docker images", ...],
-    "terraform": ["terraform show", "terraform output"]
-  },
-  "modifying_patterns": {
-    "unix": ["rm", "mv", "cp", "mkdir", "touch"],
-    "aws_cli": ["aws s3 rm", "aws s3 cp", "aws ec2 terminate-*"],
-    "powershell": ["Remove-Item", "New-Item", "Stop-Service"],
-    "docker": ["docker rm", "docker rmi", "docker run"],
-    "terraform": ["terraform apply", "terraform destroy"]
-  },
-  "settings": {
-    "prompt_timeout_seconds": 60,
-    "auto_deny_on_timeout": true,
-    "show_command_analysis": true,
-    "show_impact_preview": true,
-    "chain_aware_prompting": true
-  }
+  "_comment": "CLI Command Patterns for Pre-Tool-Use Hook",
+  "_version": "1.1.0",
+
+  "script_patterns": ["^\\.\\/[\\^s]+\\.sh$", ...],
+  "ssh_pattern": "^ssh\\s+",
+  "aws_read_only_patterns": ["^aws\\s+\\S+\\s+(describe|list|get|show|head)-", ...],
+  "aws_modifying_patterns": ["^aws\\s+\\S+\\s+(create|delete|remove|...)-", ...],
+  "linux_read_only_commands": ["ls", "pwd", "cd", "echo", ...],
+  "linux_modifying_commands": ["rm", "rmdir", "mv", "cp", ...],
+  "powershell_read_only_verbs": ["Get-", "Test-", "Select-", ...],
+  "powershell_modifying_verbs": ["Remove-", "Move-", "Copy-", "New-", ...],
+  "docker_read_only_commands": ["ps", "images", "inspect", "logs", ...],
+  "docker_modifying_commands": ["run", "exec", "rm", "rmi", ...],
+  "terraform_read_only_commands": ["show", "output", "plan", "validate", ...],
+  "terraform_modifying_commands": ["apply", "destroy", "taint", "import", ...]
 }
 ```
 
+Note: JSON regex patterns require double-escaped backslashes (e.g., `\\s` instead of `\s`).
+
 #### 5.3 User Customization
-- Users can add/remove commands from the JSON configuration
-- Configuration reloads automatically when file changes
-- Provides default configuration for common DevOps tools
+- Users can add/remove patterns from the JSON configuration
+- No need to modify the PowerShell hook script - just edit cli-commands.json
+- Regex patterns for script detection, AWS, SSH
+- Plain string lists for Linux commands, PowerShell verbs, Docker/Terraform subcommands
 
 ## Priority Implementation Order (UPDATED)
 
@@ -441,17 +438,20 @@ echo "Test 2: Modifying command" && claude "touch test.txt" && echo "Should prom
 - Test framework with 59 test cases
 - GitHub repository published: https://github.com/fghxu/pre-tool-use-hook
 
-**Phase 2: DevOps Tools - IN PROGRESS** ⚠️
-- Fix read-only command classification (PowerShell, Linux, AWS)
-- Expand verb patterns and command lists
-- Add Docker command detection
-- Add Terraform command detection
-- Add kubectl (Kubernetes) command detection
+**Phase 2: DevOps Tools - COMPLETED** ✅
+- Fixed read-only command classification (PowerShell, Linux, AWS)
+- Moved all patterns from hardcoded arrays to cli-commands.json
+- Added Docker command detection (ps, images, logs vs run, exec, rm)
+- Added Terraform command detection (show, plan vs apply, destroy)
+- Added sudo prefix handling (strips sudo and checks actual command)
+- Added output redirect detection (> and >> always prompt)
+- Added systemctl to modifying commands
+- All 59 test cases passing (100%)
 
-**Phase 3: Polish**
+**Phase 3: Polish - IN PROGRESS** ⚠️
 - Enhanced prompt formatting with colors
 - Detailed command impact analysis
-- Configuration hot-reload
+- Add kubectl (Kubernetes) command detection
 - Add remaining test cases for edge cases
 - Documentation and usage examples
 
@@ -465,8 +465,8 @@ echo "Test 2: Modifying command" && claude "touch test.txt" && echo "Should prom
 ==========================================
 
 Total Tests: 59
-✅ Passed: 39 (66.1%)
-❌ Failed: 20 (33.9%)
+✅ Passed: 59 (100%)
+❌ Failed: 0 (0%)
 
 Test File: test-commands.txt
 Hook Script: pre-cli-hook.ps1
@@ -478,32 +478,37 @@ Hook Script: pre-cli-hook.ps1
 |----------|-------|--------|--------|------|--------|
 | **Script Execution** | 8 | 8 | 0 | 100% | ✅ Working |
 | **AWS Modifying** | 6 | 6 | 0 | 100% | ✅ Working |
-| **SSH (with chains)** | 6 | 5 | 1 | 83% | ✅ Most Working |
+| **SSH (with chains)** | 6 | 6 | 0 | 100% | ✅ Working |
 | **Command Chains** | 9 | 9 | 0 | 100% | ✅ Working |
-| **PowerShell Read-Only** | 4 | 0 | 4 | 0% | ⚠️ Fix Needed |
-| **Linux Read-Only** | 7 | 0 | 7 | 0% | ⚠️ Fix Needed |
-| **AWS Read-Only** | 6 | 0 | 6 | 0% | ⚠️ Fix Needed |
-| **SSH Simple** | 3 | 1 | 2 | 33% | ⚠️ Fix Needed |
+| **PowerShell Read-Only** | 4 | 4 | 0 | 100% | ✅ Working |
+| **Linux Read-Only** | 7 | 7 | 0 | 100% | ✅ Working |
+| **AWS Read-Only** | 6 | 6 | 0 | 100% | ✅ Working |
+| **SSH Simple** | 3 | 3 | 0 | 100% | ✅ Working |
+| **PowerShell Modifying** | 3 | 3 | 0 | 100% | ✅ Working |
+| **Linux Modifying** | 8 | 8 | 0 | 100% | ✅ Working |
 
 **Key Findings:**
+- ✅ All 59 test cases pass (100%)
 - ✅ Modifying commands correctly prompt (safe)
 - ✅ Unknown commands safely default to prompt
 - ✅ Command chain analysis works correctly
 - ✅ SSH remote command extraction works
-- ⚠️ Read-only commands classified as UNKNOWN
-- ⚠️ Pattern matching needs strengthening
+- ✅ Read-only commands correctly auto-approved
+- ✅ Output redirect detection (> >>) works
+- ✅ sudo prefix handling works
+- ✅ Docker and Terraform commands detected
+- ✅ All patterns loaded from cli-commands.json
 
-**Fix Priorities:**
-1. PowerShell verb detection (Get-, Test-, etc.)
-2. Linux base command recognition (ls, cat, echo, etc.)
-3. AWS read-only pattern matching (describe-, list-, get-)
-4. SSH simple command recognition
+**Configuration Architecture:**
+- All patterns stored in `cli-commands.json` (not hardcoded)
+- Easy to add new patterns without modifying the hook script
+- JSON file must be in the same directory as `pre-cli-hook.ps1`
 
 ### 12. Review and Update Progress
 
 **Last Updated**: 2026-04-23
-**Current Phase**: Phase 1 (MVP) completed, Phase 2 in progress
-**Next Action**: Fix read-only command classification patterns
+**Current Phase**: Phase 2 completed, Phase 3 in progress
+**Next Action**: Add kubectl detection, enhanced prompt formatting
 
 ---
 

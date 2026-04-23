@@ -52,7 +52,7 @@ function Run-HookTest {
     param($Command)
     try {
         # Call the hook script and capture output
-        $output = & pwsh -File $HookScript "`"$Command`"" 2>&1
+        $output = & pwsh -Command "& '$HookScript' '$Command'" 2>&1
         $exitCode = $LASTEXITCODE
 
         # Parse JSON output if present

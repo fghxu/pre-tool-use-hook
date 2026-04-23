@@ -1,140 +1,73 @@
 {
-  "read_only_commands": {
-    "unix": [
-      "ls", "pwd", "cd", "echo", "cat", "head", "tail", "grep", "find", "which",
-      "whoami", "id", "groups", "ps", "top", "htop", "df", "du", "free",
-      "uname", "hostname", "date", "uptime", "w", "last", "lastlog",
-      "git status", "git log", "git show", "git diff", "git branch",
-      "git remote -v", "git config --get", "git tag", "git describe",
-      "npm list", "npm view", "npm search", "npm config get",
-      "yarn list", "yarn info", "yarn config get",
-      "pip list", "pip show", "pip search", "pip config get",
-      "composer show", "composer search", "composer config",
-      "gem list", "gem search", "gem info",
-      "curl -I", "curl --head", "wget --spider",
-      "docker ps", "docker images", "docker inspect", "docker version",
-      "docker info", "docker stats", "docker-compose config",
-      "kubectl get", "kubectl describe", "kubectl logs", "kubectl version",
-      "terraform show", "terraform output", "terraform show -json",
-      "terraform version", "terraform providers"
-    ],
-    "aws_cli": [
-      "aws s3 ls", "aws s3api head-object", "aws s3api get-object-acl",
-      "aws s3api list-objects", "aws s3api list-buckets",
-      "aws ec2 describe-instances", "aws ec2 describe-vpcs",
-      "aws ec2 describe-subnets", "aws ec2 describe-security-groups",
-      "aws ec2 describe-images", "aws ec2 describe-volumes",
-      "aws ec2 describe-key-pairs", "aws ec2 describe-snapshots",
-      "aws rds describe-db-instances", "aws rds describe-db-clusters",
-      "aws cloudformation describe-stacks", "aws cloudformation describe-stack-resources",
-      "aws cloudformation get-template", "aws cloudformation list-stacks",
-      "aws iam list-users", "aws iam list-roles", "aws iam list-policies",
-      "aws ssm get-parameter", "aws ssm get-parameters",
-      "aws cloudwatch list-metrics", "aws cloudwatch get-metric-statistics",
-      "aws configure get", "aws configure list",
-      "aws help", "aws s3 help", "aws ec2 help"
-    ],
-    "powershell": [
-      "Get-ChildItem", "Get-Location", "Get-Content", "Get-Process",
-      "Get-Service", "Get-EventLog", "Get-Date", "Get-Host",
-      "Get-Command", "Get-Help", "Get-Alias", "Get-Member",
-      "Get-Variable", "Get-Item", "Get-ItemProperty", "Get-History",
-      "Get-Random", "Get-Credential", "Get-WmiObject", "Get-CimInstance",
-      "Test-Path", "Test-Connection", "Test-NetConnection", "Write-Output",
-      "Select-Object", "Where-Object", "Sort-Object", "Measure-Object",
-      "Compare-Object", "Group-Object", "Format-Table", "Format-List"
-    ],
-    "docker": [
-      "docker ps", "docker images", "docker inspect", "docker logs",
-      "docker version", "docker info", "docker stats", "docker system df",
-      "docker image ls", "docker container ls", "docker network ls",
-      "docker volume ls", "docker-compose config", "docker-compose ps",
-      "docker-compose images", "docker-compose top", "docker-compose version",
-      "docker buildx ls", "docker buildx imagetools inspect"
-    ],
-    "terraform": [
-      "terraform show", "terraform output", "terraform state list",
-      "terraform state show", "terraform providers", "terraform version",
-      "terraform plan -detailed-exitcode", "terraform show -json",
-      "terraform validate", "terraform fmt -check", "terraform console",
-      "terraform graph", "terraform validate -json"
-    ],
-    "kubernetes": [
-      "kubectl get", "kubectl describe", "kubectl logs", "kubectl version",
-      "kubectl cluster-info", "kubectl api-resources", "kubectl api-versions",
-      "kubectl config view", "kubectl config get-contexts", "kubectl config get-users",
-      "kubectl top pod", "kubectl top node", "kubectl auth can-i",
-      "kubectl explain"
-    ]
-  },
-  "modifying_patterns": {
-    "unix": [
-      "rm", "rmdir", "mv", "cp", "touch", "mkdir", "chmod", "chown",
-      "chgrp", "ln -s", "useradd", "userdel", "usermod", "groupadd",
-      "groupdel", "passwd", "mount", "umount", "shutdown", "reboot",
-      "systemctl (stop|start|restart|enable|disable)",
-      "service (stop|start|restart)", "apt-get", "apt", "yum", "dnf",
-      "rpm", "dpkg", "pip (install|uninstall)", "npm (install|uninstall)",
-      "yarn (add|remove)", "composer (require|remove)", "make install",
-      "curl -X (POST|PUT|DELETE|PATCH)", "wget (without --spider)",
-      "rsync (without -n or --dry-run)", "scp", "sftp",
-      "mysql", "psql", "mongo", "redis-cli", "sqlite3"
-    ],
-    "aws_cli": [
-      "aws s3 (rm|cp|mv|sync)", "aws s3api (put-object|delete-object|delete-bucket)",
-      "aws ec2 (terminate-instances|stop-instances|start-instances|reboot-instances)",
-      "aws ec2 (create-volume|attach-volume|detach-volume|delete-volume)",
-      "aws rds (stop-db-instance|delete-db-instance|reboot-db-instance)",
-      "aws cloudformation (create-stack|update-stack|delete-stack)",
-      "aws iam (create-user|delete-user|attach-user-policies)",
-      "aws ssm put-parameter", "aws cloudwatch put-metric-data",
-      "aws ecs (stop-task|delete-cluster)", "aws eks delete-cluster"
-    ],
-    "powershell": [
-      "Remove-Item", "Move-Item", "Copy-Item", "New-Item", "Set-Content",
-      "Clear-Content", "Add-Content", "Set-Item", "Rename-Item", "Stop-Service",
-      "Start-Service", "Restart-Service", "Suspend-Service", "Resume-Service",
-      "New-LocalUser", "Remove-LocalUser", "Set-LocalUser", "New-ItemProperty",
-      "Set-ItemProperty", "Remove-ItemProperty", "Clear-Item", "Set-ExecutionPolicy",
-      "New-WebAppPool", "Remove-WebAppPool", "Restart-WebItem"
-    ],
-    "docker": [
-      "docker (run|exec|rm|rmi|stop|kill|pause|unpause)",
-      "docker (build|push|pull|tag|load|save)",
-      "docker (create|update|rename)",
-      "docker network (create|rm|connect|disconnect)",
-      "docker volume (create|rm)", "docker-compose (up|down|exec)",
-      "docker system (prune)"
-    ],
-    "terraform": [
-      "terraform apply", "terraform destroy", "terraform taint",
-      "terraform untaint", "terraform import", "terraform state rm",
-      "terraform state mv", "terraform refresh"
-    ],
-    "kubernetes": [
-      "kubectl (apply|create|delete|replace)",
-      "kubectl (edit|patch)",
-      "kubectl (exec|attach|port-forward)",
-      "kubectl (scale|rollout)",
-      "kubectl (label|annotate)",
-      "kubectl expose"
-    ]
-  },
-  "settings": {
-    "prompt_timeout_seconds": 60,
-    "auto_deny_on_timeout": true,
-    "show_command_analysis": true,
-    "show_impact_preview": true,
-    "chain_aware_prompting": true,
-    "log_approvals": true,
-    "log_file": "~/.claude/hook-approvals.log"
-  },
-  "command_inspectors": {
-    "curl_needs_data_check": [
-      "-d", "--data", "--data-ascii", "--data-binary", "--data-raw", "--data-urlencode"
-    ],
-    "wget_needs_download_check": [
-      "--post-data", "--post-file", "--method=POST"
-    ]
-  }
+  "_comment": "CLI Command Patterns for Pre-Tool-Use Hook - Used by pre-cli-hook.ps1",
+  "_version": "1.1.0",
+
+  "script_patterns": [
+    "^\\.\\\/[^\\s]+\\.sh$",
+    "^\\.\\\/[^\\s]+$",
+    "^bash\\s+[^\\s]+\\.sh$",
+    "^sh\\s+[^\\s]+\\.sh$",
+    "^sh\\s+[^\\s]+$",
+    "^python\\d?\\s+[^\\s]+$",
+    "^python\\d?\\.\\d?\\s+[^\\s]+$",
+    "^perl\\s+[^\\s]+$",
+    "^node\\s+[^\\s]+$",
+    "^source\\s+[^\\s]+$",
+    "^\\.\\s+[^\\s]+$",
+    "^\\.\\\/[^\\s]+",
+    "^\\.\\\/gradlew\\s+",
+    "^\\.\\\/mvnw\\s+"
+  ],
+
+  "ssh_pattern": "^ssh\\s+",
+
+  "aws_read_only_patterns": [
+    "^aws\\s+\\S+\\s+(describe|list|get|show|head)-",
+    "^aws\\s+s3\\s+ls"
+  ],
+
+  "aws_modifying_patterns": [
+    "^aws\\s+\\S+\\s+(create|delete|remove|terminate|stop|start|reboot|modify|update|put|upload|download|sync|rm)-",
+    "^aws\\s+s3\\s+(rm|cp|mv|sync)",
+    "^aws\\s+s3api\\s+(put|delete)-"
+  ],
+
+  "linux_read_only_commands": [
+    "ls", "pwd", "cd", "echo", "cat", "head", "tail", "grep", "find", "which",
+    "whoami", "id", "groups", "file", "ps", "df", "du", "free", "uname",
+    "hostname", "date", "uptime", "who", "wc", "sort", "uniq", "less", "more"
+  ],
+
+  "linux_modifying_commands": [
+    "rm", "rmdir", "mv", "cp", "scp", "rsync", "touch", "mkdir",
+    "chmod", "chown", "chgrp", "setfacl", "useradd", "userdel",
+    "usermod", "passwd", "groupadd", "groupdel", "mount", "umount",
+    "fsck", "mkfs", "dd", "shutdown", "reboot", "halt", "poweroff",
+    "yum", "apt-get", "dnf", "pip", "npm", "composer", "gem",
+    "mysql", "psql", "redis-cli", "mongosh", "mongo", "systemctl"
+  ],
+
+  "powershell_read_only_verbs": [
+    "Get-", "Test-", "Select-", "Where-", "Measure-", "Find-", "Write-"
+  ],
+
+  "powershell_modifying_verbs": [
+    "Remove-", "Move-", "Copy-", "New-", "Set-", "Clear-", "Rename-", "Stop-", "Start-", "Restart-", "Invoke-"
+  ],
+
+  "docker_read_only_commands": [
+    "ps", "images", "inspect", "logs", "stats", "info"
+  ],
+
+  "docker_modifying_commands": [
+    "run", "exec", "rm", "rmi", "stop", "kill", "build", "push", "pull", "commit", "tag"
+  ],
+
+  "terraform_read_only_commands": [
+    "show", "output", "plan", "validate", "fmt"
+  ],
+
+  "terraform_modifying_commands": [
+    "apply", "destroy", "taint", "import", "refresh"
+  ]
 }

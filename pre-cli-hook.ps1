@@ -11,9 +11,11 @@ This hook script integrates with Claude Code's PreToolUse hooks to:
 - Handle SSH commands specially (extract remote command and analyze it)
 - Detect script executions and always prompt for approval
 - Support pattern-based AWS detection (describe-, create-, delete- etc)
+- Load all patterns from cli-commands.json for easy customization
 
 .NOTES
 Returns exit code 0 for approval, 1 for denial (prompt required)
+Config file: cli-commands.json (must be in same directory as this script)
 #>
 
 param(
@@ -21,65 +23,81 @@ param(
     [string]$FullCommand
 )
 
-# Configuration - Regex Patterns
+# ==================================================
+# Load Configuration from cli-commands.json
 # ==================================================
 
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ConfigFile = Join-Path $ScriptDir "cli-commands.json"
+
+if (-not (Test-Path $ConfigFile)) {
+    Write-Error "Config file not found: $ConfigFile"
+    exit 1
+}
+
+$Config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+
 # Script Execution Patterns - Always prompt (execute unknown code)
-$ScriptPatterns = @(
-    '^\.\/[^\s]+\.sh$',      # ./script.sh
-    '^\.\/[^\s]+$',          # ./anything
-    '^bash\s+[^\s]+\.sh$',   # bash script.sh
-    '^sh\s+[^\s]+\.sh$',     # sh script.sh
-    '^sh\s+[^\s]+$',          # sh /path/to/script
-    '^python\d?\s+[^\s]+$',   # python script.py
-    '^python\d?\.\d?\s+[^\s]+$', # python3.8 script.py
-    '^perl\s+[^\s]+$',        # perl script.pl
-    '^node\s+[^\s]+$',        # node script.js
-    '^source\s+[^\s]+$',      # source script.sh
-    '^\.\s+[^\s]+$',          # . script.sh
-    '^\.\/[^\s]+',            # ./gradlew, ./configure
-    '^\.\/gradlew\s+',         # ./gradlew build
-    '^\.\/mvnw\s+'            # ./mvnw package
-)
+$ScriptPatterns = @($Config.script_patterns)
 
 # SSH Command Pattern
-$SSHPattern = '^ssh\s+'
+$SSHPattern = $Config.ssh_pattern
 
-# AWS Read-Only Patterns (pattern-based to avoid hardcoding)
-$AWSReadOnlyPatterns = @(
-    '^aws\s+\S+\s+(describe|list|get|show|head)-',  # describe-, list-, get-, show-, head-
-    '^aws\s+s3\s+ls'                                   # aws s3 ls (special case)
-)
+# AWS Read-Only Patterns
+$AWSReadOnlyPatterns = @($Config.aws_read_only_patterns)
 
 # AWS Modifying Patterns
-$AWSModifyingPatterns = @(
-    '^aws\s+\S+\s+(create|delete|remove|terminate|stop|start|reboot|modify|update|put|upload|download|sync|rm)-',
-    '^aws\s+s3\s+(rm|cp|mv|sync)',                    # aws s3 rm|cp|mv|sync
-    '^aws\s+s3api\s+(put|delete)-'                  # aws s3api put-|delete-
-)
+$AWSModifyingPatterns = @($Config.aws_modifying_patterns)
 
 # Linux/Unix Read-Only Commands
-$LinuxReadOnlyCommands = @(
-    'ls', 'pwd', 'cd', 'echo', 'cat', 'head', 'tail', 'grep', 'find', 'which',
-    'whoami', 'id', 'groups', 'file', 'ps', 'df', 'du', 'free', 'uname',
-    'hostname', 'date', 'uptime', 'who', 'wc', 'sort', 'uniq', 'less', 'more'
-)
+$LinuxReadOnlyCommands = @($Config.linux_read_only_commands)
 
 # Linux/Unix Modifying Commands
-$LinuxModifyingCommands = @(
-    'rm', 'rmdir', 'mv', 'cp', 'scp', 'rsync', 'touch', 'mkdir',
-    'chmod', 'chown', 'chgrp', 'setfacl', 'useradd', 'userdel',
-    'usermod', 'passwd', 'groupadd', 'groupdel', 'mount', 'umount',
-    'fsck', 'mkfs', 'dd', 'shutdown', 'reboot', 'halt', 'poweroff',
-    'yum', 'apt-get', 'dnf', 'pip', 'npm', 'composer', 'gem',
-    'mysql', 'psql', 'redis-cli', 'mongosh', 'mongo'
-)
+$LinuxModifyingCommands = @($Config.linux_modifying_commands)
 
-# PowerShell Read-Only Verbs (Get-, Test-, Select-, etc.)
-$PowerShellReadOnlyVerbs = @('Get-', 'Test-', 'Select-', 'Where-', 'Measure-', 'Find-', 'Write-')
+# PowerShell Read-Only Verbs
+$PowerShellReadOnlyVerbs = @($Config.powershell_read_only_verbs)
 
-# PowerShell Modifying Verbs (Remove-, New-, Set-, etc.)
-$PowerShellModifyingVerbs = @('Remove-', 'Move-', 'Copy-', 'New-', 'Set-', 'Clear-', 'Rename-', 'Stop-', 'Start-', 'Restart-', 'Invoke-')
+# PowerShell Modifying Verbs
+$PowerShellModifyingVerbs = @($Config.powershell_modifying_verbs)
+
+# Docker Read-Only Commands
+$DockerReadOnlyCommands = @($Config.docker_read_only_commands)
+
+# Docker Modifying Commands
+$DockerModifyingCommands = @($Config.docker_modifying_commands)
+
+# Terraform Read-Only Commands
+$TerraformReadOnlyCommands = @($Config.terraform_read_only_commands)
+
+# Terraform Modifying Commands
+$TerraformModifyingCommands = @($Config.terraform_modifying_commands)
+
+# ==================================================
+# Logging Function
+# ==================================================
+
+function Log-Decision {
+    param(
+        [string]$Command,
+        [string]$Action,
+        [string]$Reason
+    )
+
+    $logFile = "C:\temp\command-hook.log"
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "$timestamp | Command: $Command | Action: $Action | Reason: $Reason"
+
+    try {
+        if (-not (Test-Path "C:\temp")) {
+            New-Item -ItemType Directory -Path "C:\temp" -Force | Out-Null
+        }
+        Add-Content -Path $logFile -Value $logEntry -ErrorAction SilentlyContinue
+    }
+    catch {
+        # Logging failure should not block the hook
+    }
+}
 
 # ==================================================
 # Helper Functions
@@ -126,15 +144,75 @@ function Test-IsAWSModifying {
 function Test-IsLinuxReadOnly {
     param([string]$Command)
 
-    $cmdName = ($Command -split '\s+')[0]
+    $cmdToCheck = $Command
+    # Strip leading sudo to check the actual command
+    if ($cmdToCheck -match '^sudo\s+') {
+        $cmdToCheck = $cmdToCheck -replace '^sudo\s+', ''
+    }
+
+    $cmdName = ($cmdToCheck -split '\s+')[0]
     return $LinuxReadOnlyCommands -contains $cmdName
 }
 
 function Test-IsLinuxModifying {
     param([string]$Command)
 
-    $cmdName = ($Command -split '\s+')[0]
+    $cmdToCheck = $Command
+    # Strip leading sudo to check the actual command
+    if ($cmdToCheck -match '^sudo\s+') {
+        $cmdToCheck = $cmdToCheck -replace '^sudo\s+', ''
+    }
+
+    $cmdName = ($cmdToCheck -split '\s+')[0]
     return $LinuxModifyingCommands -contains $cmdName
+}
+
+function Test-IsDockerReadOnly {
+    param([string]$Command)
+
+    if ($Command -match '^docker\s+(\S+)') {
+        $subCmd = $Matches[1]
+        return $DockerReadOnlyCommands -contains $subCmd
+    }
+    if ($Command -match '^docker-compose\s+(\S+)') {
+        $subCmd = $Matches[1]
+        return $DockerReadOnlyCommands -contains $subCmd
+    }
+    return $false
+}
+
+function Test-IsDockerModifying {
+    param([string]$Command)
+
+    if ($Command -match '^docker\s+(\S+)') {
+        $subCmd = $Matches[1]
+        return $DockerModifyingCommands -contains $subCmd
+    }
+    if ($Command -match '^docker-compose\s+(\S+)') {
+        $subCmd = $Matches[1]
+        return $DockerModifyingCommands -contains $subCmd
+    }
+    return $false
+}
+
+function Test-IsTerraformReadOnly {
+    param([string]$Command)
+
+    if ($Command -match '^terraform\s+(\S+)') {
+        $subCmd = $Matches[1]
+        return $TerraformReadOnlyCommands -contains $subCmd
+    }
+    return $false
+}
+
+function Test-IsTerraformModifying {
+    param([string]$Command)
+
+    if ($Command -match '^terraform\s+(\S+)') {
+        $subCmd = $Matches[1]
+        return $TerraformModifyingCommands -contains $subCmd
+    }
+    return $false
 }
 
 function Test-IsPowerShellReadOnly {
@@ -163,14 +241,14 @@ function Extract-SSHRemoteCommand {
     param([string]$Command)
 
     # Extract text within quotes (the remote command)
-    # Example: ssh user@host "cat file && grep pattern" -> "cat file && grep pattern"
+    # Example: ssh user@host "cat file && grep pattern" -> cat file && grep pattern
     if ($Command -match '"(.+)"') {
-        return $matches[1]
+        return $Matches[1]
     }
 
     # Handle single quotes as well
     if ($Command -match "'(.+)'") {
-        return $matches[1]
+        return $Matches[1]
     }
 
     return $null
@@ -222,8 +300,18 @@ function Get-CLICommandType {
         return "AWS"
     }
 
-    # Check for PowerShell (starts with capitalized verb or common cmdlets)
-    if ($cmd -match '^[A-Z][a-z]+-' -or $cmd -match '^(Get-|Test-|Select-|Where-|Measure-|Find-|Write-|Remove-|Move-|Copy-|New-|Set-|Clear-|Rename-|Stop-|Start-|Restart-|Invoke-)') {
+    # Check for Docker
+    if ($cmd -match '^docker(\s|-compose\s)') {
+        return "Docker"
+    }
+
+    # Check for Terraform
+    if ($cmd -match '^terraform\s+') {
+        return "Terraform"
+    }
+
+    # Check for PowerShell (starts with Verb-Noun pattern)
+    if ($cmd -match '^[A-Z][a-z]+-') {
         return "PowerShell"
     }
 
@@ -237,7 +325,7 @@ function Test-IsReadOnly {
     $cliType = Get-CLICommandType $Command
 
     switch ($cliType) {
-        "Script" { return $false }  # Scripts never read-only
+        "Script" { return $false } # Scripts never read-only
 
         "SSH" {
             $remoteCmd = Extract-SSHRemoteCommand $Command
@@ -249,13 +337,15 @@ function Test-IsReadOnly {
             $subCommands = Split-ChainedCommands $remoteCmd
             foreach ($subCmd in $subCommands) {
                 if (-not (Test-IsReadOnly $subCmd)) {
-                    return $false  # One modifying means entire SSH command modifies
+                    return $false
                 }
             }
             return $true
         }
 
         "AWS" { return Test-IsAWSReadOnly $Command }
+        "Docker" { return Test-IsDockerReadOnly $Command }
+        "Terraform" { return Test-IsTerraformReadOnly $Command }
         "PowerShell" { return Test-IsPowerShellReadOnly $Command }
         "Linux" { return Test-IsLinuxReadOnly $Command }
         default { return $false }
@@ -268,7 +358,7 @@ function Test-IsModifying {
     $cliType = Get-CLICommandType $Command
 
     switch ($cliType) {
-        "Script" { return $true }  # Scripts always modifying
+        "Script" { return $true } # Scripts always modifying
 
         "SSH" {
             $remoteCmd = Extract-SSHRemoteCommand $Command
@@ -280,16 +370,18 @@ function Test-IsModifying {
             $subCommands = Split-ChainedCommands $remoteCmd
             foreach ($subCmd in $subCommands) {
                 if (Test-IsModifying $subCmd) {
-                    return $true  # One modifying means entire SSH command modifies
+                    return $true
                 }
             }
             return $false
         }
 
         "AWS" { return Test-IsAWSModifying $Command }
+        "Docker" { return Test-IsDockerModifying $Command }
+        "Terraform" { return Test-IsTerraformModifying $Command }
         "PowerShell" { return Test-IsPowerShellModifying $Command }
         "Linux" { return Test-IsLinuxModifying $Command }
-        default { return $true }  # Better safe than sorry
+        default { return $true } # Better safe than sorry
     }
 }
 
@@ -316,6 +408,11 @@ function Analyze-Command {
 
     if (-not $Command -or $Command.Trim().Length -eq 0) {
         return New-DecisionResult "approve" "Empty command"
+    }
+
+    # Check: Output redirection (always modifying - creates/overwrites files)
+    if ($Command -match '\s*>>?\s*\S' -and $Command -notmatch '^\s*$') {
+        return New-DecisionResult "prompt" "REDIRECT: Command contains output redirection (modifying)"
     }
 
     # Check: Script Execution (Highest priority - always prompt)
@@ -404,16 +501,19 @@ if ($FullCommand) {
     $resultJson = Analyze-Command $FullCommand
     $result = $resultJson | ConvertFrom-Json
 
-    Write-Host @"
+    Write-Host ""
 
-==============================================
-CLI Security Analysis
-==============================================
-Command: $FullCommand
-Decision: $($result.action.ToUpper())
-Reason: $($result.reason)
-==============================================
-"@
+    Write-Host "=============================================="
+    Write-Host "CLI Security Analysis"
+    Write-Host "=============================================="
+    Write-Host "Command: $FullCommand"
+    Write-Host "Decision: $($result.action.ToUpper())"
+    Write-Host "Reason: $($result.reason)"
+    Write-Host "=============================================="
+    Write-Host ""
+
+    # Log the decision
+    Log-Decision -Command $FullCommand -Action $result.action -Reason $result.reason
 
     # Return JSON output
     Write-Output $resultJson
@@ -426,26 +526,29 @@ Reason: $($result.reason)
     }
 } else {
     # No command provided, show help
-    Write-Host @"
-
-Pre-CLI Hook for Claude Code
-============================
-
-Usage: pwsh pre-cli-hook.ps1 <command>
-
-Examples:
-  pwsh pre-cli-hook.ps1 "Get-ChildItem"
-  pwsh pre-cli-hook.ps1 "Remove-Item file.txt"
-  pwsh pre-cli-hook.ps1 "ls -la"
-  pwsh pre-cli-hook.ps1 "sh user@host 'cat /var/log/app.log'"
-  pwsh pre-cli-hook.ps1 "./script.sh"
-  pwsh pre-cli-hook.ps1 "aws ec2 describe-instances"
-
-Returns:
-  Exit code 0 = APPROVE (read-only)
-  Exit code 1 = PROMPT (modifying or unknown)
-
-With JSON output showing decision and reason.
-"@
+    Write-Host ""
+    Write-Host "Pre-CLI Hook for Claude Code"
+    Write-Host "============================"
+    Write-Host ""
+    Write-Host "Usage: pwsh pre-cli-hook.ps1 <command>"
+    Write-Host ""
+    Write-Host "Config: cli-commands.json (same directory as this script)"
+    Write-Host ""
+    Write-Host "Examples:"
+    Write-Host '  pwsh pre-cli-hook.ps1 "Get-ChildItem"'
+    Write-Host '  pwsh pre-cli-hook.ps1 "Remove-Item file.txt"'
+    Write-Host '  pwsh pre-cli-hook.ps1 "ls -la"'
+    Write-Host "  pwsh pre-cli-hook.ps1 `"ssh user@host 'cat /var/log/app.log'`""
+    Write-Host '  pwsh pre-cli-hook.ps1 "./script.sh"'
+    Write-Host '  pwsh pre-cli-hook.ps1 "aws ec2 describe-instances"'
+    Write-Host '  pwsh pre-cli-hook.ps1 "docker ps"'
+    Write-Host '  pwsh pre-cli-hook.ps1 "terraform plan"'
+    Write-Host ""
+    Write-Host "Returns:"
+    Write-Host "  Exit code 0 = APPROVE (read-only)"
+    Write-Host "  Exit code 1 = PROMPT (modifying or unknown)"
+    Write-Host ""
+    Write-Host "With JSON output showing decision and reason."
+    Write-Host "All decisions logged to C:\temp\command-hook.log"
+    Write-Host ""
 }
-
