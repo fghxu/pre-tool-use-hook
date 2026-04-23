@@ -1,0 +1,89 @@
+# Test File for Pre-CLI-Hook
+# Format: Y/N;Category;Command;Description
+# Y = auto-approve, N = manual approval
+# ==================================================
+
+# PowerShell Read-Only Commands (Y)
+Y;PowerShell_ReadOnly;Get-ChildItem;List files in directory
+Y;PowerShell_ReadOnly;Get-Location;Get current location
+Y;PowerShell_ReadOnly;Get-Process;List running processes
+Y;PowerShell_ReadOnly;Get-Content file.txt;Read file contents
+
+# PowerShell Modifying Commands (N)
+N;PowerShell_Modifying;Remove-Item file.txt;Delete a file
+N;PowerShell_Modifying;New-Item -ItemType File test.txt;Create new file
+N;PowerShell_Modifying;Stop-Service "MyService";Stop a service
+
+# SSH Commands - Read-Only Remote (Y)
+Y;SSH_ReadOnly;ssh user@server "cat /var/log/app.log";Read remote log file
+Y;SSH_ReadOnly;ssh user@server "ls -la /opt/app";List remote directory
+Y;SSH_ReadOnly;ssh -i key.pem user@server "cat /etc/config | grep db_host";Read config with grep
+
+# SSH Commands - Chained Read-Only (Y)
+Y;SSH_ChainedReadOnly;ssh user@server "cat /var/log/app.log | grep ERROR";Pipe to grep (read-only)
+Y;SSH_ChainedReadOnly;ssh user@server "cat file1.txt && cat file2.txt";Cat multiple files
+
+# SSH Commands - Modifying Remote (N)
+N;SSH_Modifying_Remote;ssh user@server "cat /tmp/test | grep java && rm /var/a.txt";Contains rm
+N;SSH_Modifying;ssh user@server "sudo systemctl restart nginx";System modification
+
+# Script Executions (N) - Always require approval
+N;Script_Execution;./script.sh;Execute shell script
+N;Script_Execution;./configure;Run configure script
+N;Script_Execution;bash deploy.sh;Run bash script
+N;Script_Execution;sh /path/to/script.sh;Run sh script
+N;Script_Execution;python migrate.py;Run Python script
+N;Script_Execution;python3 script.py;Run Python3 script
+N;Script_Execution;node server.js;Run Node.js script
+N;Script_Execution;perl script.pl;Run Perl script
+
+# Linux/Unix Read-Only Commands (Y)
+Y;Linux_ReadOnly;ls -la;List directory contents
+Y;Linux_ReadOnly;pwd;Print working directory
+Y;Linux_ReadOnly;cat file.txt;Concatenate file
+Y;Linux_ReadOnly;grep "error" log.txt;Search for pattern
+Y;Linux_ReadOnly;head -n 10 file.txt;Show first 10 lines
+Y;Linux_ReadOnly;tail -f /var/log/app.log;Follow log file
+Y;Linux_ReadOnly;find /opt -name "*.log";Find files
+
+# Linux/Unix Modifying Commands (N)
+N;Linux_Modifying;rm file.txt;Remove a file
+N;Linux_Modifying;rm -rf /tmp/cache;Remove directory recursively
+N;Linux_Modifying;cp file.txt backup.txt;Copy file
+N;Linux_Modifying;mv old.txt new.txt;Move/rename file
+N;Linux_Modifying;touch newfile.txt;Update file timestamp
+N;Linux_Modifying;mkdir -p /opt/app/config;Create directory
+N;Linux_Modifying;chmod 755 script.sh;Change permissions
+N;Linux_Modifying;chown user:group file.txt;Change ownership
+
+# AWS CLI Commands - Read-Only (Y)
+Y;AWS_ReadOnly;aws ec2 describe-instances;Describe EC2 instances
+Y;AWS_ReadOnly;aws s3 ls s3://my-bucket/;List S3 bucket contents
+Y;AWS_ReadOnly;aws s3api head-object --bucket my-bucket --key file.txt;Get object metadata
+Y;AWS_ReadOnly;aws rds describe-db-instances;Describe RDS instances
+Y;AWS_ReadOnly;aws cloudformation describe-stacks;Describe CloudFormation stacks
+Y;AWS_ReadOnly;aws iam list-users;List IAM users
+
+# AWS CLI Commands - Modifying (N)
+N;AWS_Modifying;aws s3 rm s3://my-bucket/file.txt;Delete S3 object
+N;AWS_Modifying;aws s3 cp file.txt s3://my-bucket/;Upload file to S3
+N;AWS_Modifying;aws s3 mv s3://bucket1/a s3://bucket2/b;Move S3 object
+N;AWS_Modifying;aws ec2 terminate-instances --instance-ids i-123456;Terminate EC2 instance
+N;AWS_Modifying;aws ec2 reboot-instances --instance-ids i-123456;Reboot EC2 instance
+N;AWS_Modifying;aws cloudformation delete-stack --stack-name my-stack;Delete CloudFormation stack
+
+# Chained Commands - All Read-Only (Y)
+Y;Chained_ReadOnly;pwd && ls;Two read-only commands
+Y;Chained_ReadOnly;cat file.txt | grep "error";Pipe read-only commands
+Y;Chained_ReadOnly;echo "test" && echo "done";Echo commands (read-only)
+
+# Chained Commands - With One Modifying (N)
+N;Chained_OneModifying;ls && touch file.txt;Second command modifies
+N;Chained_OneModifying;cat file.txt && rm file.txt;Read then delete
+N;Chained_OneModifying;grep "test" file.txt && mv file.txt backup.txt;Read then move
+
+# Complex Commands
+Y;Complex_ReadOnly;pwd && ls -la && echo "done";All read-only
+N;Complex_Modifying;pwd && touch test.txt && echo "done";Middle command modifies
+Y;ComplexPipe_ReadOnly;cat file.txt | grep ERROR | wc -l;Pipe chain all read-only
+N;ComplexPipe_Modifying;cat file.txt | grep ERROR > error.log;Output redirect (modifying)

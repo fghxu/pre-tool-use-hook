@@ -5,241 +5,446 @@ Analyzes PowerShell commands and approves read-only operations while denying mod
 
 .DESCRIPTION
 This hook script integrates with Claude Code's PreToolUse hooks to:
-- Auto-approve read-only PowerShell commands
+- Auto-approve read-only commands (PowerShell, AWS, Docker, Terraform, Linux/Unix, SSH)
 - Prompt for approval on modifying operations
-- Parse command chains and analyze each sub-command
+- Parse command chains (&&, ||, |, ;) and analyze each sub-command
+- Handle SSH commands specially (extract remote command and analyze it)
+- Detect script executions and always prompt for approval
+- Support pattern-based AWS detection (describe-, create-, delete- etc)
 
 .NOTES
 Returns exit code 0 for approval, 1 for denial (prompt required)
 #>
 
-param()
+param(
+    [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
+    [string]$FullCommand
+)
 
-# Configuration
-$ConfigFile = "$env:USERPROFILE\.claude\cli-commands.json"
-$LogFile = "$env:USERPROFILE\.claude\hook-approvals.log"
+# Configuration - Regex Patterns
+# ==================================================
 
-# Initialize arrays for different command categories
-$script:ReadOnlyCommands = @()
-$script:ModifyingPatterns = @()
+# Script Execution Patterns - Always prompt (execute unknown code)
+$ScriptPatterns = @(
+    '^\.\/[^\s]+\.sh$',      # ./script.sh
+    '^\.\/[^\s]+$',          # ./anything
+    '^bash\s+[^\s]+\.sh$',   # bash script.sh
+    '^sh\s+[^\s]+\.sh$',     # sh script.sh
+    '^sh\s+[^\s]+$',          # sh /path/to/script
+    '^python\d?\s+[^\s]+$',   # python script.py
+    '^python\d?\.\d?\s+[^\s]+$', # python3.8 script.py
+    '^perl\s+[^\s]+$',        # perl script.pl
+    '^node\s+[^\s]+$',        # node script.js
+    '^source\s+[^\s]+$',      # source script.sh
+    '^\.\s+[^\s]+$',          # . script.sh
+    '^\.\/[^\s]+',            # ./gradlew, ./configure
+    '^\.\/gradlew\s+',         # ./gradlew build
+    '^\.\/mvnw\s+'            # ./mvnw package
+)
 
-function Write-DebugLog {
-    param([string]$Message)
-    if ($env:HOOK_DEBUG -eq "true") {
-        Write-Host "[DEBUG] $Message" -ForegroundColor Gray
-    }
-}
+# SSH Command Pattern
+$SSHPattern = '^ssh\s+'
 
-function Write-ApprovalLog {
-    param(
-        [string]$Status,
-        [string]$Reason
-    )
-    $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
-    if (Test-Path $LogFile) {
-        Add-Content -Path $LogFile -Value "[$timestamp] [$Status] $Command - $Reason"
-    }
-}
+# AWS Read-Only Patterns (pattern-based to avoid hardcoding)
+$AWSReadOnlyPatterns = @(
+    '^aws\s+\S+\s+(describe|list|get|show|head)-',  # describe-, list-, get-, show-, head-
+    '^aws\s+s3\s+ls'                                   # aws s3 ls (special case)
+)
 
-function Load-Configuration {
-    if (Test-Path $ConfigFile) {
-        try {
-            $config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
-            $script:ReadOnlyCommands = $config.read_only_commands.powershell
-            $script:ModifyingPatterns = $config.modifying_patterns.powershell
-            Write-DebugLog "Loaded configuration with $($script:ReadOnlyCommands.Count) read-only commands and $($script:ModifyingPatterns.Count) modifying patterns"
+# AWS Modifying Patterns
+$AWSModifyingPatterns = @(
+    '^aws\s+\S+\s+(create|delete|remove|terminate|stop|start|reboot|modify|update|put|upload|download|sync|rm)-',
+    '^aws\s+s3\s+(rm|cp|mv|sync)',                    # aws s3 rm|cp|mv|sync
+    '^aws\s+s3api\s+(put|delete)-'                  # aws s3api put-|delete-
+)
+
+# Linux/Unix Read-Only Commands
+$LinuxReadOnlyCommands = @(
+    'ls', 'pwd', 'cd', 'echo', 'cat', 'head', 'tail', 'grep', 'find', 'which',
+    'whoami', 'id', 'groups', 'file', 'ps', 'df', 'du', 'free', 'uname',
+    'hostname', 'date', 'uptime', 'who', 'wc', 'sort', 'uniq', 'less', 'more'
+)
+
+# Linux/Unix Modifying Commands
+$LinuxModifyingCommands = @(
+    'rm', 'rmdir', 'mv', 'cp', 'scp', 'rsync', 'touch', 'mkdir',
+    'chmod', 'chown', 'chgrp', 'setfacl', 'useradd', 'userdel',
+    'usermod', 'passwd', 'groupadd', 'groupdel', 'mount', 'umount',
+    'fsck', 'mkfs', 'dd', 'shutdown', 'reboot', 'halt', 'poweroff',
+    'yum', 'apt-get', 'dnf', 'pip', 'npm', 'composer', 'gem',
+    'mysql', 'psql', 'redis-cli', 'mongosh', 'mongo'
+)
+
+# PowerShell Read-Only Verbs (Get-, Test-, Select-, etc.)
+$PowerShellReadOnlyVerbs = @('Get-', 'Test-', 'Select-', 'Where-', 'Measure-', 'Find-', 'Write-')
+
+# PowerShell Modifying Verbs (Remove-, New-, Set-, etc.)
+$PowerShellModifyingVerbs = @('Remove-', 'Move-', 'Copy-', 'New-', 'Set-', 'Clear-', 'Rename-', 'Stop-', 'Start-', 'Restart-', 'Invoke-')
+
+# ==================================================
+# Helper Functions
+# ==================================================
+
+function Test-IsScriptExecution {
+    param([string]$Command)
+
+    foreach ($pattern in $ScriptPatterns) {
+        if ($Command -match $pattern) {
             return $true
-        } catch {
-            Write-DebugLog "Error loading configuration: $_"
-            return $false
-        }
-    } else {
-        Write-DebugLog "Configuration file not found: $ConfigFile"
-        return $false
-    }
-}
-
-function Test-ReadOnlyCommand {
-    param([string]$Cmd)
-
-    $cmdLower = $Cmd.ToLower().Trim()
-
-    # Simple pattern matching for common read-only commands
-    $readOnlyPatterns = @(
-        "^get-", "^test-", "^select-", "^where-", "^sort-", "^measure-",
-        "^group-", "^format-", "^compare-", "^write-",
-        # Aliases
-        "^ls$", "^dir$", "^pwd$", "^echo$", "^cat$", "^type$", "^gc$",
-        "^where$", "^select$", "^sort$", "^measure$", "^group$", "^format$"
-    )
-
-    foreach ($pattern in $readOnlyPatterns) {
-        if ($cmdLower -match $pattern) {
-            Write-DebugLog "Command '$Cmd' matches read-only pattern: $pattern"
-            return $true
         }
     }
-
-    # Check against configured read-only commands
-    if ($script:ReadOnlyCommands -and $script:ReadOnlyCommands.Count -gt 0) {
-        foreach ($roCmd in $script:ReadOnlyCommands) {
-            $cmdBase = $Cmd -split '\s+' | Select-Object -First 1
-            if ($cmdBase -eq $roCmd -or $Cmd.StartsWith($roCmd + " ")) {
-                Write-DebugLog "Command '$Cmd' matches configured read-only: $roCmd"
-                return $true
-            }
-        }
-    }
-
     return $false
 }
 
-function Test-ModifyingCommand {
-    param([string]$Cmd)
+function Test-IsSSHCommand {
+    param([string]$Command)
+    return $Command -match $SSHPattern
+}
 
-    $cmdLower = $Cmd.ToLower().Trim()
+function Test-IsAWSReadOnly {
+    param([string]$Command)
 
-    # Simple pattern matching for modifying commands
-    $modifyingPatterns = @(
-        "^new-", "^set-", "^remove-", "^stop-", "^start-", "^restart-",
-        "^add-", "^clear-", "^rename-", "^move-", "^copy-"
-    )
-
-    foreach ($pattern in $modifyingPatterns) {
-        if ($cmdLower -match $pattern) {
-            Write-DebugLog "Command '$Cmd' matches modifying pattern: $pattern"
+    foreach ($pattern in $AWSReadOnlyPatterns) {
+        if ($Command -match $pattern) {
             return $true
         }
     }
-
-    # Check against configured modifying patterns
-    if ($script:ModifyingPatterns -and $script:ModifyingPatterns.Count -gt 0) {
-        foreach ($modPattern in $script:ModifyingPatterns) {
-            if ($Cmd -like "$modPattern*") {
-                Write-DebugLog "Command '$Cmd' matches configured modifying pattern: $modPattern"
-                return $true
-            }
-        }
-    }
-
     return $false
 }
 
-function Split-CommandChain {
-    param([string]$FullCommand)
+function Test-IsAWSModifying {
+    param([string]$Command)
 
-    # Split on PowerShell operators: ;, |, &&, ||
-    # Note: && and || are not native PowerShell but may appear in Claude Code
-    $operators = @(";", "|", "&&", "||")
-    $segments = @($FullCommand)
+    foreach ($pattern in $AWSModifyingPatterns) {
+        if ($Command -match $pattern) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-IsLinuxReadOnly {
+    param([string]$Command)
+
+    $cmdName = ($Command -split '\s+')[0]
+    return $LinuxReadOnlyCommands -contains $cmdName
+}
+
+function Test-IsLinuxModifying {
+    param([string]$Command)
+
+    $cmdName = ($Command -split '\s+')[0]
+    return $LinuxModifyingCommands -contains $cmdName
+}
+
+function Test-IsPowerShellReadOnly {
+    param([string]$Command)
+
+    foreach ($verb in $PowerShellReadOnlyVerbs) {
+        if ($Command -match "^$verb") {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-IsPowerShellModifying {
+    param([string]$Command)
+
+    foreach ($verb in $PowerShellModifyingVerbs) {
+        if ($Command -match "^$verb") {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Extract-SSHRemoteCommand {
+    param([string]$Command)
+
+    # Extract text within quotes (the remote command)
+    # Example: ssh user@host "cat file && grep pattern" -> "cat file && grep pattern"
+    if ($Command -match '"(.+)"') {
+        return $matches[1]
+    }
+
+    # Handle single quotes as well
+    if ($Command -match "'(.+)'") {
+        return $matches[1]
+    }
+
+    return $null
+}
+
+function Split-ChainedCommands {
+    param([string]$Command)
+
+    # Split by common operators, preserving quoted strings
+    $operators = @(' && ', ' || ', ' | ', '; ', ' & ', ' ;')
+
+    # Replace operators with a special marker
+    $markedCmd = $Command
+    $marker = "@@@"
 
     foreach ($op in $operators) {
-        $newSegments = @()
-        foreach ($segment in $segments) {
-            $split = $segment -split [regex]::Escape($op)
-            $newSegments += $split
-        }
-        $segments = $newSegments
+        $markedCmd = $markedCmd -replace [regex]::Escape($op), $marker
     }
+
+    # Split by marker
+    $segments = $markedCmd -split $marker
 
     # Clean up segments
     $cleanSegments = foreach ($segment in $segments) {
         $clean = $segment.Trim()
-        if ($clean) {
-            $clean
-        }
+        if ($clean) { $clean }
     }
 
     return $cleanSegments
 }
 
-# Main function
-function Test-CommandApproval {
+function Get-CLICommandType {
     param([string]$Command)
 
-    if ([string]::IsNullOrWhiteSpace($Command)) {
-        Write-DebugLog "No command provided, approving by default"
-        return $true
+    $cmd = $Command.Trim()
+
+    # Check for script execution first
+    if (Test-IsScriptExecution $cmd) {
+        return "Script"
     }
 
-    # Load configuration if available
-    Load-Configuration | Out-Null
+    # Check for SSH
+    if (Test-IsSSHCommand $cmd) {
+        return "SSH"
+    }
 
-    # Split command chain
-    $commands = Split-CommandChain -FullCommand $Command
-    Write-DebugLog "Split command chain into $($commands.Count) commands: $($commands -join ', ')"
+    # Check for AWS
+    if ($cmd -match '^aws\s+') {
+        return "AWS"
+    }
 
-    # Analyze each command
-    $modifyingCommands = @()
-    $readOnlyCommands = @()
-    $ambiguousCommands = @()
+    # Check for PowerShell (starts with capitalized verb or common cmdlets)
+    if ($cmd -match '^[A-Z][a-z]+-' -or $cmd -match '^(Get-|Test-|Select-|Where-|Measure-|Find-|Write-|Remove-|Move-|Copy-|New-|Set-|Clear-|Rename-|Stop-|Start-|Restart-|Invoke-)') {
+        return "PowerShell"
+    }
 
-    foreach ($cmd in $commands) {
-        if (Test-ReadOnlyCommand -Cmd $cmd) {
-            $readOnlyCommands += $cmd
-        } elseif (Test-ModifyingCommand -Cmd $cmd) {
-            $modifyingCommands += $cmd
-        } else {
-            $ambiguousCommands += $cmd
+    # Default to Linux/Unix
+    return "Linux"
+}
+
+function Test-IsReadOnly {
+    param([string]$Command)
+
+    $cliType = Get-CLICommandType $Command
+
+    switch ($cliType) {
+        "Script" { return $false }  # Scripts never read-only
+
+        "SSH" {
+            $remoteCmd = Extract-SSHRemoteCommand $Command
+            if (-not $remoteCmd) {
+                return $false
+            }
+
+            # Check all remote sub-commands
+            $subCommands = Split-ChainedCommands $remoteCmd
+            foreach ($subCmd in $subCommands) {
+                if (-not (Test-IsReadOnly $subCmd)) {
+                    return $false  # One modifying means entire SSH command modifies
+                }
+            }
+            return $true
         }
-    }
 
-    Write-DebugLog "Read-only: $($readOnlyCommands.Count) - $readOnlyCommands"
-    Write-DebugLog "Modifying: $($modifyingCommands.Count) - $modifyingCommands"
-    Write-DebugLog "Ambiguous: $($ambiguousCommands.Count) - $ambiguousCommands"
-
-    # Decision logic
-    if ($modifyingCommands.Count -eq 0 -and $ambiguousCommands.Count -eq 0) {
-        # All commands are read-only
-        Write-ApprovalLog -Status "AUTO-APPROVE" -Reason "All commands are read-only"
-        Write-DebugLog "Auto-approving all read-only commands"
-        return $true
-    } elseif ($modifyingCommands.Count -gt 0) {
-        # Found modifying commands
-        Write-ApprovalLog -Status "DENY" -Reason "Modifying commands detected: $($modifyingCommands -join ', ')"
-        Write-DebugLog "Denying due to modifying commands"
-        return $false
-    } else {
-        # Only ambiguous commands - defer to prompt hook
-        Write-ApprovalLog -Status "AMBIGUOUS" -Reason "Ambiguous commands: $($ambiguousCommands -join ', ')"
-        Write-DebugLog "Deferring to prompt hook for ambiguous commands"
-        return $false
+        "AWS" { return Test-IsAWSReadOnly $Command }
+        "PowerShell" { return Test-IsPowerShellReadOnly $Command }
+        "Linux" { return Test-IsLinuxReadOnly $Command }
+        default { return $false }
     }
 }
 
-# Read input from stdin (Claude Code passes JSON)
-$inputJson = $null
-if ($PSCmdlet.MyInvocation.PipelineLength -gt 1) {
-    $inputJson = $input
+function Test-IsModifying {
+    param([string]$Command)
+
+    $cliType = Get-CLICommandType $Command
+
+    switch ($cliType) {
+        "Script" { return $true }  # Scripts always modifying
+
+        "SSH" {
+            $remoteCmd = Extract-SSHRemoteCommand $Command
+            if (-not $remoteCmd) {
+                return $true
+            }
+
+            # Check all remote sub-commands
+            $subCommands = Split-ChainedCommands $remoteCmd
+            foreach ($subCmd in $subCommands) {
+                if (Test-IsModifying $subCmd) {
+                    return $true  # One modifying means entire SSH command modifies
+                }
+            }
+            return $false
+        }
+
+        "AWS" { return Test-IsAWSModifying $Command }
+        "PowerShell" { return Test-IsPowerShellModifying $Command }
+        "Linux" { return Test-IsLinuxModifying $Command }
+        default { return $true }  # Better safe than sorry
+    }
+}
+
+function New-DecisionResult {
+    param(
+        [string]$action,
+        [string]$reason
+    )
+
+    $result = @{
+        action = $action
+        reason = $reason
+    }
+
+    return $result | ConvertTo-Json -Compress
+}
+
+# ==================================================
+# Main Analysis Logic
+# ==================================================
+
+function Analyze-Command {
+    param([string]$Command)
+
+    if (-not $Command -or $Command.Trim().Length -eq 0) {
+        return New-DecisionResult "approve" "Empty command"
+    }
+
+    # Check: Script Execution (Highest priority - always prompt)
+    if (Test-IsScriptExecution $Command) {
+        return New-DecisionResult "prompt" "EXECUTES_SCRIPT: Executes external script (unknown code cannot be verified)"
+    }
+
+    # Check: SSH Commands with remote operations
+    if (Test-IsSSHCommand $Command) {
+        $remoteCmd = Extract-SSHRemoteCommand $Command
+        if (-not $remoteCmd) {
+            return New-DecisionResult "prompt" "SSH_INCOMPLETE: SSH command without remote command"
+        }
+
+        # Check all remote sub-commands
+        $subCommands = Split-ChainedCommands $remoteCmd
+        $modifyingCmds = @()
+
+        foreach ($subCmd in $subCommands) {
+            if (Test-IsModifying $subCmd) {
+                $modifyingCmds += $subCmd
+            }
+        }
+
+        if ($modifyingCmds.Count -gt 0) {
+            $modList = ($modifyingCmds -join '|')
+            return New-DecisionResult "prompt" "SSH_MODIFIES: Remote command contains modifying operation(s): $modList"
+        }
+
+        return New-DecisionResult "approve" "SSH_READ_ONLY: All remote commands are read-only"
+    }
+
+    # Check: Command Chains (&&, ||, |, ;)
+    $subCommands = Split-ChainedCommands $Command
+
+    if ($subCommands.Count -gt 1) {
+        $modifyingCmds = @()
+        $sshCommands = @()
+
+        foreach ($subCmd in $subCommands) {
+            if (Test-IsSSHCommand $subCmd) {
+                $sshCommands += $subCmd
+            }
+            elseif (Test-IsModifying $subCmd) {
+                $modifyingCmds += $subCmd
+            }
+        }
+
+        if ($sshCommands.Count -gt 0) {
+            # Re-analyze SSH commands individually
+            foreach ($sshCmd in $sshCommands) {
+                $sshResult = Analyze-Command $sshCmd
+                if (($sshResult | ConvertFrom-Json).action -eq "prompt") {
+                    return $sshResult
+                }
+            }
+        }
+
+        if ($modifyingCmds.Count -gt 0) {
+            $modList = ($modifyingCmds -join '|')
+            return New-DecisionResult "prompt" "CHAIN_MODIFIES: Command chain contains modifying operation(s): $modList"
+        }
+
+        return New-DecisionResult "approve" "CHAIN_READ_ONLY: All commands in chain are read-only"
+    }
+
+    # Single command analysis
+    if (Test-IsReadOnly $Command) {
+        return New-DecisionResult "approve" "READ_ONLY: Read-only command"
+    }
+
+    if (Test-IsModifying $Command) {
+        return New-DecisionResult "prompt" "MODIFIES: Modifying command"
+    }
+
+    # Unknown command - safe default
+    return New-DecisionResult "prompt" "UNKNOWN: Unknown command type (safe default)"
+}
+
+# ==================================================
+# Main Execution
+# ==================================================
+
+if ($FullCommand) {
+    # Called directly from command line
+    $resultJson = Analyze-Command $FullCommand
+    $result = $resultJson | ConvertFrom-Json
+
+    Write-Host @"
+
+==============================================
+CLI Security Analysis
+==============================================
+Command: $FullCommand
+Decision: $($result.action.ToUpper())
+Reason: $($result.reason)
+==============================================
+"@
+
+    # Return JSON output
+    Write-Output $resultJson
+
+    # Exit code
+    if ($result.action -eq "approve") {
+        exit 0
+    } else {
+        exit 1
+    }
 } else {
-    $inputJson = [Console]::In.ReadToEnd()
-}
+    # No command provided, show help
+    Write-Host @"
 
-if ([string]::IsNullOrWhiteSpace($inputJson)) {
-    Write-DebugLog "No input received"
-    exit 0
-}
+Pre-CLI Hook for Claude Code
+============================
 
-try {
-    # Parse JSON input
-    $inputObj = $inputJson | ConvertFrom-Json
-    $script:Command = $inputObj.tool_input.command
-    $chained = $inputObj.tool_input.chained
+Usage: pwsh pre-cli-hook.ps1 <command>
 
-    Write-DebugLog "Hook received command: $script:Command"
-    Write-DebugLog "Chained: $chained"
+Examples:
+  pwsh pre-cli-hook.ps1 "Get-ChildItem"
+  pwsh pre-cli-hook.ps1 "Remove-Item file.txt"
+  pwsh pre-cli-hook.ps1 "ls -la"
+  pwsh pre-cli-hook.ps1 "sh user@host 'cat /var/log/app.log'"
+  pwsh pre-cli-hook.ps1 "./script.sh"
+  pwsh pre-cli-hook.ps1 "aws ec2 describe-instances"
 
-    # Test command approval
-    $approved = Test-CommandApproval -Command $script:Command
+Returns:
+  Exit code 0 = APPROVE (read-only)
+  Exit code 1 = PROMPT (modifying or unknown)
 
-    if ($approved) {
-        exit 0  # Approve
-    } else {
-        exit 1  # Deny (needs prompt)
-    }
-}
-catch {
-    Write-DebugLog "Error in hook: $_"
-    Write-Error "Hook failed: $_"
-    exit 1  # Deny on error
+With JSON output showing decision and reason.
+"@
 }
