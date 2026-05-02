@@ -65,14 +65,18 @@ $DockerReadOnlyCmds    = @($config.docker_read_only_commands)
 $DockerModifyingCmds   = @($config.docker_modifying_commands)
 $TerraformReadOnlyCmds = @($config.terraform_read_only_commands)
 $TerraformModifyingCmds = @($config.terraform_modifying_commands)
-$GIT_ReadOnlyCommands  = @($config.git_read_only_commands)
+$GIT_ReadOnlyCommands = @($config.git_read_only_commands)
 $GIT_ModifyingCommands = @($config.git_modifying_commands)
+$KubectlReadOnlyCmds    = @($config.kubectl_read_only_commands)
+$KubectlModifyingCmds   = @($config.kubectl_modifying_commands)
+$DOSReadOnlyCommands    = @($config.dos_read_only_commands)
+$DOSModifyingCommands   = @($config.dos_modifying_commands)
 
 # ================================================
 # Logging
 # ================================================
 
-$logDir  = "C:\Users\$env:USERNAME\.copilot\logs"
+$logDir = "C:\Users\$env:USERNAME\.copilot\logs"
 $logFile = $null
 
 function Initialize-Log {
@@ -92,10 +96,6 @@ function Write-Log {
         } catch { }
     }
 }
-
-# ================================================
-# Copilot Response Helpers
-# ================================================
 
 # ================================================
 # Output Helpers - Format VS Code Hook Responses
@@ -399,6 +399,172 @@ function Test-IsGitModifying {
     return $false
 }
 
+function Test-IsKubectlReadOnly {
+    <#
+    .SYNOPSIS
+    Detect kubectl read-only operations (get, describe, logs, top, etc).
+    .DESCRIPTION
+    Extracts kubectl subcommand and checks if it's read-only.
+    .PARAMETER Command
+    The kubectl command string to analyze.
+    .OUTPUTS
+    [bool] $true if kubectl command is read-only; $false otherwise.
+    #>
+    param([string]$Command)
+    if ($Command -match '^kubectl\s+(.+)$') {
+        $rest = $Matches[1]
+        # Try two-word subcommands first (e.g., "config view", "rollout status")
+        if ($rest -match '^(\S+\s+\S+)(?:\s|$)') {
+            $twoWordCmd = $Matches[1]
+            if ($KubectlReadOnlyCmds -contains $twoWordCmd) { return $true }
+        }
+        # Then single-word subcommand
+        if ($rest -match '^(\S+)') {
+            $subcmd = $Matches[1]
+            return $KubectlReadOnlyCmds -contains $subcmd
+        }
+    }
+    return $false
+}
+
+function Test-IsKubectlModifying {
+    <#
+    .SYNOPSIS
+    Detect kubectl modifying operations (apply, delete, exec, etc).
+    .DESCRIPTION
+    Extracts kubectl subcommand and checks if it modifies cluster state.
+    .PARAMETER Command
+    The kubectl command string to analyze.
+    .OUTPUTS
+    [bool] $true if kubectl command modifies cluster; $false otherwise.
+    #>
+    param([string]$Command)
+    if ($Command -match '^kubectl\s+(.+)$') {
+        $rest = $Matches[1]
+        if ($rest -match '^(\S+\s+\S+)(?:\s|$)') {
+            $twoWordCmd = $Matches[1]
+            if ($KubectlModifyingCmds -contains $twoWordCmd) { return $true }
+        }
+        if ($rest -match '^(\S+)') {
+            $subcmd = $Matches[1]
+            return $KubectlModifyingCmds -contains $subcmd
+        }
+    }
+    return $false
+}
+
+function Test-IsDOSReadOnly {
+    <#
+    .SYNOPSIS
+    Detect DOS/CMD read-only commands (dir, type, find, etc).
+    .DESCRIPTION
+    Extracts base DOS command and checks if it's in the read-only list.
+    .PARAMETER Command
+    The DOS command string to analyze.
+    .OUTPUTS
+    [bool] $true if DOS command is read-only; $false otherwise.
+    #>
+    param([string]$Command)
+    $cmdName = ($Command -split '\s+')[0].ToLower()
+    return $DOSReadOnlyCommands -contains $cmdName
+}
+
+function Test-IsDOSModifying {
+    <#
+    .SYNOPSIS
+    Detect DOS/CMD modifying commands (del, rmdir, copy, etc).
+    .DESCRIPTION
+    Extracts base DOS command and checks if it modifies files/system.
+    .PARAMETER Command
+    The DOS command string to analyze.
+    .OUTPUTS
+    [bool] $true if DOS command is modifying; $false otherwise.
+    #>
+    param([string]$Command)
+    $cmdName = ($Command -split '\s+')[0].ToLower()
+    return $DOSModifyingCommands -contains $cmdName
+}
+
+function Extract-DOSFromCmdWrapper {
+    <#
+    .SYNOPSIS
+    Extract the actual DOS command from a cmd /c wrapper.
+    .DESCRIPTION
+    Handles cmd /c "command" or cmd /c command wrappers.
+    Returns the inner command without the cmd /c prefix.
+    .PARAMETER Command
+    The command string containing cmd /c wrapper.
+    .OUTPUTS
+    [string] The extracted DOS command, or $null if not a cmd wrapper.
+    #>
+    param([string]$Command)
+    if ($Command -match 'cmd(?:\.exe)?\s+/c\s+(.+)$') {
+        $innerCmd = $Matches[1].Trim()
+        # Remove surrounding quotes if present
+        $innerCmd = $innerCmd -replace '^"|"$', ''
+        $innerCmd = $innerCmd -replace "^'|'$", ''
+        return $innerCmd
+    }
+    return $null
+}
+
+function Test-IsDOSCommand {
+    <#
+    .SYNOPSIS
+    Check if a command is a known DOS command.
+    .DESCRIPTION
+    Checks if the base command is in either DOS read-only or modifying list.
+    .PARAMETER Command
+    The command string to check.
+    .OUTPUTS
+    [bool] $true if command is a known DOS command; $false otherwise.
+    #>
+    param([string]$Command)
+    $cmdName = ($Command -split '\s+')[0].ToLower()
+    $allDosCommands = $DOSReadOnlyCommands + $DOSModifyingCommands
+    return $allDosCommands -contains $cmdName
+}
+
+function Extract-PowerShellCommands {
+    <#
+    .SYNOPSIS
+    Extract individual PowerShell cmdlets from a command string.
+    .DESCRIPTION
+    Handles multi-line blocks separated by backtick-n (`n), semicolons,
+    and strips comments. Returns array of individual cmdlets.
+    .PARAMETER Command
+    The PowerShell command string to parse.
+    .OUTPUTS
+    [string[]] Array of individual PowerShell cmdlets.
+    #>
+    param([string]$Command)
+
+    $commands = @()
+
+    # STEP 1: Split by PowerShell's backtick-n line separator
+    $lines = $Command -split '`n'
+
+    foreach ($line in $lines) {
+        $trimmedLine = $line.Trim()
+        if (-not $trimmedLine) { continue }
+
+        # STEP 2: Remove inline comments (# to end of line)
+        $trimmedLine = $trimmedLine -replace '\s+#.*$', ''
+        if ($trimmedLine -match '^#') { continue }
+
+        # STEP 3: Split by semicolons for inline cmdlet separation
+        $segments = $trimmedLine -split ';'
+        foreach ($seg in $segments) {
+            $trimmedSeg = $seg.Trim()
+            if ($trimmedSeg) {
+                $commands += $trimmedSeg
+            }
+        }
+    }
+
+    return $commands
+}
+
 function Test-IsPowerShellReadOnly {
     <#
     .SYNOPSIS
@@ -489,11 +655,29 @@ function Split-ChainedCommands {
     $operators = @('&&', '||', '|', ';', '&')
     $markedCmd = $Command
     $marker = "@@@"
+
+    # Extract $() command substitutions before splitting
+    $substitutions = @()
+    if ($markedCmd -match '\$\([^)]+\)') {
+        $matches = [regex]::Matches($markedCmd, '\$\(([^)]+)\)')
+        foreach ($m in $matches) {
+            $substitutions += $m.Groups[1].Value
+        }
+        $markedCmd = [regex]::Replace($markedCmd, '\$\([^)]+\)', $marker)
+    }
+
+    # Split by standard operators
     foreach ($op in $operators) {
         $markedCmd = $markedCmd -replace [regex]::Escape($op), $marker
     }
+
     $segments = $markedCmd -split $marker
-    return @($segments | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $segments = @($segments | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+
+    # Add back any $() substitutions
+    $allSegments = $segments + $substitutions
+
+    return $allSegments
 }
 
 function Get-CLICommandType {
@@ -517,7 +701,11 @@ function Get-CLICommandType {
     if ($cmd -match '^docker(?:-compose)?\s') { return "Docker" }
     if ($cmd -match '^terraform\s+')          { return "Terraform" }
     if ($cmd -match '^git\s+')                { return "Git" }
+    if ($cmd -match '^kubectl\s+')           { return "kubectl" }
     if ($cmd -match '^[A-Z][a-z]+-')          { return "PowerShell" }
+    if ($cmd -match '^cmd(?:\.exe)?\s+/c\s+') { return "DOS" }
+    $baseCmd = ($cmd -split '\s+')[0].ToLower()
+    if ($DOSReadOnlyCommands -contains $baseCmd -or $DOSModifyingCommands -contains $baseCmd) { return "DOS" }
     return "Linux"
 }
 
@@ -550,6 +738,12 @@ function Test-IsReadOnly {
         "Docker"     { return Test-IsDockerReadOnly $Command }
         "Terraform"  { return Test-IsTerraformReadOnly $Command }
         "Git"        { return Test-IsGitReadOnly $Command }
+        "kubectl"    { return Test-IsKubectlReadOnly $Command }
+        "DOS"        {
+            $inner = Extract-DOSFromCmdWrapper $Command
+            if ($inner) { return Test-IsDOSReadOnly $inner }
+            return Test-IsDOSReadOnly $Command
+        }
         "PowerShell" { return Test-IsPowerShellReadOnly $Command }
         "Linux"      { return Test-IsLinuxReadOnly $Command }
         default      { return $false }
@@ -586,6 +780,12 @@ function Test-IsModifying {
         "Docker"     { return Test-IsDockerModifying $Command }
         "Terraform"  { return Test-IsTerraformModifying $Command }
         "Git"        { return Test-IsGitModifying $Command }
+        "kubectl"    { return Test-IsKubectlModifying $Command }
+        "DOS"        {
+            $inner = Extract-DOSFromCmdWrapper $Command
+            if ($inner) { return Test-IsDOSModifying $inner }
+            return Test-IsDOSModifying $Command
+        }
         "PowerShell" { return Test-IsPowerShellModifying $Command }
         "Linux"      { return Test-IsLinuxModifying $Command }
         default      { return $true }
@@ -626,7 +826,8 @@ function Get-CommandDecision {
     $testCmd = $Command -replace '2>&1', ''  # Remove safe stderr->stdout redirect
     $testCmd = $testCmd -replace '2>/dev/null', ''  # Remove stderr to /dev/null
 
-    if ($testCmd -match '(?<!![>])\s*\w' -or $testCmd -match '>>\w' -or $testCmd -match '1>\s*\w') {
+    # if ($testCmd -match '(?<!&)>\s*\w' -or $testCmd -match '>>\s*\w' or $testCmd -match '1>\s*\w') {
+    if ($testCmd -match '(?:^|\s)(?:\d+)?>>?\s+[a-zA-Z./~\\]') {
         return @{ decision = "ask"; reason = "REDIRECT: Command contains file output redirection (modifying)" }
     }
 
@@ -651,6 +852,28 @@ function Get-CommandDecision {
             return @{ decision = "ask"; reason = "SSH_MODIFIES: Remote command is not confirmed read-only: $($notReadOnly -join '|')" }
         }
         return @{ decision = "allow"; reason = "SSH_READ_ONLY: All remote commands are read-only" }
+    }
+
+    # PowerShell code blocks — extract individual cmdlets and analyze each
+    $psCmdlets = Extract-PowerShellCommands $Command
+    if ($psCmdlets.Count -gt 1) {
+        $modifyingCmds = @()
+        foreach ($cmdlet in $psCmdlets) {
+            # Check if this cmdlet is a DOS command
+            if (Test-IsDOSCommand $cmdlet) {
+                if (Test-IsDOSModifying $cmdlet) {
+                    $modifyingCmds += "[DOS] $cmdlet"
+                }
+            }
+            # Check if this cmdlet is a modifying PowerShell cmdlet
+            elseif (Test-IsPowerShellModifying $cmdlet) {
+                $modifyingCmds += $cmdlet
+            }
+        }
+        if ($modifyingCmds.Count -gt 0) {
+            return @{ decision = "ask"; reason = "PS_BLOCK_MODIFIES: PowerShell block contains modifying operations: $($modifyingCmds -join '|')" }
+        }
+        return @{ decision = "allow"; reason = "PS_BLOCK_READ_ONLY: All PowerShell cmdlets are read-only" }
     }
 
     # Command chains - check each segment
@@ -702,20 +925,15 @@ Initialize-Log
 
 # Read JSON payload from stdin (or from -DebugInputFile/-DebugInput for VS Code debugger)
 if ($DebugInputFile) {
-    Write-Host "[DEBUG] Using -DebugInputFile: $DebugInputFile" -ForegroundColor Green
     if (Test-Path $DebugInputFile) {
         $stdinRaw = Get-Content $DebugInputFile -Raw
-        Write-Host "[DEBUG] Loaded from file (length: $($stdinRaw.Length))" -ForegroundColor Green
     } else {
-        Write-Host "[DEBUG] File not found: $DebugInputFile" -ForegroundColor Red
         Write-Allow "Debug input file not found; defaulting to allow"
         exit 0
     }
 } elseif ($DebugInput) {
-    Write-Host "[DEBUG] Using -DebugInput parameter (length: $($DebugInput.Length))" -ForegroundColor Green
     $stdinRaw = $DebugInput
 } else {
-    Write-Host "[DEBUG] Reading from stdin..." -ForegroundColor Yellow
     $stdinRaw = [Console]::In.ReadToEnd()
 }
 
