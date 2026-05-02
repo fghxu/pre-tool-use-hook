@@ -1,6 +1,7 @@
 {
-  "_comment": "CLI Command Patterns for Pre-Tool-Use Hook - Used by pre-cli-hook.ps1",
-  "_version": "1.1.0",
+  "_comment": "CLI Command Patterns for Pre-Tool-Use Hook - Used by pre-cli-hook.ps1 and pre-cli-hook-copilot.ps1",
+  "version": "2.3.0",
+  "_note": "v2.3.0: Allow 2>&1 stderr->stdout redirections (console-only, non-modifying). File redirections still require approval.",
 
   "script_patterns": [
     "^\\.\\\/[^\\s]+\\.sh$",
@@ -14,60 +15,181 @@
     "^node\\s+[^\\s]+$",
     "^source\\s+[^\\s]+$",
     "^\\.\\s+[^\\s]+$",
-    "^\\.\\\/[^\\s]+",
-    "^\\.\\\/gradlew\\s+",
-    "^\\.\\\/mvnw\\s+"
+    "^\\.\\-\\\/[^\\s]+",
+    "^\\.\\-\\\/[^\\s]+",
+    "^\\.\\-\\\/gradlew\\s+",
+    "^\\.\\-\\\/mvnw\\s+",
+    "^\\.\\-\\\/manage\\.py\\s+",
+    "^ruby\\s+[^\\s]+$",
+    "^php\\s+[^\\s]+$",
+    "^go\\s+run\\s+[^\\s]+$",
+    "^Rscript\\s+[^\\s]+$"
   ],
 
   "ssh_pattern": "^ssh\\s+",
 
   "aws_read_only_patterns": [
-    "^aws\\s+\\S+\\s+(describe|list|get|show|head)-",
-    "^aws\\s+s3\\s+ls"
+    "^aws\\s+\\S+\\s+(describe|list|get|show|head|lookup)-",
+    "^aws\\s+s3\\s+ls",
+    "^aws\\s+sts\\s+decode-authorization-message",
+    "^aws\\s+logs\\s+filter-",
+    "^aws\\s+iam\\s+simulate-",
+    "^aws\\s+dynamodb\\s+scan",
+    "^aws\\s+dynamodb\\s+query"
   ],
 
   "aws_modifying_patterns": [
-    "^aws\\s+\\S+\\s+(create|delete|remove|terminate|stop|start|reboot|modify|update|put|upload|download|sync|rm)-",
+    "^aws\\s+\\S+\\s+(create|delete|remove|terminate|stop|start|reboot|modify|update|put|upload|download|sync|rm|cp|mv|run|invoke|execute|attach|detach|associate|disassociate|enable|disable|add|register|deregister|tag|untag|reset|cancel|restore|import|export|publish|deploy|rollback|rotate|revoke|authorize|flush|purge|send|trigger|activate|deactivate|suspend|resume)-",
     "^aws\\s+s3\\s+(rm|cp|mv|sync)",
-    "^aws\\s+s3api\\s+(put|delete)-"
+    "^aws\\s+lambda\\s+invoke",
+    "^aws\\s+sns\\s+publish",
+    "^aws\\s+sso\\s+login",
+    "^aws\\s+dynamodb\\s+batch-write-"
   ],
 
   "linux_read_only_commands": [
     "ls", "pwd", "cd", "echo", "cat", "head", "tail", "grep", "find", "which",
     "whoami", "id", "groups", "file", "ps", "df", "du", "free", "uname",
-    "hostname", "date", "uptime", "who", "wc", "sort", "uniq", "less", "more"
+    "hostname", "date", "uptime", "who", "wc", "sort", "uniq", "less", "more",
+    "stat", "lsof", "netstat", "ss", "ip", "ifconfig", "ping", "traceroute",
+    "nslookup", "dig", "host", "env", "printenv",
+    "alias", "history", "type", "man", "info", "help", "diff", "cmp",
+    "md5sum", "sha1sum", "sha256sum", "sha512sum", "readlink", "realpath",
+    "dirname", "basename", "tr", "cut", "paste", "column", "tac", "rev",
+    "strings", "xxd", "od", "hexdump", "ldd", "nm", "objdump", "readelf",
+    "journalctl", "dmesg", "top", "htop", "iotop", "vmstat", "iostat",
+    "sar", "strace", "ltrace", "lsblk", "blkid",
+    "df", "du", "tree", "locate", "whereis",
+    "rpm", "dpkg-query", "apt-cache",
+    "openssl",
+    "jq"
   ],
 
   "linux_modifying_commands": [
     "rm", "rmdir", "mv", "cp", "scp", "rsync", "touch", "mkdir",
-    "chmod", "chown", "chgrp", "setfacl", "useradd", "userdel",
-    "usermod", "passwd", "groupadd", "groupdel", "mount", "umount",
-    "fsck", "mkfs", "dd", "shutdown", "reboot", "halt", "poweroff",
-    "yum", "apt-get", "dnf", "pip", "npm", "composer", "gem",
-    "mysql", "psql", "redis-cli", "mongosh", "mongo", "systemctl"
+    "chmod", "chown", "chgrp", "setfacl", "chattr", "lnattr",
+    "useradd", "userdel", "usermod", "passwd", "groupadd", "groupdel",
+    "mount", "umount", "fsck", "mkfs", "dd", "parted", "fdisk", "set", "export",
+    "shutdown", "reboot", "halt", "poweroff", "init",
+    "yum", "apt-get", "apt", "dnf", "zypper", "snap", "flatpak", "brew",
+    "pip", "pip3", "npm", "yarn", "pnpm", "composer", "gem", "cargo",
+    "mysql", "psql", "redis-cli", "mongosh", "mongo", "sqlite3",
+    "systemctl", "service", "initctl",
+    "kill", "killall", "pkill", "pkexec",
+    "xargs", "awk",
+    "bash", "sh", "zsh", "ksh", "dash", "fish",
+    "crontab", "at", "batch",
+    "ln", "mklink", "truncate", "fallocate", "shred",
+    "iptables", "ip6tables", "nftables", "ufw", "firewall-cmd",
+    "ssh-keygen", "ssh-copy-id",
+    "ansible", "ansible-playbook",
+    "kubectl", "helm",
+    "tee", "install", "update-alternatives", "svn", "hg",
+    "visudo", "chsh", "newgrp",
+    "modprobe", "insmod", "rmmod",
+    "mkswap", "swapon", "swapoff",
+    "format", "diskpart", "curl", "wget",
+    "zip", "unzip", "tar", "gzip", "gunzip", "bzip2", "bunzip2", "xz"
   ],
 
   "powershell_read_only_verbs": [
-    "Get-", "Test-", "Select-", "Where-", "Measure-", "Find-", "Write-"
+    "Get-", "Test-", "Select-", "Where-", "Measure-", "Find-",
+    "Write-", "Read-", "Show-", "Compare-", "Format-", "Out-",
+    "ConvertTo-", "ConvertFrom-", "Resolve-", "Search-", "Watch-", "Set-Location"
   ],
 
   "powershell_modifying_verbs": [
-    "Remove-", "Move-", "Copy-", "New-", "Set-", "Clear-", "Rename-", "Stop-", "Start-", "Restart-", "Invoke-"
+    "Remove-", "Move-", "Copy-", "New-", "Set-", "Clear-", "Rename-",
+    "Stop-", "Start-", "Restart-", "Invoke-", "Add-", "Register-",
+    "Unregister-", "Enable-", "Disable-", "Mount-", "Dismount-",
+    "Publish-", "Unpublish-", "Install-", "Uninstall-", "Update-",
+    "Backup-", "Restore-", "Reset-", "Lock-", "Unlock-", "Block-",
+    "Unblock-", "Push-", "Pop-", "Import-", "Export-", "Send-",
+    "Receive-", "Connect-", "Disconnect-", "Enter-", "Exit-",
+    "Open-", "Close-", "Save-", "Submit-", "Approve-", "Deny-",
+    "Grant-", "Revoke-", "Protect-", "Unprotect-", "Suspend", "Resume-",
+    "Initialize-", "Format-Volume", "Repair-"
   ],
 
   "docker_read_only_commands": [
-    "ps", "images", "inspect", "logs", "stats", "info"
+    "ps", "images", "inspect", "logs", "stats", "info", "version",
+    "diff", "history", "port", "top", "events",
+    "network ls", "network inspect",
+    "volume ls", "volume inspect",
+    "config ls", "config inspect",
+    "secret ls",
+    "node ls", "node inspect",
+    "service ls", "service inspect", "service logs",
+    "stack ls", "stack ps", "stack services",
+    "system df", "system info", "system events"
   ],
 
   "docker_modifying_commands": [
-    "run", "exec", "rm", "rmi", "stop", "kill", "build", "push", "pull", "commit", "tag"
+    "run", "exec", "rm", "rmi", "stop", "kill", "start", "restart", "pause", "unpause",
+    "build", "push", "pull", "commit", "tag", "save", "load", "import", "export",
+    "create", "rename", "update", "cp", "attach",
+    "network create", "network rm", "network connect", "network disconnect",
+    "volume create", "volume rm", "volume prune",
+    "config create", "config rm",
+    "secret create", "secret rm",
+    "node update", "node rm", "node promote", "node demote",
+    "service create", "service update", "service rm", "service scale",
+    "stack deploy", "stack rm",
+    "system prune", "image prune", "container prune",
+    "swarm init", "swarm join", "swarm leave", "swarm update",
+    "login", "logout",
+    "up", "down", "scale", "deploy", "build", "rebuild"
   ],
 
   "terraform_read_only_commands": [
-    "show", "output", "plan", "validate", "fmt"
+    "show", "output", "plan", "validate", "fmt",
+    "state list", "state show", "state pull",
+    "providers", "version", "graph", "init",
+    "workspace list", "workspace show",
+    "login", "logout"
   ],
 
   "terraform_modifying_commands": [
-    "apply", "destroy", "taint", "import", "refresh"
+    "apply", "destroy", "taint", "untaint", "import", "refresh",
+    "state mv", "state rm", "state push", "state replace-provider",
+    "force-unlock",
+    "workspace new", "workspace delete", "workspace select"
+  ],
+
+  "git_read_only_commands": [
+    "status", "log", "show", "diff", "branch", "fetch",
+    "ls-files", "ls-tree", "cat-file", "rev-parse", "rev-list",
+    "stash list", "tag", "describe", "blame", "shortlog", "clone", "init",
+    "config --list", "config --get", "tag -a", "remote -v", "remote get-url", "remote show"
+  ],
+
+  "git_modifying_commands": [
+    "add", "commit", "push", "pull", "merge", "rebase", "reset",
+    "checkout", "switch", "restore", "cherry-pick", "revert",
+    "stash", "stash pop", "stash drop", "stash clear",
+    "branch -d", "branch -D", "branch -m",
+    "remote add", "remote rm", "remote rename", "remote remove", "remote set-url", "remote prune", "remote update",
+    "tag -d", "submodule", "clean", "gc", "prune",
+    "config --global", "config --local",
+    "am", "apply", "format-patch",
+    "worktree add", "worktree remove"
+  ],
+
+  "kubectl_read_only_commands": [
+    "get", "describe", "logs", "top", "explain", "api-resources",
+    "api-versions", "version", "cluster-info", "config view",
+    "config get-contexts", "config current-context",
+    "rollout status", "rollout history"
+  ],
+
+  "kubectl_modifying_commands": [
+    "apply", "create", "delete", "edit", "patch", "replace",
+    "scale", "expose", "run", "set",
+    "annotate", "label", "taint", "drain", "cordon", "uncordon",
+    "exec", "cp", "port-forward", "proxy",
+    "rollout restart", "rollout undo", "rollout pause", "rollout resume",
+    "autoscale", "certificate approve", "certificate deny",
+    "config set-context", "config use-context", "config set-cluster",
+    "config set-credentials", "config delete-context"
   ]
 }
