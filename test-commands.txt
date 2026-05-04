@@ -3,6 +3,24 @@
 # Y = auto-approve, N = manual approval
 # ==================================================
 
+
+# PowerShell Script Block Tests - Modifying inside { } blocks (N)
+N;PS_Block_Modifying_MultiLine;$serever=\"serveA\"`nwhile($true) {if (-not $cred) { remove-item a.txt`n} Remove-Item b.txt ; exit 1 }; Enter-PSSession -ComputerName $server -Credential $cred;Multi-line blocks with `n - Remove-Item in nested blocks
+N;PS_Block_Modifying_MultiLine;$serever=\"serveA\"`nwhile($true) {if (-not $cred) { get-content a.txt`n} get-content a.txt | Remove-Item b.txt ; exit 1 }; Enter-PSSession -ComputerName $server -Credential $cred;Multi-line blocks with `n - Remove-Item in nested blocks
+N;PS_Block_Modifying_MultiLine;$serever=\"serveA\"`nwhile($true) {if (-not $cred) { get-content a.txt`n} get-content a.txt | Remove-Item b.txt ; exit 1 }; Enter-PSSession -ComputerName $server -Credential $cred;Multi-line blocks with `n - Remove-Item in nested blocks
+N;PS_Block_Modifying_MultiLine_InnerRO;$serever=\"serveA\"`nwhile($true) {if (-not $cred) { get-content a.txt`n} Remove-Item b.txt \"Cancelled\"; exit 1 }; Enter-PSSession -ComputerName $server -Credential $cred;Inner block read-only (get-content), outer block has Remove-Item
+N;PS_Block_Modifying_MultiLine;$server = Read-Host \"Enter target server name\"; $credential = Get-Credential; Invoke-Command -ComputerName $server -Credential $credential -ScriptBlock { $tempPath = \"C:\\temp\"`n$filePath = \"C:\\temp\\host.txt\"`n if (Test-Path -Path $tempPath) { Write-Output \"Directory exists: $tempPath\"`nif (Test-Path -Path $filePath) { Remove-Item -Path $filePath -Force; Write-Output \"File deleted: $filePath\" } else { Write-Output \"File not found: $filePath\" } } else { Write-Output \"Directory not found: $tempPath\" } };Multi-line blocks with `n - Remove-Item in nested blocks
+Y;PS_Block_Modifying_MultiLine;$server = Read-Host \"Enter target server name\"; $credential = Get-Credential; Invoke-Command -ComputerName $server -Credential $credential -ScriptBlock { $tempPath = \"C:\\temp\"`n$filePath = \"C:\\temp\\host.txt\"`n if (Test-Path -Path $tempPath) { Write-Output \"Directory exists: $tempPath\"`nif (Test-Path -Path $filePath) { List-Item -Path $filePath -Force; Write-Output \"File deleted: $filePath\" } else { Write-Output \"File not found: $filePath\" } } else { Write-Output \"Directory not found: $tempPath\" } };Multi-line blocks with `n - List-Item in nested blocks
+
+
+# PowerShell chain operators && and || inside blocks (PowerShell 7+)
+N;PS_Block_Modifying_AndChain;if ($x) { get-content a.txt && Remove-Item b.txt };Block with && chain - read-only then modifying
+N;PS_Block_Modifying_OrChain;if ($x) { get-content a.txt || Remove-Item b.txt };Block with || chain - read-only then modifying
+Y;PS_Block_ReadOnly_AndChain;if ($x) { Get-Process && Get-Service };Block with && chain - all read-only
+Y;PS_Block_ReadOnly_OrChain;if ($x) { Get-Process || Get-Service };Block with || chain - all read-only
+
+
+
 # PowerShell Read-Only Commands (Y)
 Y;PowerShell_ReadOnly;Get-ChildItem;List files in directory
 Y;PowerShell_ReadOnly;Get-Location;Get current location
@@ -87,3 +105,96 @@ Y;Complex_ReadOnly;pwd && ls -la && echo "done";All read-only
 N;Complex_Modifying;pwd && touch test.txt && echo "done";Middle command modifies
 Y;ComplexPipe_ReadOnly;cat file.txt | grep ERROR | wc -l;Pipe chain all read-only
 N;ComplexPipe_Modifying;cat file.txt | grep ERROR > error.log;Output redirect (modifying)
+
+# kubectl Commands - Read-Only (Y)
+Y;kubectl_ReadOnly;kubectl get pods;List Kubernetes pods
+Y;kubectl_ReadOnly;kubectl describe pod my-pod;Describe a pod
+Y;kubectl_ReadOnly;kubectl logs my-pod;View pod logs
+Y;kubectl_ReadOnly;kubectl config view;View kubeconfig
+Y;kubectl_ReadOnly;kubectl rollout status deployment/my-app;Check rollout status
+
+# kubectl Commands - Modifying (N)
+N;kubectl_Modifying;kubectl delete pod my-pod;Delete a pod
+N;kubectl_Modifying;kubectl apply -f deployment.yaml;Apply configuration
+N;kubectl_Modifying;kubectl exec -it my-pod -- /bin/bash;Exec into pod
+N;kubectl_Modifying;kubectl rollout undo deployment/my-app;Rollback deployment
+
+# DOS Commands - Read-Only (Y)
+Y;DOS_ReadOnly;dir;List directory contents
+Y;DOS_ReadOnly;type C:\file.txt;Display file contents
+Y;DOS_ReadOnly;findstr "error" C:\log.txt;Search for string in file
+Y;DOS_ReadOnly;systeminfo;Display system information
+Y;DOS_ReadOnly;tasklist;List running processes
+
+# DOS Commands - Modifying (N)
+N;DOS_Modifying;del C:\file.txt;Delete a file
+N;DOS_Modifying;rmdir /s C:\temp;Remove directory tree
+N;DOS_Modifying;copy file1.txt file2.txt;Copy file
+N;DOS_Modifying;move file.txt C:\backup\;Move file
+N;DOS_Modifying;md C:\newdir;Create directory
+N;DOS_Modifying;net stop wuauserv;Stop a Windows service
+
+# DOS via cmd /c wrapper - Read-Only (Y)
+Y;DOS_cmd_c_ReadOnly;cmd /c dir;DOS dir via cmd wrapper
+Y;DOS_cmd_c_ReadOnly;cmd /c type C:\file.txt;DOS type via cmd wrapper
+
+# DOS via cmd /c wrapper - Modifying (N)
+N;DOS_cmd_c_Modifying;cmd /c del C:\file.txt;DOS delete via cmd wrapper
+N;DOS_cmd_c_Modifying;cmd.exe /c rmdir /s C:\temp;DOS rmdir via cmd.exe wrapper
+
+# PowerShell Multi-line blocks (using `n separator) - Read-Only (Y)
+Y;PS_MultiLine_ReadOnly;Get-Process`nGet-Service;Two read-only cmdlets via `n
+Y;PS_MultiLine_ReadOnly;Get-Location`nGet-Date`nWrite-Host Done;Three read-only cmdlets
+
+# PowerShell Multi-line blocks (using `n separator) - Modifying (N)
+N;PS_MultiLine_Modifying;Get-Process`nStop-Process -Name Notepad;Read then stop process
+N;PS_MultiLine_Modifying;Get-ChildItem`nRemove-Item test.txt;List then delete
+
+# PowerShell inline -Command blocks
+Y;PS_InlineCommand_ReadOnly;powershell -Command "Get-Process | Select-Object Name";Inline read-only using pipe
+N;PS_InlineCommand_Modifying;powershell -Command "Get-Process; Stop-Process notepad";Inline modifying
+
+# $() command substitution chains
+Y;DollarSub_ReadOnly;echo $(date);Command substitution with read-only
+Y;DollarSub_ReadOnly;ls $(pwd);Command substitution in arguments
+N;DollarSub_Modifying;echo $(rm file.txt);Command substitution with modifying command
+
+# PowerShell Script Block Tests - Modifying inside { } blocks (N)
+N;PS_Block_Modifying_Simple;if ($x) { remove-item a.txt };Simple block with Remove-Item
+N;PS_Block_Modifying_Multi;if ($x) { remove-item a.txt; stop-process notepad };Multiple modifying in block
+N;PS_Block_Modifying_Nested;while($true) { if ($x) { remove-item a.txt } };Nested blocks with Remove-Item
+N;PS_Block_Modifying_Deep;foreach ($i in 1..10) { if ($j) { remove-item a.txt } };Deeply nested blocks
+N;PS_Block_Modifying_TopLevel;if ($x) { remove-item a.txt }; get-process;Block + top-level read-only
+N;PS_Block_Modifying_Complex;while(true) {if (-not $cred) { remove-item a.txt;} Write-Host "Cancelled"; exit 1 }; Enter-PSSession -ComputerName $server -Credential $cred;Original failing case - nested blocks with Remove-Item and Enter-PSSession
+N;PS_Block_Modifying_IfElse;if ($cond) { Get-Process } else { Remove-Item test.txt };Else block contains modifying
+
+# PowerShell Script Block Tests - Read-Only inside { } blocks (Y)
+Y;PS_Block_ReadOnly_Simple;if ($x) { Get-Process };Simple block with Get-Process
+Y;PS_Block_ReadOnly_Multi;if ($x) { Get-Process; Get-Service };Block with only read-only cmdlets
+Y;PS_Block_ReadOnly_WhereObj;Get-Process | Where-Object { $_.CPU -gt 100 };Where-Object script block (read-only)
+Y;PS_Block_ReadOnly_Foreach;foreach ($i in 1..10) { Write-Host "Processing $i" };Foreach with Write-Host (read-only)
+Y;PS_Block_ReadOnly_Nested;while($true) { if ($x) { Get-Process } };Nested blocks all read-only
+Y;PS_Block_ReadOnly_EnterPSSession;Enter-PSSession -ComputerName $server -Credential $cred;Enter-PSSession is read-only verb
+
+
+N;PS_Block_Modifying_Simple;if ($x) { remove-item a.txt };Simple block with Remove-Item
+N;PS_Block_Modifying_Multi;if ($x) { remove-item a.txt; stop-process notepad };Multiple modifying in block
+N;PS_Block_Modifying_Nested;while($true) { if ($x) { remove-item a.txt } };Nested blocks with Remove-Item
+N;PS_Block_Modifying_Deep;foreach ($i in 1..10) { if ($j) { remove-item a.txt } };Deeply nested blocks
+N;PS_Block_Modifying_TopLevel;if ($x) { remove-item a.txt }; get-process;Block + top-level read-only
+N;PS_Block_Modifying_Complex;while(true) {if (-not $cred) { remove-item a.txt;} Write-Host "Cancelled"; exit 1 }; Enter-PSSession -ComputerName $server -Credential $cred;Original failing case - nested blocks with Remove-Item and Enter-PSSession
+N;PS_Block_Modifying_IfElse;if ($cond) { Get-Process } else { Remove-Item test.txt };Else block contains modifying
+
+# PowerShell Script Block Tests - Read-Only inside { } blocks (Y)
+Y;PS_Block_ReadOnly_Simple;if ($x) { Get-Process };Simple block with Get-Process
+Y;PS_Block_ReadOnly_Multi;if ($x) { Get-Process; Get-Service };Block with only read-only cmdlets
+Y;PS_Block_ReadOnly_WhereObj;Get-Process | Where-Object { $_.CPU -gt 100 };Where-Object script block (read-only)
+Y;PS_Block_ReadOnly_Foreach;foreach ($i in 1..10) { Write-Host "Processing $i" };Foreach with Write-Host (read-only)
+Y;PS_Block_ReadOnly_Nested;while($true) { if ($x) { Get-Process } };Nested blocks all read-only
+Y;PS_Block_ReadOnly_EnterPSSession;Enter-PSSession -ComputerName $server -Credential $cred;Enter-PSSession is read-only verb
+
+# Trusted Script Files - Auto-approved even as script execution (Y)
+Y;TrustedScript;pwsh test-runner-copilot.ps1;Invoke trusted script via pwsh
+Y;TrustedScript;./test-runner-copilot.ps1;Invoke trusted script via relative path
+Y;TrustedScript;powershell -File test-runner-copilot.ps1;Invoke trusted script via powershell -File
+N;UntrustedScript;pwsh ./some-unknown-script.ps1;Unknown script should still ask

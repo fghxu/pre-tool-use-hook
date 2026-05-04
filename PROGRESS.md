@@ -1,75 +1,77 @@
 ## Goal
-Implement a Claude Code Pre-Tool-Use hook that automatically approves read-only CLI commands while requiring approval for any commands that modify the system, including special handling for SSH commands and script execution detection.
+Implement a VS Code Copilot PreToolUse hook that intercepts CLI commands, auto-approves read-only operations, and prompts for approval on modifying operations across PowerShell, AWS CLI, Docker, Terraform, Git, kubectl, Linux/Unix, DOS, and SSH.
 
 ## Completed Steps
-1. Created comprehensive requirements documentation (requirements.md)
-2. Designed test framework with 59 test cases covering:
-   - PowerShell read-only and modifying commands
-   - SSH commands (read-only remote and with modifying operations)
-   - Script execution detection (bash, sh, python, etc.)
-   - AWS CLI commands (pattern-based read-only vs modifying detection)
-   - Linux/Unix commands (cat, ls, rm, etc.)
-   - Command chain analysis (&&, ||, |, ;)
-   - Docker and Terraform command detection
-   - Output redirect detection (> >>)
-3. Implemented pre-cli-hook.ps1 with:
-   - Pattern-based AWS command detection (describe, list, get vs create, delete, etc.)
-   - SSH remote command extraction and analysis
-   - Script execution detection (always prompt)
-   - Command chain parsing and sub-command analysis
-   - Pattern-based classification for PowerShell, Linux, AWS, Docker, Terraform
-   - sudo prefix handling (strips sudo and checks actual command)
-   - Output redirect detection (> and >> always prompt)
-   - Logging to C:\temp\command-hook.log
-   - Safe defaults (prompt for unknown commands)
-4. Created cli-commands.json - externalized all patterns from hardcoded arrays:
-   - script_patterns, ssh_pattern, aws_read_only/modifying_patterns
-   - linux_read_only/modifying_commands (with systemctl added)
-   - powershell_read_only/modifying_verbs
-   - docker_read_only/modifying_commands
-   - terraform_read_only/modifying_commands
-5. Created test framework (test-runner.ps1):
-   - Reads test cases from test-commands.txt
-   - Compares expected vs actual hook decisions
-   - Detailed pass/fail reporting with reasons
-   - Summary statistics by category
-6. Fixed test runner command invocation (pwsh -Command instead of -File)
-7. All 59 test cases passing (100% success rate)
-8. Git repository published to GitHub at https://github.com/fghxu/pre-tool-use-hook
 
-## Test Results (Full Suite Run)
-- **Total Tests**: 59
-- **Passed**: 59 (100%)
-- **Failed**: 0 (0%)
+### Core Implementation
+- Hook script `pre-cli-hook-copilot.ps1` (~1300 lines): receives JSON via stdin from Copilot's PreToolUse event, analyzes command, outputs allow/ask decision
+- Configuration in `cli-commands.json` (v2.9.0): all patterns externalized — PowerShell verbs, AWS patterns, Linux commands, Docker/Terraform/Git/kubectl subcommands, DOS commands, SSH patterns, script patterns, trusted scripts
+- Decision pipeline: empty check → redirect detection → trusted scripts → script execution → SSH → PowerShell blocks → chained commands → single commands → safe default
 
-### All Categories Working (100% Pass)
-- **Script Execution**: 8/8 tests passed
-- **AWS Modifying**: 6/6 tests passed
-- **AWS Read-Only**: 6/6 tests passed
-- **SSH with Chains**: 2/2 tests passed
-- **SSH Modifying**: 1/1 tests passed
-- **SSH Modifying Remote**: 1/1 tests passed
-- **SSH Read-Only**: 3/3 tests passed
-- **Command Chains Read-Only**: 3/3 tests passed
-- **Command Chains Modifying**: 3/3 tests passed
-- **PowerShell Read-Only**: 4/4 tests passed
-- **PowerShell Modifying**: 3/3 tests passed
-- **Linux Read-Only**: 7/7 tests passed
-- **Linux Modifying**: 8/8 tests passed
-- **Complex/Pipe commands**: all passed
+### PowerShell Block Extraction Algorithm
+- Stack-based `Extract-CmdletsFromScriptBlocks` (v2.4.0): non-recursive 4-phase algorithm finds ALL `{ }` pairs, processes innermost first, extracts contents without doubling
+- Multi-line block support (v2.5.0): block extraction runs on FULL command before `n` splitting; handles `{ }` blocks spanning lines
+- `Remove-ControlFlowPrefix`: strips `if (...)`, `while (...)`, `foreach (...)`, `else`, `do`, `}` remnants after block removal
+- Segment trimming fix (v2.7.0): trims `;`-split segments before control flow stripping (prevents leading-space regex misses)
+- `originalHadBlocks` check (v2.7.0): PowerShell commands with `{ }` blocks trigger block analysis even if only 1 cmdlet remains
+- Pipe/chain handling in `Test-IsPowerShellModifying` (v2.8.0/v2.9.0): splits on `|`, `&&`, `||` and checks each segment independently
+
+### Chain Operator Coverage
+- `|` (pipeline) — split in `Test-IsPowerShellModifying` for PowerShell, in `Split-ChainedCommands` for Linux
+- `&&` (AND) — split in both PowerShell and Linux paths
+- `||` (OR) — split in both PowerShell and Linux paths
+- `;` (statement separator) — split in `Extract-PowerShellCommands` for PowerShell, in `Split-ChainedCommands` for Linux
+- `&` — NOT split for PowerShell (it's the call operator, not a chain operator); split in Linux path only
+
+### Trusted Script Files (v2.6.0)
+- `trusted_script_files` array in `cli-commands.json`
+- Trusted scripts bypass script execution check → auto-approve
+- Disable by removing `trusted_script_files` from config
+
+### Test Framework
+- `test-commands.txt`: 132 test cases, format `Y/N;Category;Command;Description`
+- `test-runner-copilot.ps1`: automated runner — builds Copilot-format JSON, pipes to hook, compares expected vs actual
+- `debug-input.json`: sample payload for `-DebugInputFile` debugging
+
+### Test Results: 132/132 PASSING (100%)
+All 48 categories at 100%:
+
+| Category | Tests | Status |
+|----------|-------|--------|
+| PowerShell Read-Only | 4 | 100% |
+| PowerShell Modifying | 3 | 100% |
+| PS Block Modifying (MultiLine, Nested, IfElse, Simple, etc.) | 22 | 100% |
+| PS Block Read-Only | 12 | 100% |
+| PS MultiLine (ReadOnly + Modifying) | 4 | 100% |
+| PS Inline Command | 2 | 100% |
+| PS Chain Operators (&&, \|\|) | 4 | 100% |
+| Linux Read-Only | 7 | 100% |
+| Linux Modifying | 8 | 100% |
+| AWS Read-Only | 6 | 100% |
+| AWS Modifying | 6 | 100% |
+| SSH Read-Only | 3 | 100% |
+| SSH Chained Read-Only | 2 | 100% |
+| SSH Modifying | 2 | 100% |
+| Script Execution | 8 | 100% |
+| Chained Commands (ReadOnly + Modifying) | 6 | 100% |
+| Complex (ReadOnly + Modifying + Pipe) | 4 | 100% |
+| kubectl Read-Only | 5 | 100% |
+| kubectl Modifying | 4 | 100% |
+| DOS Read-Only | 5 | 100% |
+| DOS Modifying | 6 | 100% |
+| DOS cmd /c Wrapper | 4 | 100% |
+| Dollar-Substitution $() | 3 | 100% |
+| Trusted/Untrusted Scripts | 4 | 100% |
 
 ## Current Step
-Phase 3: Polish - adding more DevOps tool support and enhanced formatting
+All 132 tests passing. Hook is feature-complete for all supported tool categories.
 
 ## Next Steps
-1. Add kubectl (Kubernetes) command detection to cli-commands.json
-2. Enhanced prompt formatting with colors
-3. Detailed command impact analysis
-4. Add more test cases for Docker and Terraform edge cases
-5. Documentation and usage examples
+- Consider edge cases for `Remove-ControlFlowPrefix` with deeply nested parens
+- Add more real-world multi-line PowerShell script examples
+- Performance optimization for large command strings
 
 ## Blockers / Notes
-- cli-commands.json regex patterns require double-escaped backslashes (JSON format: `\\s` not `\s`)
-- The hook must be in the same directory as cli-commands.json
-- Logging writes to C:\temp\command-hook.log (directory created automatically)
-- VSCode Copilot hook location: C:\Users\fghxu\.copilot\hooks\
+- `cli-commands.json` regex patterns require double-escaped backslashes (JSON format: `\\s` not `\s`)
+- Copilot passes PowerShell multiline with `n` (backtick-n), not `\r\n`
+- Hook expects `tool_name` field to be `run_in_terminal`, `Bash`, `bash`, `terminal`, or `execute_command`

@@ -1,11 +1,15 @@
 {
   "_comment": "CLI Command Patterns for Pre-Tool-Use Hook - Used by pre-cli-hook.ps1 and pre-cli-hook-copilot.ps1",
-  "version": "2.3.0",
-  "_note": "v2.3.0: Allow 2>&1 stderr->stdout redirections (console-only, non-modifying). File redirections still require approval.",
+  "version": "2.8.0",
+  "_note": "v2.8.0: Fixed Test-IsPowerShellModifying to handle piped commands (|). Each pipe segment checked independently for modifying verbs.",
+
+  "trusted_script_files": [
+    "test-runner-copilot.ps1"
+  ],
 
   "script_patterns": [
-    "^\\.\\\/[^\\s]+\\.sh$",
-    "^\\.\\\/[^\\s]+$",
+    "^\\.\\/[^\\s]+\\.sh$",
+    "^\\.\\/[^\\s]+$",
     "^bash\\s+[^\\s]+\\.sh$",
     "^sh\\s+[^\\s]+\\.sh$",
     "^sh\\s+[^\\s]+$",
@@ -15,11 +19,9 @@
     "^node\\s+[^\\s]+$",
     "^source\\s+[^\\s]+$",
     "^\\.\\s+[^\\s]+$",
-    "^\\.\\-\\\/[^\\s]+",
-    "^\\.\\-\\\/[^\\s]+",
-    "^\\.\\-\\\/gradlew\\s+",
-    "^\\.\\-\\\/mvnw\\s+",
-    "^\\.\\-\\\/manage\\.py\\s+",
+    "^\\.\\/gradlew\\s+",
+    "^\\.\\/mvnw\\s+",
+    "^\\.\\/manage\\.py\\s+",
     "^ruby\\s+[^\\s]+$",
     "^php\\s+[^\\s]+$",
     "^go\\s+run\\s+[^\\s]+$",
@@ -95,7 +97,9 @@
   "powershell_read_only_verbs": [
     "Get-", "Test-", "Select-", "Where-", "Measure-", "Find-",
     "Write-", "Read-", "Show-", "Compare-", "Format-", "Out-",
-    "ConvertTo-", "ConvertFrom-", "Resolve-", "Search-", "Watch-", "Set-Location"
+    "ConvertTo-", "ConvertFrom-", "Resolve-", "Search-", "Watch-", 
+    "Set-Location","Enter-PSSession", 
+    "Invoke-Command"
   ],
 
   "powershell_modifying_verbs": [
@@ -191,5 +195,24 @@
     "autoscale", "certificate approve", "certificate deny",
     "config set-context", "config use-context", "config set-cluster",
     "config set-credentials", "config delete-context"
+  ],
+
+  "dos_read_only_commands": [
+    "dir", "type", "cd", "chdir", "echo", "date", "time",
+    "ver", "hostname", "whoami", "where", "find", "findstr",
+    "tree", "systeminfo", "tasklist", "driverquery", "path",
+    "fc", "comp", "more", "sort", "clip"
+  ],
+
+  "dos_modifying_commands": [
+    "del", "erase", "rmdir", "rd", "md", "mkdir",
+    "copy", "xcopy", "robocopy", "move", "rename", "ren",
+    "format", "diskpart", "chkdsk", "chkntfs",
+    "attrib", "cacls", "icacls", "takeown",
+    "net", "sc", "reg", "shutdown", "schtasks",
+    "bcdedit", "diskraid",
+    "label", "subst", "mklink", "compact", "cipher",
+    "convert", "expand", "replace", "ftype", "assoc",
+    "rundll32", "msiexec", "taskkill", "tskill"
   ]
 }

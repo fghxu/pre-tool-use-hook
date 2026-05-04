@@ -1,22 +1,23 @@
 # Requirements: Read-Only CLI Command Security Hook
 
 ## Executive Summary
-Implement a Claude Code PreToolUse hook that automatically approves read-only CLI commands while requiring human approval for any commands that modify the system. This enhances security and automation for DevOps workflows.
+A VS Code Copilot **PreToolUse hook** (`pre-cli-hook-copilot.ps1`) that intercepts CLI commands before execution. Receives JSON via stdin from Copilot's PreToolUse event, analyzes the command against categorized patterns in `cli-commands.json`, and outputs either `allow` (auto-execute) or `ask` (prompt user for approval). Supports PowerShell, AWS CLI, Docker, Terraform, Git, kubectl, Linux/Unix, DOS, and SSH commands.
 
 ## Goals
 1. Automatically execute read-only CLI commands without human intervention
 2. Prompt for approval before executing any command that modifies the system
-3. Support complex command chains (using operators like &&, ||, |, $)
-4. Analyze each sub-command in a chain independently
-5. Provide detailed analysis when prompting for approval
+3. Support complex command chains (using operators like `&&`, `||`, `|`, `;`, `$()`)
+4. Analyze each sub-command in a chain/block independently
+5. Extract and analyze PowerShell cmdlets hidden inside `{ }` script blocks (if/while/foreach/etc.)
+6. Handle multi-line PowerShell commands using `n` (backtick-n) separators
 
 ## Requirements
 
 ### 1. Hook Configuration
-**Location**: Global Claude Code configuration
-- The hook will be configured in Claude Code's global settings (not project-specific)
-- Affects all projects on the user's machine
-- Uses native Claude Code PreToolUse hooks (no external dependencies)
+**Location**: VS Code Copilot hooks directory
+- The hook integrates with Copilot's PreToolUse event via JSON stdin/stdout
+- No external dependencies — pure PowerShell
+- Debug mode via `-DebugInputFile` parameter for local testing
 
 ### 2. Command Categories
 
@@ -135,287 +136,193 @@ Commands that require context to determine read-only status:
 ### 3. Command Chain Analysis
 
 #### 3.1 Supported Operators
-The hook must parse and analyze the following command operators:
-- `&&` (AND - execute second command only if first succeeds)
-- `||` (OR - execute second command only if first fails)
-- `|` (pipe - pass first command's output to second)
-- `;` (semicolon - execute commands sequentially)
-- `&` (background execution)
+The hook parses and analyzes the following command operators:
+- `&&` (AND — execute second command only if first succeeds)
+- `||` (OR — execute second command only if first fails)
+- `|` (pipe — pass first command's output to second)
+- `;` (semicolon — execute commands sequentially)
 - `$()` (command substitution)
-- `` ` `` (backticks - command substitution)
-- `>` (redirect stdout)
-- `>>` (append stdout)
-- `<` (redirect stdin)
+- `>` / `>>` (file output redirection — always requires approval, except `2>&1` and `2>/dev/null` which are read-only)
+- `n` (PowerShell backtick-n — multi-line separator)
 
-#### 3.2 Special Command Types
+#### 3.2 PowerShell Script Block Extraction (v2.4.0+)
 
-**SSH Commands:**
-```javascript
-// Detection patterns
-const sshPattern = /^ssh\s+(?:-\w+\s+)*(?:[^@]+@)?[^"\s]+(\s+"[^"]+")/;
+PowerShell commands can hide modifying cmdlets inside `{ }` blocks within control flow statements:
 
-// Examples to handle:
-ssh user@host "command"                    // Single command
-ssh user@host "cmd1 && cmd2 | cmd3"       // Chained commands
-ssh -i key.pem user@host "sudo cat file"  // With options
-ssh host "$(cat script.sh)"              // Command substitution
+```powershell
+while($true) {if (-not $cred) { get-content a.txt`n} Remove-Item b.txt; exit 1 }; Enter-PSSession ...
 ```
 
-**Script Execution Commands:**
-```javascript
-// Patterns to detect (ALWAYS require approval)
-const scriptPatterns = [
-  /^\.\/[^\s]+\.sh$/,      // ./script.sh
-  /^\.\/[^\s]+$/,          // ./anything (any executable)
-  /^bash\s+[^\s]+\.sh$/,   // bash script.sh
-  /^sh\s+[^\s]+\.sh$/,     // sh script.sh
-  /^python\d?\s+[^\s]+/,   // python script.py
-  /^perl\s+[^\s]+/,        // perl script.pl
-  /^node\s+[^\s]+/,        // node script.js
-  /^source\s+[^\s]+/,     // source script.sh
-  /^\.\s+[^\s]+/,          // . script.sh (dot operator)
-];
+The hook uses a **stack-based, non-recursive algorithm** (`Extract-CmdletsFromScriptBlocks`):
+
+1. **Find ALL `{ }` pairs** via character-by-character stack matching
+2. **Process innermost blocks first** — extract content, remove block from line
+3. **Split block contents by `;`** once (after ALL blocks extracted)
+4. **Split remaining line** (without blocks) by `;`
+5. **Combine** all extracted cmdlets and remaining segments
+
+After extraction, `Remove-ControlFlowPrefix` strips control flow remnants (`if (...)`, `while (...)`, `foreach (...)`, `else`, `do`, `}`) from each segment, exposing the actual cmdlet for verb analysis.
+
+**Multi-line support** (v2.5.0): Block extraction runs on the FULL command BEFORE `n` splitting, ensuring `{ }` blocks spanning multiple lines are handled correctly.
+
+**Pipe/chain handling** (v2.8.0/v2.9.0): `Test-IsPowerShellModifying` splits on `|`, `&&`, `||` and checks each segment independently. This prevents `get-content a.txt | Remove-Item b.txt` from being missed (the `Get-` prefix would otherwise short-circuit the check).
+
+#### 3.3 SSH Remote Command Extraction
+```
+ssh -v -p 2222 user@server "cat /var/log/app.log | grep java && rm /var/a.txt"
+                              └────────────────────────────────────────────┘
+                                        extracted remote command
 ```
 
-#### 3.3 Chain Analysis Logic
+1. Detect SSH command via `^ssh\s+` pattern
+2. Extract remote command from quoted string (supports both `"` and `'`)
+3. Extract commands from bash block structures (if/for/while/case)
+4. Split by chain operators (`&&`, `||`, `|`, `;`)
+5. Analyze each sub-command independently
+6. If ALL read-only → auto-approve; if ANY modifying → prompt
+
+#### 3.4 Chain Analysis Logic
 
 **Primary Rule:** If ANY sub-command is modifying or a script → prompt for approval
 
-**Decision Flow:**
-1. Check if command is script execution → prompt (executes unknown code)
-2. Check if command is SSH → extract remote command and analyze sub-commands
-3. Parse chained commands separated by operators
-4. For each sub-command:
-   - Identify CLI type (PowerShell, AWS, Docker, Terraform, Linux/Unix)
-   - Check against read-only whitelist for that CLI
-   - If not in whitelist → treat as modifying → need approval
-5. If **ALL** commands are read-only → **auto-approve**
-6. If **ANY** command is modifying → **prompt with details**
+**Decision Flow (Get-CommandDecision):**
+1. Empty command → allow
+2. File output redirections (`>`, `>>`, `1>`) → ask (exception: `2>&1`, `2>/dev/null` → allow)
+3. Trusted scripts → allow (configured via `trusted_script_files` in config)
+4. Script execution (`./script.sh`, `bash deploy.sh`, `python migrate.py`, etc.) → ask
+5. SSH commands → extract remote command, analyze each sub-command
+6. PowerShell blocks → extract cmdlets from `{ }` blocks, check each
+7. Chained commands → split by operators, analyze each segment
+8. Single commands → check read-only vs modifying
+9. Unknown → ask (safe default)
 
-**Example Analysis:**
-```bash
-# Example: ssh user@server01 "cat /opt/a.txt | grep java && sudo rm /var/a.txt"
+### 4. Approval Prompt Design (Copilot Hook API)
 
-Step 1: Detect SSH command ✓
-Step 2: Extract remote command: "cat /opt/a.txt | grep java && sudo rm /var/a.txt"
-Step 3: Parse sub-commands:
-  - cat /opt/a.txt (read-only ✓)
-  - grep java (read-only ✓)
-  - sudo rm /var/a.txt (modifying ✗)
-Step 4: Decision: PROMPT (contains rm)
+#### 4.1 JSON Response Format
+The hook outputs JSON to stdout:
+```json
+// Auto-approve:
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"READ_ONLY: Read-only command"}}
+
+// Require approval:
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"MODIFIES: Modifying command"}}
 ```
 
-**Example 2:**
-```bash
-# Example: bash deploy.sh
-
-Step 1: Match script pattern ✓
-Step 2: Decision: PROMPT (script execution)
-```
-
-### 4. Approval Prompt Design
-
-#### 4.1 Prompt Format (Detailed Analysis Mode)
-When approval is required, display:
-```
-⚠️  Command requires approval - Detected modifying operation
-
-Command: aws s3 rm s3://my-bucket/file.txt
-
-Analysis:
-  ✓ aws s3 ls s3://my-bucket/ - READ ONLY
-  ✗ aws s3 rm s3://my-bucket/file.txt - MODIFYING (will delete file)
-
-This operation will:
-  - Delete the file 'file.txt' from S3 bucket 'my-bucket'
-  - This action cannot be undone
-
-Chain impact: The subsequent commands will not be executed if this is denied
-
-Proceed with execution? [y/N] 
-```
-
-#### 4.2 Prompt Features
-- **Command breakdown**: Show each sub-command with its read-only status
-- **Impact analysis**: Explain what the modifying command will do
-- **Chain awareness**: Inform about dependent commands that won't run if denied
-- **Default to No**: User must explicitly type 'y' or 'yes' to approve
-- **Timeout**: Prompt automatically denies after 60 seconds of inactivity
+#### 4.2 Decision Reasons (Examples)
+| Reason | Decision | Example |
+|--------|----------|---------|
+| `READ_ONLY: Read-only command` | allow | `Get-Process` |
+| `MODIFIES: Modifying command` | ask | `Remove-Item file.txt` |
+| `PS_BLOCK_MODIFIES: ...` | ask | `if ($x) { Remove-Item a.txt }` |
+| `PS_BLOCK_READ_ONLY: ...` | allow | `if ($x) { Get-Process }` |
+| `SSH_MODIFIES: Remote command is not confirmed read-only: rm ...` | ask | `ssh user@host "rm file"` |
+| `SSH_READ_ONLY: All remote commands are read-only` | allow | `ssh user@host "cat /var/log/app.log"` |
+| `CHAIN_MODIFIES: Command chain contains modifying operation(s): ...` | ask | `ls && rm file.txt` |
+| `REDIRECT: Command contains file output redirection (modifying)` | ask | `cat file.txt > output.txt` |
+| `EXECUTES_SCRIPT: Executes external script (unknown code)` | ask | `bash deploy.sh` |
+| `TRUSTED_SCRIPT: Script file is in trusted list` | allow | `pwsh test-runner-copilot.ps1` |
 
 ### 5. Configuration File
 
 #### 5.1 File Location
-`cli-commands.json` (must be in the same directory as `pre-cli-hook.ps1`)
+`cli-commands.json` — must be in the same directory as `pre-cli-hook-copilot.ps1`. Alternatively, configurable via the `$ConfigFile` fallback path in the script.
 
-#### 5.2 Configuration Schema (IMPLEMENTED)
+#### 5.2 Configuration Schema (v2.9.0)
 ```json
 {
   "_comment": "CLI Command Patterns for Pre-Tool-Use Hook",
-  "_version": "1.1.0",
+  "version": "2.9.0",
 
-  "script_patterns": ["^\\.\\/[\\^s]+\\.sh$", ...],
+  "trusted_script_files": ["test-runner-copilot.ps1"],
+  "script_patterns": ["^\\.\\/[^\\s]+\\.sh$", ...],
   "ssh_pattern": "^ssh\\s+",
-  "aws_read_only_patterns": ["^aws\\s+\\S+\\s+(describe|list|get|show|head)-", ...],
+
+  "aws_read_only_patterns": ["^aws\\s+\\S+\\s+(describe|list|get|show|head|lookup)-", ...],
   "aws_modifying_patterns": ["^aws\\s+\\S+\\s+(create|delete|remove|...)-", ...],
+
   "linux_read_only_commands": ["ls", "pwd", "cd", "echo", ...],
   "linux_modifying_commands": ["rm", "rmdir", "mv", "cp", ...],
+
   "powershell_read_only_verbs": ["Get-", "Test-", "Select-", ...],
   "powershell_modifying_verbs": ["Remove-", "Move-", "Copy-", "New-", ...],
+
   "docker_read_only_commands": ["ps", "images", "inspect", "logs", ...],
   "docker_modifying_commands": ["run", "exec", "rm", "rmi", ...],
+
   "terraform_read_only_commands": ["show", "output", "plan", "validate", ...],
-  "terraform_modifying_commands": ["apply", "destroy", "taint", "import", ...]
+  "terraform_modifying_commands": ["apply", "destroy", "taint", "import", ...],
+
+  "git_read_only_commands": ["status", "log", "show", "diff", ...],
+  "git_modifying_commands": ["add", "commit", "push", "pull", ...],
+
+  "kubectl_read_only_commands": ["get", "describe", "logs", "top", ...],
+  "kubectl_modifying_commands": ["apply", "create", "delete", "edit", ...],
+
+  "dos_read_only_commands": ["dir", "type", "cd", "echo", ...],
+  "dos_modifying_commands": ["del", "rmdir", "copy", "move", ...]
 }
 ```
 
-Note: JSON regex patterns require double-escaped backslashes (e.g., `\\s` instead of `\s`).
+Note: JSON regex patterns require double-escaped backslashes (e.g., `\\s` instead of `\s`). PowerShell read-only verbs take precedence over modifying verbs (e.g., `Set-Location` is read-only despite `Set-` being a modifying verb).
 
 #### 5.3 User Customization
-- Users can add/remove patterns from the JSON configuration
-- No need to modify the PowerShell hook script - just edit cli-commands.json
-- Regex patterns for script detection, AWS, SSH
-- Plain string lists for Linux commands, PowerShell verbs, Docker/Terraform subcommands
+- Add/remove patterns from JSON — no need to modify the PowerShell script
+- `trusted_script_files`: list scripts that bypass the script-execution check
+- Regex patterns for AWS/script detection use standard .NET regex syntax
+- Plain string lists for Linux commands, PowerShell verbs, Docker/Terraform/Git/kubectl subcommands
 
-## Priority Implementation Order (UPDATED)
+## Priority Implementation Order
 
-### Phase 1: SSH Command Support (HIGHEST PRIORITY)
-Handle remote commands executed via SSH that may contain chained operations.
+### Phase 1: Core Hook + PowerShell Block Extraction ✅ COMPLETED
+- JSON stdin/stdout interface matching Copilot PreToolUse API
+- Stack-based `Extract-CmdletsFromScriptBlocks` for `{ }` block analysis
+- Multi-line PowerShell support via `n` splitting
+- `Remove-ControlFlowPrefix` for stripping control flow remnants
+- `Test-IsPowerShellModifying` with pipe/chain operator handling (`|`, `&&`, `||`)
 
-**Examples:**
-- `ssh user@host "cat /var/log/app.log | grep ERROR"` → Auto-approve (read-only)
-- `ssh user@host "cat /tmp/test | grep java && rm /var/a.txt"` → Prompt (contains rm)
-- `ssh user@host "sudo systemctl restart nginx"` → Prompt (modifies system)
+### Phase 2: All CLI Categories ✅ COMPLETED
+- AWS CLI pattern-based detection (describe/list/get vs create/delete/terminate)
+- Docker subcommand classification (ps/images/logs vs run/exec/rm)
+- Terraform subcommand classification (plan/show vs apply/destroy)
+- Git subcommand classification (single + two-word: status/log vs commit/push, stash pop/remote add)
+- kubectl subcommand classification (get/describe/logs vs apply/delete/exec)
+- Linux/Unix command lists (ls/cat/grep vs rm/mv/chmod)
+- DOS/CMD commands + `cmd /c` wrapper extraction
+- SSH remote command extraction and sub-analysis
 
-**Requirements:**
-1. Detect SSH commands starting with `ssh`
-2. Extract remote command from last quoted string
-3. Parse chained commands within remote command (`&&`, `||`, `|`, `;`)
-4. If ANY sub-command is modifying → prompt for approval
-5. Only if ALL sub-commands are read-only → auto-approve
+### Phase 3: Chain Analysis & Edge Cases ✅ COMPLETED
+- Command chain splitting (`&&`, `||`, `|`, `;`, `$()`)
+- Output redirect detection (`>`, `>>`, `1>` → ask; `2>&1`, `2>/dev/null` → allow)
+- Script execution detection with trusted script override
+- File output redirection detection
 
-**Implementation Logic:**
-```javascript
-if (isSSHCommand(command)) {
-  const remoteCommand = extractRemoteCommand(command);
-  const subCommands = parseChainedCommands(remoteCommand);
-  const hasModifying = subCommands.some(cmd => isModifyingCommand(cmd, 'linux'));
-  
-  if (hasModifying) return { decision: 'prompt', reason: 'SSH remote command contains modifying operations' };
-  return { decision: 'approve' };
-}
-```
-
-### Phase 2: Script Execution Detection
-All script executions require manual approval as they execute unknown code.
-
-**Patterns to detect:**
-- `./script.sh`
-- `./configure`
-- `./any-executable`
-- `bash script.sh`
-- `sh script.sh`
-- `python script.py`
-- `python3 script.py`
-- `perl script.pl`
-- `node script.js`
-- `/path/to/script`
-
-**Examples:**
-- `bash deploy.sh` → Prompt (executes script)
-- `./test.sh` → Prompt (executes script)
-- `python migrate.py` → Prompt (executes Python script)
-
-**Implementation:**
-- Match against regex patterns for script execution
-- Always require approval (executes arbitrary code)
-- Explain that script contents cannot be verified
-
-### Phase 3: Standard CLI Commands
-Handle direct PowerShell, AWS CLI, Docker, Terraform, and Linux/Unix commands.
-
-**Examples:**
-- `ls`, `pwd`, `cd` → Auto-approve (read-only)
-- `rm file.txt`, `mv a b` → Prompt (modifying)
-- `aws s3 ls` → Auto-approve (read-only)
-- `aws s3 rm s3://bucket/file` → Prompt (modifying)
-- `docker ps` → Auto-approve (read-only)
-- `docker rm container` → Prompt (modifying)
-
-### Implementation Approach
-
-#### Fast Command Hook (Shell Script)
-- Runs bash script for quick identification
-- Exit 0 for auto-approval, Exit 1 for prompt hook
-- 5 second timeout
-
-#### Detailed Prompt Hook (LLM Analysis)
-- For complex analysis (chained commands, SSH, scripts)
-- Uses Claude for safety analysis
-- 15 second timeout
-
-#### 6.2 File Structure
-```
-~/.claude/
-├── settings.json           # Main Claude Code settings
-├── cli-commands.json       # Read-only command configuration
-└── hooks/
-    └── pre-cli-hook.sh     # Command hook script
-```
-
-#### 6.3 Hook Registration
-In `~/.claude/settings.json`:
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/pre-cli-hook.sh",
-            "timeout": 5
-          },
-          {
-            "type": "prompt",
-            "prompt": "Analyze CLI command chain for read-only operations: $TOOL_INPUT\n\nConfiguration: ~/.claude/cli-commands.json\n\nRules:\n1. Parse chained commands separated by &&, ||, |, ;\n2. Check each sub-command against read-only whitelist\n3. If any modifying operation detected, deny with detailed analysis\n4. Explain why approval is needed\n5. Default to safe (deny on uncertainty)\n\nReturn: approve|deny with explanation",
-            "timeout": 15
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+### Phase 4: Testing ✅ COMPLETED
+- 132 test cases covering all 48 categories — 100% pass rate
+- Automated test runner (`test-runner-copilot.ps1`)
+- Debug input file for VS Code debugger integration
 
 ### 7. Testing Strategy
 
-#### 7.1 Test Cases
-1. **Read-only single command**: `ls -la` → auto-approve
-2. **Modifying single command**: `rm file.txt` → prompt for approval
-3. **Chained all read-only**: `pwd && ls` → auto-approve
-4. **Chained with one modifying**: `ls && rm file.txt` → prompt for approval
-5. **Complex AWS chain**: `aws s3 ls && aws s3 rm s3://bucket/file` → prompt for approval
-6. **Terraform plan**: `terraform plan` → prompt for approval (explain state lock)
-7. **Docker: `docker ps && docker images` → auto-approve
-8. **Docker: `docker ps && docker rm container` → prompt for approval
-
-#### 7.2 Test Commands
-Create test script to validate hook behavior:
-```bash
-# test-hook.sh
-echo "Test 1: Read-only command" && claude "ls -la" && echo "✓ Passed"
-echo "Test 2: Modifying command" && claude "touch test.txt" && echo "Should prompt"
-...
+#### 7.1 Test File Format
+`test-commands.txt` — one test per line:
 ```
+Y/N;Category;Command;Description
+```
+- `Y` = expect auto-approve (allow), `N` = expect manual approval (ask)
+- Semicolons in commands are handled by the parser (joins parts between Category and Description)
+
+#### 7.2 Test Runner
+`test-runner-copilot.ps1`: builds Copilot-format JSON (`{"tool_name":"run_in_terminal","tool_input":{"command":"..."}}`), pipes to hook via `pwsh -File`, parses the `permissionDecision` from the JSON response, compares expected vs actual.
 
 ### 8. Security Considerations
 
-1. **Never auto-approve unknown commands**: When in doubt, prompt for approval
-2. **Safe defaults**: Timeout or error should result in denial, not approval
-3. **Command injection prevention**: Sanitize command strings before parsing
-4. **No credential logging**: Never log commands that might contain secrets
-5. **Minimal privileges**: Hook scripts should run with minimal required permissions
+1. **Never auto-approve unknown commands**: When in doubt, prompt for approval (safe default)
+2. **Safe defaults**: Empty/corrupt input results in allow — the hook must never block Copilot from functioning
+3. **Command injection prevention**: Commands analyzed structurally, not executed
+4. **No credential logging**: Log files truncate commands and never store credentials
+5. **Read-only precedence**: Read-only verbs take precedence over modifying verbs (e.g., `Set-Location` is read-only despite `Set-` being a modifying verb)
+6. **SSH remote command validation**: Incomplete SSH commands (no quoted remote command) default to ask
+7. **PowerShell call operator**: `&` is NOT split as a chain operator in PowerShell (it's the call/invoke operator)
 
 ### 9. Future Enhancements
 
@@ -455,61 +362,61 @@ echo "Test 2: Modifying command" && claude "touch test.txt" && echo "Should prom
 - Add remaining test cases for edge cases
 - Documentation and usage examples
 
-### 11. Test Results
+### 11. Test Results (v2.9.0)
 
 **Full Test Suite Run**:
 
 ```
 ==========================================
-  Pre-CLI Hook Test Runner
+  Copilot Hook Test Runner
 ==========================================
 
-Total Tests: 59
-✅ Passed: 59 (100%)
-❌ Failed: 0 (0%)
+Total Tests: 132
+Passed: 132 (100%)
+Failed: 0 (0%)
 
 Test File: test-commands.txt
-Hook Script: pre-cli-hook.ps1
+Hook Script: pre-cli-hook-copilot.ps1
 ```
 
-**Breakdown by Category:**
+**Breakdown by Category (48 categories, all 100%):**
 
-| Category | Total | Passed | Failed | Rate | Status |
-|----------|-------|--------|--------|------|--------|
-| **Script Execution** | 8 | 8 | 0 | 100% | ✅ Working |
-| **AWS Modifying** | 6 | 6 | 0 | 100% | ✅ Working |
-| **SSH (with chains)** | 6 | 6 | 0 | 100% | ✅ Working |
-| **Command Chains** | 9 | 9 | 0 | 100% | ✅ Working |
-| **PowerShell Read-Only** | 4 | 4 | 0 | 100% | ✅ Working |
-| **Linux Read-Only** | 7 | 7 | 0 | 100% | ✅ Working |
-| **AWS Read-Only** | 6 | 6 | 0 | 100% | ✅ Working |
-| **SSH Simple** | 3 | 3 | 0 | 100% | ✅ Working |
-| **PowerShell Modifying** | 3 | 3 | 0 | 100% | ✅ Working |
-| **Linux Modifying** | 8 | 8 | 0 | 100% | ✅ Working |
+| Category | Tests | Rate |
+|----------|-------|------|
+| PowerShell Read-Only | 4 | 100% |
+| PowerShell Modifying | 3 | 100% |
+| PS Block Modifying (MultiLine, Nested, Simple, Complex, IfElse, Deep, TopLevel) | 22 | 100% |
+| PS Block Read-Only (Simple, Multi, WhereObj, Foreach, Nested, EnterPSSession) | 12 | 100% |
+| PS MultiLine Read-Only/Modifying | 4 | 100% |
+| PS Inline Command | 2 | 100% |
+| PS Chain Operators (&&, \|\|) | 4 | 100% |
+| Linux Read-Only | 7 | 100% |
+| Linux Modifying | 8 | 100% |
+| AWS Read-Only | 6 | 100% |
+| AWS Modifying | 6 | 100% |
+| SSH Read-Only / Chained / Modifying | 7 | 100% |
+| Script Execution | 8 | 100% |
+| Chained Commands (ReadOnly + Modifying) | 6 | 100% |
+| Complex / ComplexPipe (ReadOnly + Modifying) | 4 | 100% |
+| kubectl Read-Only / Modifying | 9 | 100% |
+| DOS Read-Only / Modifying | 11 | 100% |
+| DOS cmd /c Wrapper | 4 | 100% |
+| Dollar-Substitution $() | 3 | 100% |
+| Trusted/Untrusted Scripts | 4 | 100% |
 
 **Key Findings:**
-- ✅ All 59 test cases pass (100%)
-- ✅ Modifying commands correctly prompt (safe)
-- ✅ Unknown commands safely default to prompt
-- ✅ Command chain analysis works correctly
-- ✅ SSH remote command extraction works
-- ✅ Read-only commands correctly auto-approved
-- ✅ Output redirect detection (> >>) works
-- ✅ sudo prefix handling works
-- ✅ Docker and Terraform commands detected
-- ✅ All patterns loaded from cli-commands.json
-
-**Configuration Architecture:**
-- All patterns stored in `cli-commands.json` (not hardcoded)
-- Easy to add new patterns without modifying the hook script
-- JSON file must be in the same directory as `pre-cli-hook.ps1`
+- All 132 test cases pass (100%) across 48 categories
+- PowerShell block extraction correctly handles nested, multi-line, and chained blocks
+- Pipe/chain operators (`|`, `&&`, `||`) correctly split and analyzed in both PowerShell and Linux paths
+- SSH remote command extraction works for read-only, chained, and modifying remote operations
+- File output redirect detection correctly identifies `>`, `>>`, `1>` while allowing `2>&1` and `2>/dev/null`
+- DOS `cmd /c` wrapper extraction correctly unwraps and analyzes inner commands
+- Trusted scripts auto-approve while unknown scripts prompt
+- All patterns loaded from `cli-commands.json` (no hardcoded patterns)
 
 ### 12. Review and Update Progress
 
-**Last Updated**: 2026-04-23
-**Current Phase**: Phase 2 completed, Phase 3 in progress
-**Next Action**: Add kubectl detection, enhanced prompt formatting
-
----
-
-**Next Steps**: Proceed with creating the implementation plan and actual hook scripts.
+**Last Updated**: 2026-05-04
+**Current Phase**: All phases complete — v2.9.0
+**Test Status**: 132/132 passing (100%) across 48 categories
+**Next Action**: Edge case testing for deeply nested parens in `Remove-ControlFlowPrefix`, additional real-world multi-line PowerShell scripts

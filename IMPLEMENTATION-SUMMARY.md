@@ -1,170 +1,130 @@
-# Implementation Summary
+# Implementation Summary — Pre-CLI Hook for Copilot (poc3)
 
-## Files Created
+## Overview
 
-I've successfully implemented the CLI Security Hook for Claude Code with all necessary files and documentation.
+A VS Code Copilot **PreToolUse hook** (`pre-cli-hook-copilot.ps1`) that intercepts CLI commands before execution. It analyzes each command against categorized patterns in `cli-commands.json` and returns one of two decisions:
 
-### Core Implementation Files
+- **`allow`** — Auto-execute (all sub-commands confirmed read-only)
+- **`ask`** — Prompt user for approval (modifying operation detected)
 
-1. **cli-commands.json** (6,868 bytes)
-   - Comprehensive configuration of read-only and modifying commands
-   - Covers Unix/Linux, AWS CLI, PowerShell, Docker, Terraform, and Kubernetes
-   - Settings for prompt behavior and logging
+## Architecture
 
-2. **pre-cli-hook.sh** (7,235 bytes, executable)
-   - Main hook script that analyzes commands
-   - Auto-approves read-only operations
-   - Denies modifying operations (prompts for approval)
-   - Handles command chaining
-   - Requires jq for JSON parsing
+```
+Copilot PreToolUse event
+        │
+        ▼
+  JSON via stdin ───▶ pre-cli-hook-copilot.ps1 ───▶ JSON to stdout
+        │                    │                          │
+        │            cli-commands.json            { permissionDecision:
+        │            (patterns/config)              "allow" | "ask" }
+```
 
-### Documentation Files
+### Decision Pipeline (Get-CommandDecision)
 
-3. **requirements.md** (10,719 bytes)
-   - Comprehensive requirements document
-   - Covers all tool categories and command patterns
-   - Implementation phases and testing strategy
-   - Security considerations
+1. **Empty command** → allow
+2. **File redirections** (`>`, `>>`, `1>`) → ask (exception: `2>&1`, `2>/dev/null` → allow)
+3. **Trusted scripts** → allow (configured via `trusted_script_files`)
+4. **Script execution** (`./script.sh`, `bash deploy.sh`, `python migrate.py`, etc.) → ask
+5. **SSH commands** → extract remote command from quotes, analyze sub-commands
+6. **PowerShell blocks** → extract individual cmdlets from `{ }` blocks and `;`/`n` separators
+7. **Chained commands** (`&&`, `||`, `|`, `;`) → split and analyze each segment
+8. **Single commands** → check read-only vs modifying
+9. **Unknown** → ask (safe default)
 
-4. **tests.md** (17,971 bytes)
-   - Detailed installation instructions
-   - Test suites for all supported tools
-   - Troubleshooting guide
-   - Setup verification checklist
+## Supported Tool Categories
 
-### PowerShell Test Project
+| Category | Detection | Examples |
+|----------|-----------|----------|
+| **PowerShell** | Verb-based (Get-, Remove-, etc.) + `{ }` block extraction | `Get-Process`, `Remove-Item`, `if ($x) { ... }` |
+| **AWS CLI** | Regex patterns for read-only vs modifying verbs | `aws ec2 describe-instances`, `aws s3 rm ...` |
+| **Docker** | Subcommand extraction (`docker ps` vs `docker rm`) | `docker ps`, `docker-compose down` |
+| **Terraform** | Subcommand extraction (`plan` vs `apply`) | `terraform plan`, `terraform destroy` |
+| **Git** | Subcommand extraction (single + two-word) | `git status`, `git stash pop` |
+| **kubectl** | Subcommand extraction (single + two-word) | `kubectl get pods`, `kubectl delete pod` |
+| **Linux/Unix** | Base command name lookup | `ls`, `cat`, `grep` (read-only); `rm`, `mv`, `chmod` (modifying) |
+| **DOS/CMD** | Base command name lookup + `cmd /c` wrapper | `dir`, `type` (read-only); `del`, `rmdir` (modifying) |
+| **SSH** | Remote command extraction and sub-analysis | `ssh user@host "cat /var/log/app.log"` |
+| **Scripts** | Regex patterns (`./script.sh`, `bash`, `python`, `node`, etc.) | Always ask unless in trusted list |
 
-5. **powershell-test/README.md** (3,285 bytes)
-   - Project overview and test coverage
-   - Usage instructions
-   - Sample commands for testing
+## Key Algorithm: PowerShell Block Extraction
 
-6. **powershell-test/Test-Hook.ps1** (6,100 bytes, executable)
-   - Automated test script with three sections:
-     - Read-only command tests
-     - Modifying command tests
-     - Command chaining tests
-   - Validates hook behavior
-   - Automatic cleanup
-
-7. **test-powershell.ps1** (3,285 bytes)
-   - Standalone quick test script
-   - Tests basic PowerShell commands
-   - Good for quick verification
-
-## Installation Summary
-
-### Quick Install Steps
-
-1. **Install dependencies** (REQUIRED):
-   ```bash
-   # Linux/macOS
-   brew install jq  # or apt-get install jq
-
-   # Windows
-   # Download jq from https://stedolan.github.io/jq/download/
-   ```
-
-2. **Create directories**:
-   ```bash
-   mkdir -p ~/.claude/hooks
-   ```
-
-3. **Copy files** (from poc6 directory):
-   ```bash
-   cp cli-commands.json ~/.claude/cli-commands.json
-   cp pre-cli-hook.sh ~/.claude/hooks/pre-cli-hook.sh
-   chmod +x ~/.claude/hooks/pre-cli-hook.sh
-   ```
-
-4. **Configure Claude Code**:
-   Add to ~/.claude/settings.json:
-   ```json
-   {
-     "hooks": {
-       "PreToolUse": [
-         {
-           "matcher": "Bash",
-           "hooks": [
-             {
-               "type": "command",
-               "command": "bash ~/.claude/hooks/pre-cli-hook.sh",
-               "timeout": 5
-             },
-             {
-               "type": "prompt",
-               "prompt": "Analyze CLI command: $TOOL_INPUT",
-               "timeout": 15
-             }
-           ]
-         }
-       ]
-     }
-   }
-   ```
-
-5. **Restart Claude Code**:
-   ```bash
-   /exit  # Then restart
-   ```
-
-## Testing Instructions
-
-### Option 1: Run PowerShell Test Project
+The most complex part of the hook. PowerShell commands can contain control flow blocks with `{ }` that hide modifying cmdlets:
 
 ```powershell
-cd "C:\git\claudecode\poc6\powershell-test"
-.\Test-Hook.ps1
+while($true) {if (-not $cred) { get-content a.txt`n} Remove-Item b.txt; exit 1 }; Enter-PSSession ...
 ```
 
-This comprehensive test covers:
-- Read-only commands (should auto-approve)
-- Modifying commands (should prompt)
-- Command chaining behavior
-- Automatic cleanup
+### Stack-Based Extraction (v2.4.0+)
 
-### Option 2: Quick Manual Test
+`Extract-CmdletsFromScriptBlocks` uses a non-recursive, 4-phase stack algorithm:
 
-```bash
-# These should auto-approve
-ls -la
-pwd
-echo "test"
+1. **Find ALL `{ }` pairs** via stack matching, process innermost first
+2. **Split block contents by `;`** once (after ALL blocks extracted, not during)
+3. **Split remaining line** (without blocks) by `;`
+4. **Combine** block cmdlets + remaining segments into a single `;`-separated string
 
-# This should prompt
-touch test.txt
-rm test.txt
+`Remove-ControlFlowPrefix` then strips `if (...)`, `while (...)`, `foreach (...)`, `else`, `do`, `}` remnants from each segment, exposing the actual cmdlet for analysis.
+
+### Multi-line Support (v2.5.0)
+
+`Extract-CmdletsFromScriptBlocks` runs on the FULL command BEFORE `n` splitting. This ensures `{ }` blocks spanning multiple `n`-separated lines are extracted correctly. `n` in block contents is cleaned (replaced with space).
+
+### Pipe/Chain Handling in PowerShell (v2.8.0+)
+
+`Test-IsPowerShellModifying` splits piped/chained commands (`|`, `&&`, `||`) and checks each segment independently. This prevents cases like `get-content a.txt | Remove-Item b.txt` from being missed (the `Get-` prefix would otherwise short-circuit the check).
+
+## Configuration: cli-commands.json
+
+All patterns are externalized into `cli-commands.json` (v2.9.0). No patterns are hardcoded in the hook script.
+
+Sections:
+- `script_patterns` — regex for script execution detection
+- `ssh_pattern` — SSH command detection
+- `aws_read_only_patterns` / `aws_modifying_patterns` — AWS CLI regex
+- `linux_read_only_commands` / `linux_modifying_commands` — Linux command lists
+- `powershell_read_only_verbs` / `powershell_modifying_verbs` — PowerShell verb lists
+- `docker_read_only_commands` / `docker_modifying_commands` — Docker subcommands
+- `terraform_read_only_commands` / `terraform_modifying_commands` — Terraform subcommands
+- `git_read_only_commands` / `git_modifying_commands` — Git subcommands
+- `kubectl_read_only_commands` / `kubectl_modifying_commands` — kubectl subcommands
+- `dos_read_only_commands` / `dos_modifying_commands` — DOS/CMD commands
+- `trusted_script_files` — scripts that bypass the script-execution check
+
+## Test Framework
+
+- **Test file**: `test-commands.txt` — one test per line, format `Y/N;Category;Command;Description`
+- **Test runner**: `test-runner-copilot.ps1` — reads test file, sends each command as JSON stdin to the hook, compares expected vs actual decision
+- **Debug input**: `debug-input.json` — sample Copilot hook payload for `-DebugInputFile` parameter
+
+## Version History
+
+| Version | Change |
+|---------|--------|
+| v2.4.0 | Stack-based `Extract-CmdletsFromScriptBlocks` (replaced recursive approach) |
+| v2.5.0 | Multi-line `{ }` block support via `n` handling |
+| v2.6.0 | Trusted script files mechanism |
+| v2.7.0 | Segment trimming before `Remove-ControlFlowPrefix` + `originalHadBlocks` check |
+| v2.8.0 | `Test-IsPowerShellModifying` pipe handling (`\|`) |
+| v2.9.0 | Extended chain operator handling (`&&`, `\|\|`) in PowerShell block analysis + full test coverage |
+
+## Test Results (Current)
+
+```
+Total Tests: 132
+Passed: 132 (100%)
+Failed: 0
+Categories: 48 (all at 100%)
 ```
 
-### Option 3: Docker/AWS Tests
+## Files
 
-See tests.md for domain-specific test commands.
-
-## Key Features Implemented
-
-✅ **Read-Only Detection**: Auto-approves 100+ commands across 6 tool categories
-✅ **Modifying Detection**: Identifies dangerous operations requiring approval
-✅ **Command Chains**: Parses &&, ||, |, ; operators
-✅ **Detailed Prompts**: Shows analysis and impact preview
-✅ **Global Hook**: Affects all projects (as requested)
-✅ **Configurable**: JSON-based configuration for easy customization
-✅ **Security**: Safe defaults, timeout handling, command injection prevention
-✅ **PowerShell Support**: Dedicated test project for Windows validation
-✅ **Documentation**: Comprehensive guides for installation and testing
-
-## Next Steps
-
-1. **Test immediately**: Run the PowerShell test project
-2. **Customize**: Add your frequently used commands to cli-commands.json
-3. **Expand**: Add more tools or command patterns as needed
-4. **Log**: Enable logging to track approvals/denials
-5. **Iterate**: Adjust based on your workflow
-
-## Notes
-
-- The hook requires **jq** to be installed (Windows users need to download it)
-- The hook script is currently Bash-focused; PowerShell commands use the prompt hook
-- Configuration file can be extended with team-specific commands
-- Logs are optional and can be enabled in cli-commands.json
-
-All files are ready for use in the poc6 project directory!
+| File | Purpose |
+|------|---------|
+| `pre-cli-hook-copilot.ps1` | Main hook script (~1300 lines) |
+| `cli-commands.json` | Configuration with all command patterns |
+| `test-commands.txt` | 132 test cases across all categories |
+| `test-runner-copilot.ps1` | Automated test runner |
+| `debug-input.json` | Sample hook input for debugging |
+| `requirements.md` | Full requirements documentation |
+| `current.md` | Technical deep-dive on algorithms and fixes |
+| `problem.md` | Original bug analysis (PowerShell block extraction) |

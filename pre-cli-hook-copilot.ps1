@@ -71,6 +71,7 @@ $KubectlReadOnlyCmds    = @($config.kubectl_read_only_commands)
 $KubectlModifyingCmds   = @($config.kubectl_modifying_commands)
 $DOSReadOnlyCommands    = @($config.dos_read_only_commands)
 $DOSModifyingCommands   = @($config.dos_modifying_commands)
+$TrustedScriptFiles     = if ($config.trusted_script_files) { @($config.trusted_script_files) } else { @() }
 
 # ================================================
 # Logging
@@ -156,6 +157,7 @@ function Test-IsScriptExecution {
     .DESCRIPTION
     Scripts are unknown code requiring manual approval. Tests patterns like:
     ./script.sh, bash deploy.sh, python migrate.py, node server.js, etc.
+    Trusted scripts (in trusted_script_files config) override this check.
     Always returns modifying behavior for safety.
     .PARAMETER Command
     The command string to analyze.
@@ -163,8 +165,36 @@ function Test-IsScriptExecution {
     [bool] $true if command executes a script; $false otherwise.
     #>
     param([string]$Command)
+    # Check trusted scripts first — if filename is trusted, this is NOT a script execution
+    if (Test-IsTrustedScript $Command) { return $false }
     foreach ($pattern in $ScriptPatterns) {
         if ($Command -match $pattern) { return $true }
+    }
+    return $false
+}
+
+function Test-IsTrustedScript {
+    <#
+    .SYNOPSIS
+    Check if a command references a trusted script file (auto-approve).
+    .DESCRIPTION
+    Reads the trusted_script_files list from cli-commands.json. If the command
+    string contains any trusted filename (case-insensitive substring match),
+    the script is considered trusted and will be auto-approved.
+    
+    This allows testing/debugging scripts to run without prompting, without
+    modifying the core script_patterns detection logic.
+    
+    To disable: remove the trusted_script_files entry from cli-commands.json.
+    .PARAMETER Command
+    The command string to check.
+    .OUTPUTS
+    [bool] $true if command references a trusted script; $false otherwise.
+    #>
+    param([string]$Command)
+    if (-not $TrustedScriptFiles -or $TrustedScriptFiles.Count -eq 0) { return $false }
+    foreach ($trusted in $TrustedScriptFiles) {
+        if ($Command -match [regex]::Escape($trusted)) { return $true }
     }
     return $false
 }
@@ -525,13 +555,65 @@ function Test-IsDOSCommand {
     return $allDosCommands -contains $cmdName
 }
 
+function Remove-ControlFlowPrefix {
+    <#
+    .SYNOPSIS
+    Strip PowerShell control flow remnants from a command segment.
+    .DESCRIPTION
+    After extracting { } blocks, control flow keywords and closing braces
+    may remain prepended to cmdlets. This function strips them so the
+    actual cmdlet can be analyzed.
+    
+    Handles patterns like:
+    - if (...) Remove-Item x   →  Remove-Item x
+    - } Remove-Item x          →  Remove-Item x
+    - while(...) Get-Process   →  Get-Process
+    - else Remove-Item x       →  Remove-Item x
+    - do Get-Process           →  Get-Process
+    .PARAMETER Segment
+    The command segment to clean.
+    .OUTPUTS
+    [string] The segment with control flow prefixes stripped.
+    #>
+    param([string]$Segment)
+
+    $cleaned = $Segment
+
+    # Strip do/else (simple keywords without parens)
+    $cleaned = $cleaned -replace '^(?:do|else|then)\s+', ''
+
+    # Strip control flow keywords with condition: if (...), while (...), foreach (...), for (...), elseif (...), switch (...), until (...)
+    # Use a balanced-paren approach: match keyword + (...)+ with arbitrary nesting
+    $cleaned = $cleaned -replace '^(?:if|elseif|while|foreach|for|switch|until)\s*(\(((?:[^()]|\((?<Depth>)|\)(?<-Depth>))*(?(Depth)(?!))\))\s*)+', ''
+
+    # Strip stray } at start (closing braces from removed blocks)
+    $cleaned = $cleaned -replace '^}\s*', ''
+
+    # Strip leading/trailing whitespace and semicolons
+    $cleaned = $cleaned.Trim()
+    $cleaned = $cleaned -replace '^;\s*', ''
+    $cleaned = $cleaned -replace '\s*;$', ''
+
+    return $cleaned
+}
+
 function Extract-PowerShellCommands {
     <#
     .SYNOPSIS
     Extract individual PowerShell cmdlets from a command string.
     .DESCRIPTION
     Handles multi-line blocks separated by backtick-n (`n), semicolons,
-    and strips comments. Returns array of individual cmdlets.
+    and strips comments. Also extracts cmdlets from { } blocks inside
+    if/foreach/while/do/switch/etc statements and regex operators.
+    
+    CRITICAL: Block extraction happens FIRST on the full command string,
+    before splitting by `n. This ensures { } blocks that span multiple
+    lines are properly extracted.
+    
+    After extraction, control flow remnants (if (...), while (...), }, etc.)
+    are stripped so the actual cmdlets can be analyzed.
+    
+    Returns array of individual cmdlets.
     .PARAMETER Command
     The PowerShell command string to parse.
     .OUTPUTS
@@ -541,28 +623,149 @@ function Extract-PowerShellCommands {
 
     $commands = @()
 
-    # STEP 1: Split by PowerShell's backtick-n line separator
-    $lines = $Command -split '`n'
+    # STEP 1: Extract ALL { } blocks from the ENTIRE command FIRST
+    # This must happen BEFORE `n splitting since blocks can span `n lines
+    $processed = Extract-CmdletsFromScriptBlocks $Command
+
+    # STEP 2: Split by `n line separator
+    $lines = $processed -split '`n'
 
     foreach ($line in $lines) {
         $trimmedLine = $line.Trim()
         if (-not $trimmedLine) { continue }
 
-        # STEP 2: Remove inline comments (# to end of line)
+        # STEP 3: Remove inline comments (# to end of line)
         $trimmedLine = $trimmedLine -replace '\s+#.*$', ''
         if ($trimmedLine -match '^#') { continue }
 
-        # STEP 3: Split by semicolons for inline cmdlet separation
+        # STEP 4: Split by semicolons for inline cmdlet separation
         $segments = $trimmedLine -split ';'
         foreach ($seg in $segments) {
-            $trimmedSeg = $seg.Trim()
-            if ($trimmedSeg) {
-                $commands += $trimmedSeg
+            # STEP 5: Strip control flow remnants, then trim
+            $cleaned = Remove-ControlFlowPrefix ($seg.Trim())
+            if ($cleaned) {
+                $commands += $cleaned
             }
         }
     }
 
     return $commands
+}
+
+function Extract-CmdletsFromScriptBlocks {
+    <#
+    .SYNOPSIS
+    Extract cmdlets from { } script blocks within a line using stack-based extraction.
+    .DESCRIPTION
+    PowerShell allows inline script blocks in control flow statements like:
+    - if ($x) { Remove-Item a.txt; Stop-Process b }
+    - foreach ($i in 1..10) { Copy-Item a b }
+    - while(true) { if ($x) { remove-item a.txt } }
+    - Get-Process | Where-Object { $_.CPU -gt 100 }
+
+    Algorithm (stack-based, non-recursive):
+    1. Find ALL matched { } pairs using a stack
+    2. Process innermost blocks FIRST (no { inside), extract their content
+    3. Remove each processed block from the line
+    4. Repeat until no blocks remain
+    5. Split ALL block contents by semicolons (once, after extraction)
+    6. Split remaining line (without blocks) by semicolons
+    7. Return everything as a single ;-separated string
+
+    KEY INSIGHT: Don't split by semicolons until ALL block extraction is complete.
+    This prevents the doubling bug from the old recursive approach.
+
+    .PARAMETER Line
+    The PowerShell line that may contain script blocks.
+    .OUTPUTS
+    [string] A ;-separated string of all extracted cmdlets and remaining segments.
+    #>
+    param([string]$Line)
+
+    $lineWithoutBlocks = $Line
+    $blockContents = @()     # Raw content of each extracted block
+    $maxIterations = 50
+    $iteration = 0
+
+    # Phase 1: Extract ALL blocks, innermost first
+    while ($lineWithoutBlocks.Contains('{') -and $iteration -lt $maxIterations) {
+        $iteration++
+
+        # Build stack of all matched { } pairs
+        $stack = @()
+        $pairs = @()
+        for ($i = 0; $i -lt $lineWithoutBlocks.Length; $i++) {
+            if ($lineWithoutBlocks[$i] -eq '{') {
+                $stack += $i
+            }
+            elseif ($lineWithoutBlocks[$i] -eq '}') {
+                if ($stack.Count -gt 0) {
+                    $openPos = $stack[-1]
+                    # Pop: remove last element properly (avoid [0..-1] edge case)
+                    if ($stack.Count -gt 1) {
+                        $stack = $stack[0..($stack.Count - 2)]
+                    } else {
+                        $stack = @()
+                    }
+                    $pairs += [PSCustomObject]@{ Open = $openPos; Close = $i }
+                }
+            }
+        }
+
+        if ($pairs.Count -eq 0) { break }
+
+        # Find innermost pair(s): those with no { inside their content
+        # Process them from right-to-left (innermost first)
+        $pairs = $pairs | Sort-Object Open -Descending
+        $found = $false
+
+        foreach ($pair in $pairs) {
+            $innerContent = $lineWithoutBlocks.Substring($pair.Open + 1, $pair.Close - $pair.Open - 1)
+            if (-not $innerContent.Contains('{')) {
+                # Innermost block — extract content as-is (don't split yet!)
+                $blockContents += $innerContent
+                # Remove this block from the line
+                $lineWithoutBlocks = $lineWithoutBlocks.Substring(0, $pair.Open) + $lineWithoutBlocks.Substring($pair.Close + 1)
+                $found = $true
+                break  # Restart while loop with updated line
+            }
+        }
+
+        if (-not $found) { break }
+    }
+
+    # Phase 2: Split block contents by semicolons (once!)
+    # Also clean up `n line continuations that may appear in block content
+    $allCmdlets = @()
+    foreach ($block in $blockContents) {
+        # Replace `n with space (blocks spanning lines get their `n cleaned here)
+        $cleanBlock = $block -replace '`n', ' '
+        if ($cleanBlock.Contains(';')) {
+            $subs = @($cleanBlock -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            $allCmdlets += $subs
+        }
+        else {
+            $trimmed = $cleanBlock.Trim()
+            if ($trimmed) { $allCmdlets += $trimmed }
+        }
+    }
+
+    # Phase 3: Split remaining line (without blocks) by semicolons
+    $remaining = @()
+    if ($lineWithoutBlocks.Contains(';')) {
+        $remaining = @($lineWithoutBlocks -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+    elseif ($lineWithoutBlocks.Trim()) {
+        $remaining = @($lineWithoutBlocks.Trim())
+    }
+
+    # Phase 4: Combine — block cmdlets first, then remaining segments
+    $allParts = $allCmdlets + $remaining
+
+    if ($allParts.Count -gt 0) {
+        return ($allParts -join '; ')
+    }
+    return $lineWithoutBlocks
 }
 
 function Test-IsPowerShellReadOnly {
@@ -590,6 +793,7 @@ function Test-IsPowerShellModifying {
     Detect PowerShell modifying cmdlets (Remove-*, New-*, Set-*, Copy-*, etc).
     .DESCRIPTION
     Checks if cmdlet starts with verb known to modify system state.
+    Handles piped commands (|) by checking each pipe segment independently.
     Examples: Remove-Item, Stop-Service, New-ItemProperty, etc.
     IMPORTANT: Read-only verbs take precedence. If a command matches both a read-only
     and modifying verb (e.g., "Set-Location"), return $false (read-only wins).
@@ -599,6 +803,30 @@ function Test-IsPowerShellModifying {
     [bool] $true if cmdlet verb is in modifying list; $false otherwise.
     #>
     param([string]$Command)
+
+    # Handle piped/chained commands: check each segment independently.
+    # "get-content a.txt | Remove-Item b.txt" — the first segment is read-only
+    # but the second is modifying, so the whole command is modifying.
+    # Also handles && (AND) and || (OR) chain operators (PowerShell 7+).
+    # ; is already split by Extract-PowerShellCommands before this function.
+    # & is the call operator in PowerShell, NOT a chain operator — do NOT split on it.
+    if ($Command -match '\|\||&&|\|') {
+        $segments = $Command -split '\|\||&&|\|'
+        foreach ($seg in $segments) {
+            $trimmed = $seg.Trim()
+            if (-not $trimmed) { continue }
+            $isReadOnly = $false
+            foreach ($verb in $PSReadOnlyVerbs) {
+                if ($trimmed -match "^$verb") { $isReadOnly = $true; break }
+            }
+            if ($isReadOnly) { continue }
+            foreach ($verb in $PSModifyingVerbs) {
+                if ($trimmed -match "^$verb") { return $true }
+            }
+        }
+        return $false
+    }
+
     # Read-only verbs take precedence over modifying verbs
     # This allows exceptions like Set-Location to be read-only
     foreach ($verb in $PSReadOnlyVerbs) {
@@ -632,6 +860,79 @@ function Extract-SSHRemoteCommand {
     if ($Command -match '"(.+)"') { return $Matches[1] }
     if ($Command -match "'(.+)'") { return $Matches[1] }
     return $null
+}
+
+function Extract-BashBlockCommands {
+    <#
+    .SYNOPSIS
+    Extract commands from bash bracket structures (if, for, while, case, etc).
+    .DESCRIPTION
+    Bash allows control flow structures with brackets:
+    - if [ condition ]; then ...; fi
+    - for var in ...; do ...; done
+    - while [ condition ]; do ...; done
+    - case $var in ...) ... ;; esac
+    
+    This function extracts commands from these block structures so they can be
+    analyzed independently. Handles ARBITRARY nesting levels.
+    .PARAMETER Command
+    The bash command string that may contain bracket structures.
+    .OUTPUTS
+    [string[]] Array of individual commands extracted from blocks.
+    #>
+    param([string]$Command)
+    
+    $extracted = @()
+    
+    # Patterns for bash control structures
+    # if [ condition ]; then BODY fi
+    # for x in ...; do BODY done
+    # while [ condition ]; do BODY done
+    # case $var in PATTERN) BODY ;; esac
+    
+    # Pattern: if statements - extract body between then and fi
+    $ifPattern = 'if\s+\[.*?\]\s*;\s*then\s+(.*?)\s+fi'
+    foreach ($match in [regex]::Matches($Command, $ifPattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+        $body = $match.Groups[1].Value
+        $extracted += $body -split ';'
+    }
+    
+    # Pattern: for loops - extract body between do and done
+    $forPattern = 'for\s+\w+\s+in\s+.*?;\s*do\s+(.*?)\s+done'
+    foreach ($match in [regex]::Matches($Command, $forPattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+        $body = $match.Groups[1].Value
+        $extracted += $body -split ';'
+    }
+    
+    # Pattern: while loops - extract body between do and done
+    $whilePattern = 'while\s+\[.*?\]\s*;\s*do\s+(.*?)\s+done'
+    foreach ($match in [regex]::Matches($Command, $whilePattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+        $body = $match.Groups[1].Value
+        $extracted += $body -split ';'
+    }
+    
+    # Pattern: case statements - extract body between ) and ;; or esac
+    $casePattern = 'case\s+\$?\w+\s+in\s+(.*?)\s+esac'
+    foreach ($match in [regex]::Matches($Command, $casePattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+        $body = $match.Groups[1].Value
+        # Split by ;; to get individual case patterns
+        $cases = $body -split ';;'
+        foreach ($c in $cases) {
+            # Extract command after )
+            if ($c -match '\)(.*)') {
+                $extracted += $Matches[1].Trim()
+            }
+        }
+    }
+    
+    # Clean up and return
+    $result = @()
+    foreach ($cmd in $extracted) {
+        $trimmed = $cmd.Trim()
+        if ($trimmed) { $result += $trimmed }
+    }
+    
+    return $result
 }
 
 function Split-ChainedCommands {
@@ -826,12 +1127,18 @@ function Get-CommandDecision {
     $testCmd = $Command -replace '2>&1', ''  # Remove safe stderr->stdout redirect
     $testCmd = $testCmd -replace '2>/dev/null', ''  # Remove stderr to /dev/null
 
-    # if ($testCmd -match '(?<!&)>\s*\w' -or $testCmd -match '>>\s*\w' or $testCmd -match '1>\s*\w') {
+    # if ($testCmd -match '(?<!&)>\s*\w' -or $testCmd -match '>>\s*\w' -or $testCmd -match '1>\s*\w') {
     if ($testCmd -match '(?:^|\s)(?:\d+)?>>?\s+[a-zA-Z./~\\]') {
         return @{ decision = "ask"; reason = "REDIRECT: Command contains file output redirection (modifying)" }
     }
 
-    # Script execution - always ask
+    # Trusted scripts — auto-approve regardless of classification
+    # (configured via trusted_script_files in cli-commands.json)
+    if (Test-IsTrustedScript $Command) {
+        return @{ decision = "allow"; reason = "TRUSTED_SCRIPT: Script file is in trusted list" }
+    }
+
+    # Script execution - always ask (unless trusted)
     if (Test-IsScriptExecution $Command) {
         return @{ decision = "ask"; reason = "EXECUTES_SCRIPT: Executes external script (unknown code)" }
     }
@@ -842,12 +1149,27 @@ function Get-CommandDecision {
         if (-not $remote) {
             return @{ decision = "ask"; reason = "SSH_INCOMPLETE: SSH command without quoted remote command" }
         }
+        
         $notReadOnly = @()
-        foreach ($sub in (Split-ChainedCommands $remote)) {
-            # Require each sub-command to be EXPLICITLY read-only.
-            # Unknown commands (not in either list) are treated as unsafe.
-            if (-not (Test-IsReadOnly $sub)) { $notReadOnly += $sub }
+        
+        # First, extract commands from bash bracket structures (if, for, while, case)
+        $blockCmds = Extract-BashBlockCommands $remote
+        foreach ($sub in $blockCmds) {
+            $trimmed = $sub.Trim()
+            if (-not $trimmed) { continue }
+            # Check if this sub-command is read-only
+            if (-not (Test-IsReadOnly $trimmed)) { $notReadOnly += $trimmed }
         }
+        
+        # Also check the chained commands at the top level
+        foreach ($sub in (Split-ChainedCommands $remote)) {
+            $trimmed = $sub.Trim()
+            if (-not $trimmed) { continue }
+            # Skip if already checked in block extraction
+            if ($blockCmds -contains $trimmed) { continue }
+            if (-not (Test-IsReadOnly $trimmed)) { $notReadOnly += $trimmed }
+        }
+        
         if ($notReadOnly.Count -gt 0) {
             return @{ decision = "ask"; reason = "SSH_MODIFIES: Remote command is not confirmed read-only: $($notReadOnly -join '|')" }
         }
@@ -855,19 +1177,24 @@ function Get-CommandDecision {
     }
 
     # PowerShell code blocks — extract individual cmdlets and analyze each
+    # If the command contains { } blocks, it's structured PowerShell — analyze
+    # extracted cmdlets even if only one remains after control flow stripping
+    $originalHadBlocks = $Command.Contains('{') -and $Command.Contains('}')
     $psCmdlets = Extract-PowerShellCommands $Command
-    if ($psCmdlets.Count -gt 1) {
+    if ($psCmdlets.Count -gt 1 -or ($originalHadBlocks -and $psCmdlets.Count -gt 0)) {
         $modifyingCmds = @()
         foreach ($cmdlet in $psCmdlets) {
             # Check if this cmdlet is a DOS command
             if (Test-IsDOSCommand $cmdlet) {
                 if (Test-IsDOSModifying $cmdlet) {
                     $modifyingCmds += "[DOS] $cmdlet"
+                    break # No need to check further if we already found a modifying cmdlet
                 }
             }
             # Check if this cmdlet is a modifying PowerShell cmdlet
             elseif (Test-IsPowerShellModifying $cmdlet) {
                 $modifyingCmds += $cmdlet
+                break # No need to check further if we already found a modifying cmdlet
             }
         }
         if ($modifyingCmds.Count -gt 0) {
@@ -981,7 +1308,7 @@ if ([string]::IsNullOrWhiteSpace($cmdToAnalyze)) {
 
 # Log extracted fields
 $logCmd = $cmdToAnalyze.Substring(0, [Math]::Min(2048, $cmdToAnalyze.Length))
-Write-Log "PARSE" "tool=$toolName cmd=$logCmd"
+Write-Log "PARSE" "tool=$toolName cmd=[$logCmd]"
 
 # Run analysis
 $decision = Get-CommandDecision $cmdToAnalyze
