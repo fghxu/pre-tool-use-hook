@@ -1265,9 +1265,9 @@ if ($DebugInputFile) {
 }
 
 # Log raw payload (truncated)
-$rawTrimmed = if ($stdinRaw.Length -gt 2048) { $stdinRaw.Substring(0, 2048) + "..." } else { $stdinRaw }
-$rawClean = $rawTrimmed -replace "`n", " " -replace "`r", ""
-Write-Log "DEBUG" "RAW=$rawClean"
+#$rawTrimmed = if ($stdinRaw.Length -gt 2048) { $stdinRaw.Substring(0, 2048) + "..." } else { $stdinRaw }
+#$rawClean = $rawTrimmed -replace "`n", " " -replace "`r", ""
+#Write-Log "DEBUG" "RAW=$rawClean"
 
 # Also dump full payload for inspection
 if ($script:logFile) {
@@ -1308,7 +1308,8 @@ if ([string]::IsNullOrWhiteSpace($cmdToAnalyze)) {
 
 # Log extracted fields
 $logCmd = $cmdToAnalyze.Substring(0, [Math]::Min(2048, $cmdToAnalyze.Length))
-Write-Log "PARSE" "tool=$toolName cmd=[$logCmd]"
+$logCmd = "---[$logCmd]---"  #easier to spot in log
+#Write-Log "PARSE" "tool=$toolName cmd=$logCmd"
 
 # Run analysis
 $decision = Get-CommandDecision $cmdToAnalyze
