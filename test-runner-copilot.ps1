@@ -133,8 +133,19 @@ foreach ($line in $lines) {
 
     $expectedFlag = $parts[0]
     $category = $parts[1]
-    $command = $parts[2]
-    $description = if ($parts.Count -ge 4) { $parts[3] } else { "" }
+    # When command contains ; characters, join the middle parts back together.
+    # Format: Flag;Category;Command;Description
+    # If there are more than 4 parts, parts[2..N-2] = command, parts[-1] = description
+    if ($parts.Count -gt 4) {
+        $command = $parts[2..($parts.Count - 2)] -join ';'
+        $description = $parts[-1]
+    } elseif ($parts.Count -eq 4) {
+        $command = $parts[2]
+        $description = $parts[3]
+    } else {
+        $command = $parts[2]
+        $description = ""
+    }
 
     $TestResults.Total++
 

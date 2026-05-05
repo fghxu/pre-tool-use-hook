@@ -33,8 +33,15 @@ Implement a VS Code Copilot PreToolUse hook that intercepts CLI commands, auto-a
 - `test-runner-copilot.ps1`: automated runner — builds Copilot-format JSON, pipes to hook, compares expected vs actual
 - `debug-input.json`: sample payload for `-DebugInputFile` debugging
 
-### Test Results: 132/132 PASSING (100%)
-All 48 categories at 100%:
+### v2.9.0 — Conda Support & PS Block Fix (2026-05-04)
+- Added `conda_read_only_commands` and `conda_modifying_commands` to `cli-commands.json`
+- Added `Test-IsCondaReadOnly`/`Test-IsCondaModifying` functions, integrated into type detection
+- Fixed `Get-CommandDecision` PS block analysis: replaced DOS+PS-only checks with `Test-IsModifying` to catch script executions within PowerShell blocks (e.g., `python`, `bash`, `conda run`)
+- Added command-type guard: only actual PowerShell commands or commands with `{}` blocks enter PS block analysis path; other commands with `;` fall through to chain analysis
+- Fixed `test-runner-copilot.ps1`: parser now handles `;` within command fields by joining middle parts
+
+### Test Results: 134/134 PASSING (100%)
+All 49 categories at 100%:
 
 | Category | Tests | Status |
 |----------|-------|--------|
@@ -62,14 +69,14 @@ All 48 categories at 100%:
 | DOS cmd /c Wrapper | 4 | 100% |
 | Dollar-Substitution $() | 3 | 100% |
 | Trusted/Untrusted Scripts | 4 | 100% |
+| OneModifying (conda) | 1 | 100% |
 
 ## Current Step
-All 132 tests passing. Hook is feature-complete for all supported tool categories.
+All 134 tests passing. Conda support added, PS block cmdlet analysis fixed to catch script executions.
 
 ## Next Steps
 - Consider edge cases for `Remove-ControlFlowPrefix` with deeply nested parens
 - Add more real-world multi-line PowerShell script examples
-- Performance optimization for large command strings
 
 ## Blockers / Notes
 - `cli-commands.json` regex patterns require double-escaped backslashes (JSON format: `\\s` not `\s`)

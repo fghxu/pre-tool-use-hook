@@ -1,7 +1,7 @@
 {
   "_comment": "CLI Command Patterns for Pre-Tool-Use Hook - Used by pre-cli-hook.ps1 and pre-cli-hook-copilot.ps1",
-  "version": "2.8.0",
-  "_note": "v2.8.0: Fixed Test-IsPowerShellModifying to handle piped commands (|). Each pipe segment checked independently for modifying verbs.",
+  "version": "2.9.0",
+  "_note": "v2.9.0: Added conda command support. Fixed PS block analysis to use Test-IsModifying. Added command-type guard to PS block path.",
 
   "trusted_script_files": [
     "test-runner-copilot.ps1"
@@ -98,8 +98,8 @@
     "Get-", "Test-", "Select-", "Where-", "Measure-", "Find-",
     "Write-", "Read-", "Show-", "Compare-", "Format-", "Out-",
     "ConvertTo-", "ConvertFrom-", "Resolve-", "Search-", "Watch-", 
-    "Set-Location","Enter-PSSession", 
-    "Invoke-Command"
+    "Set-Location","Enter-PSSession", "Start-Sleep",
+    "Invoke-Command","Invoke-RestMethod"
   ],
 
   "powershell_modifying_verbs": [
@@ -195,6 +195,19 @@
     "autoscale", "certificate approve", "certificate deny",
     "config set-context", "config use-context", "config set-cluster",
     "config set-credentials", "config delete-context"
+  ],
+
+  "conda_read_only_commands": [
+    "list", "info", "search", "env list", "config --show",
+    "clean --dry-run", "compare", "notices"
+  ],
+
+  "conda_modifying_commands": [
+    "run", "install", "create", "remove", "update", "clean",
+    "config", "env create", "env remove", "env update",
+    "build", "develop", "pack", "init", "rename",
+    "uninstall", "upgrade", "downgrade", "doctor",
+    "env config", "env export", "content-trust"
   ],
 
   "dos_read_only_commands": [

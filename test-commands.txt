@@ -3,6 +3,10 @@
 # Y = auto-approve, N = manual approval
 # ==================================================
 
+#conda command
+N;OneModifying;conda run -n litellm python -c "import importlib.util as u; print("test")";Second command modifies
+N;Chained_OneModifying;$env:AWS_PROFILE="int"; python test_delete.py;Second command modifies
+
 
 # PowerShell Script Block Tests - Modifying inside { } blocks (N)
 N;PS_Block_Modifying_MultiLine;$serever=\"serveA\"`nwhile($true) {if (-not $cred) { remove-item a.txt`n} Remove-Item b.txt ; exit 1 }; Enter-PSSession -ComputerName $server -Credential $cred;Multi-line blocks with `n - Remove-Item in nested blocks
@@ -95,6 +99,7 @@ Y;Chained_ReadOnly;pwd && ls;Two read-only commands
 Y;Chained_ReadOnly;cat file.txt | grep "error";Pipe read-only commands
 Y;Chained_ReadOnly;echo "test" && echo "done";Echo commands (read-only)
 
+
 # Chained Commands - With One Modifying (N)
 N;Chained_OneModifying;ls && touch file.txt;Second command modifies
 N;Chained_OneModifying;cat file.txt && rm file.txt;Read then delete
@@ -149,6 +154,14 @@ Y;PS_MultiLine_ReadOnly;Get-Location`nGet-Date`nWrite-Host Done;Three read-only 
 # PowerShell Multi-line blocks (using `n separator) - Modifying (N)
 N;PS_MultiLine_Modifying;Get-Process`nStop-Process -Name Notepad;Read then stop process
 N;PS_MultiLine_Modifying;Get-ChildItem`nRemove-Item test.txt;List then delete
+
+# PowerShell Multi-line blocks (using \n separator) - Read-Only (Y)
+Y;PS_MultiLine_BSlashN_ReadOnly;Get-Process\nGet-Service;Two read-only cmdlets via \n
+Y;PS_MultiLine_BSlashN_ReadOnly;Get-Location\nGet-Date\nWrite-Host Done;Three read-only cmdlets via \n
+
+# PowerShell Multi-line blocks (using \n separator) - Modifying (N)
+N;PS_MultiLine_BSlashN_Modifying;Get-Process\nStop-Process -Name Notepad;Read then stop process via \n
+N;PS_MultiLine_BSlashN_Modifying;Get-ChildItem\nRemove-Item test.txt;List then delete via \n
 
 # PowerShell inline -Command blocks
 Y;PS_InlineCommand_ReadOnly;powershell -Command "Get-Process | Select-Object Name";Inline read-only using pipe

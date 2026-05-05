@@ -69,6 +69,8 @@ $GIT_ReadOnlyCommands = @($config.git_read_only_commands)
 $GIT_ModifyingCommands = @($config.git_modifying_commands)
 $KubectlReadOnlyCmds    = @($config.kubectl_read_only_commands)
 $KubectlModifyingCmds   = @($config.kubectl_modifying_commands)
+$CondaReadOnlyCmds      = @($config.conda_read_only_commands)
+$CondaModifyingCmds     = @($config.conda_modifying_commands)
 $DOSReadOnlyCommands    = @($config.dos_read_only_commands)
 $DOSModifyingCommands   = @($config.dos_modifying_commands)
 $TrustedScriptFiles     = if ($config.trusted_script_files) { @($config.trusted_script_files) } else { @() }
@@ -483,6 +485,63 @@ function Test-IsKubectlModifying {
     return $false
 }
 
+function Test-IsCondaReadOnly {
+    <#
+    .SYNOPSIS
+    Detect conda read-only operations (list, info, search, etc).
+    .DESCRIPTION
+    Extracts conda subcommand and checks if it's read-only.
+    .PARAMETER Command
+    The conda command string to analyze.
+    .OUTPUTS
+    [bool] $true if conda command is read-only; $false otherwise.
+    #>
+    param([string]$Command)
+    if ($Command -match '^conda\s+(.+)$') {
+        $rest = $Matches[1]
+        # Try two-word subcommands first (e.g., "env list", "config --show")
+        if ($rest -match '^(\S+\s+\S+)(?:\s|$)') {
+            $twoWordCmd = $Matches[1]
+            if ($CondaReadOnlyCmds -contains $twoWordCmd) { return $true }
+        }
+        # Then single-word subcommand
+        if ($rest -match '^(\S+)') {
+            $subcmd = $Matches[1]
+            return $CondaReadOnlyCmds -contains $subcmd
+        }
+    }
+    return $false
+}
+
+function Test-IsCondaModifying {
+    <#
+    .SYNOPSIS
+    Detect conda modifying operations (run, install, create, etc).
+    .DESCRIPTION
+    Extracts conda subcommand and checks if it modifies state.
+    `conda run` executes arbitrary code and is always modifying.
+    .PARAMETER Command
+    The conda command string to analyze.
+    .OUTPUTS
+    [bool] $true if conda command modifies state; $false otherwise.
+    #>
+    param([string]$Command)
+    if ($Command -match '^conda\s+(.+)$') {
+        $rest = $Matches[1]
+        # Try two-word subcommands first (e.g., "env create", "env remove")
+        if ($rest -match '^(\S+\s+\S+)(?:\s|$)') {
+            $twoWordCmd = $Matches[1]
+            if ($CondaModifyingCmds -contains $twoWordCmd) { return $true }
+        }
+        # Then single-word subcommand
+        if ($rest -match '^(\S+)') {
+            $subcmd = $Matches[1]
+            return $CondaModifyingCmds -contains $subcmd
+        }
+    }
+    return $false
+}
+
 function Test-IsDOSReadOnly {
     <#
     .SYNOPSIS
@@ -602,8 +661,8 @@ function Extract-PowerShellCommands {
     .SYNOPSIS
     Extract individual PowerShell cmdlets from a command string.
     .DESCRIPTION
-    Handles multi-line blocks separated by backtick-n (`n), semicolons,
-    and strips comments. Also extracts cmdlets from { } blocks inside
+    Handles multi-line blocks separated by backtick-n (`n) or backslash-n (\n),
+    semicolons, and strips comments. Also extracts cmdlets from { } blocks inside
     if/foreach/while/do/switch/etc statements and regex operators.
     
     CRITICAL: Block extraction happens FIRST on the full command string,
@@ -623,11 +682,16 @@ function Extract-PowerShellCommands {
 
     $commands = @()
 
+    # Normalize all line separators to `n literal text:
+    #   - Real newline chars (from JSON \n decoding) -> `n
+    #   - \n literal text (from debug input files)    -> `n
+    $Command = $Command.Replace("`n", '`n').Replace('\n', '`n')
+
     # STEP 1: Extract ALL { } blocks from the ENTIRE command FIRST
     # This must happen BEFORE `n splitting since blocks can span `n lines
     $processed = Extract-CmdletsFromScriptBlocks $Command
 
-    # STEP 2: Split by `n line separator
+    # STEP 2: Split by `n line separator (literal backtick-n text)
     $lines = $processed -split '`n'
 
     foreach ($line in $lines) {
@@ -735,11 +799,12 @@ function Extract-CmdletsFromScriptBlocks {
     }
 
     # Phase 2: Split block contents by semicolons (once!)
-    # Also clean up `n line continuations that may appear in block content
+    # Also clean up `n and \n line continuations that may appear in block content
     $allCmdlets = @()
     foreach ($block in $blockContents) {
-        # Replace `n with space (blocks spanning lines get their `n cleaned here)
-        $cleanBlock = $block -replace '`n', ' '
+        # Replace `n and \n with space (blocks spanning lines get their newlines cleaned here)
+        # Replace real newlines, `n, and \n with space
+        $cleanBlock = $block.Replace("`n", ' ').Replace('`n', ' ').Replace('\n', ' ')
         if ($cleanBlock.Contains(';')) {
             $subs = @($cleanBlock -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
             $allCmdlets += $subs
@@ -1003,6 +1068,7 @@ function Get-CLICommandType {
     if ($cmd -match '^terraform\s+')          { return "Terraform" }
     if ($cmd -match '^git\s+')                { return "Git" }
     if ($cmd -match '^kubectl\s+')           { return "kubectl" }
+    if ($cmd -match '^conda\s+')              { return "Conda" }
     if ($cmd -match '^[A-Z][a-z]+-')          { return "PowerShell" }
     if ($cmd -match '^cmd(?:\.exe)?\s+/c\s+') { return "DOS" }
     $baseCmd = ($cmd -split '\s+')[0].ToLower()
@@ -1040,6 +1106,7 @@ function Test-IsReadOnly {
         "Terraform"  { return Test-IsTerraformReadOnly $Command }
         "Git"        { return Test-IsGitReadOnly $Command }
         "kubectl"    { return Test-IsKubectlReadOnly $Command }
+        "Conda"      { return Test-IsCondaReadOnly $Command }
         "DOS"        {
             $inner = Extract-DOSFromCmdWrapper $Command
             if ($inner) { return Test-IsDOSReadOnly $inner }
@@ -1082,6 +1149,7 @@ function Test-IsModifying {
         "Terraform"  { return Test-IsTerraformModifying $Command }
         "Git"        { return Test-IsGitModifying $Command }
         "kubectl"    { return Test-IsKubectlModifying $Command }
+        "Conda"      { return Test-IsCondaModifying $Command }
         "DOS"        {
             $inner = Extract-DOSFromCmdWrapper $Command
             if ($inner) { return Test-IsDOSModifying $inner }
@@ -1177,24 +1245,18 @@ function Get-CommandDecision {
     }
 
     # PowerShell code blocks — extract individual cmdlets and analyze each
-    # If the command contains { } blocks, it's structured PowerShell — analyze
-    # extracted cmdlets even if only one remains after control flow stripping
+    # Guard: only enter PowerShell block path for actual PowerShell commands
+    # or commands with { } blocks (non-PS commands with ; are handled by chain analysis below)
+    $cmdType = Get-CLICommandType $Command
     $originalHadBlocks = $Command.Contains('{') -and $Command.Contains('}')
     $psCmdlets = Extract-PowerShellCommands $Command
-    if ($psCmdlets.Count -gt 1 -or ($originalHadBlocks -and $psCmdlets.Count -gt 0)) {
+    if (($cmdType -eq "PowerShell" -and $psCmdlets.Count -gt 1) -or ($originalHadBlocks -and $psCmdlets.Count -gt 0)) {
         $modifyingCmds = @()
         foreach ($cmdlet in $psCmdlets) {
-            # Check if this cmdlet is a DOS command
-            if (Test-IsDOSCommand $cmdlet) {
-                if (Test-IsDOSModifying $cmdlet) {
-                    $modifyingCmds += "[DOS] $cmdlet"
-                    break # No need to check further if we already found a modifying cmdlet
-                }
-            }
-            # Check if this cmdlet is a modifying PowerShell cmdlet
-            elseif (Test-IsPowerShellModifying $cmdlet) {
+            # Use full Test-IsModifying to catch script executions, DOS, PS, conda, etc.
+            if (Test-IsModifying $cmdlet) {
                 $modifyingCmds += $cmdlet
-                break # No need to check further if we already found a modifying cmdlet
+                break
             }
         }
         if ($modifyingCmds.Count -gt 0) {
