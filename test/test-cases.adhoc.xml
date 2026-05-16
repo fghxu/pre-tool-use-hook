@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<commands>
+
+  <!-- =================================================================== -->
+  <!-- SIMPLE ALLOW: Read-only commands across domains                       -->
+  <!-- =================================================================== -->
+
+  <category-group name="DOS_CMD">
+    <test-case expected="allow" reason="read-only" category="DOS-FileInspection">
+      <description>dir lists directory contents with details</description>
+      <copilot-command><![CDATA[dir C:\Windows\System32]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="DOS-Network">
+      <description>ping tests network connectivity to a host</description>
+      <copilot-command><![CDATA[ping -t 10.0.0.1]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="taskkill" category="DOS-Process">
+      <description>taskkill ends a running process by name</description>
+      <copilot-command><![CDATA[taskkill /IM chrome.exe /F]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="reg add" category="DOS-Registry">
+      <description>reg add adds a registry entry or value</description>
+      <copilot-command><![CDATA[reg add HKLM\SOFTWARE\MyApp /v Version /t REG_SZ /d 2.1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="DOS-Chained">
+      <description>Chained read-only DOS commands with &amp;&amp; separator</description>
+      <copilot-command><![CDATA[dir C:\Projects && type C:\config.ini]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Linux">
+    <test-case expected="allow" reason="read-only" category="Linux-FileInspection">
+      <description>ls lists directory contents</description>
+      <copilot-command><![CDATA[ls -la /var/log]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-FileInspection">
+      <description>cat displays file contents to stdout</description>
+      <copilot-command><![CDATA[cat /etc/hostname]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-Process">
+      <description>ps displays running processes</description>
+      <copilot-command><![CDATA[ps auxf]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-Pipeline">
+      <description>grep searches file content for patterns</description>
+      <copilot-command><![CDATA[grep -i "error" /var/log/syslog | tail -20]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-Pipeline">
+      <description>sort and uniq combination for deduplicating output</description>
+      <copilot-command><![CDATA[cat /var/log/auth.log | grep "Failed password" | awk '{print $(NF-3)}' | sort | uniq -c | sort -rn]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="rm -rf" category="Linux-FileModification">
+      <description>rm deletes files and directories</description>
+      <copilot-command><![CDATA[rm -rf /tmp/cache/*]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="chmod" category="Linux-System">
+      <description>chmod changes file permissions</description>
+      <copilot-command><![CDATA[chmod 755 /opt/deploy/scripts/start.sh]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="systemctl restart" category="Linux-System">
+      <description>systemctl restart reloads and restarts a service</description>
+      <copilot-command><![CDATA[systemctl restart sshd]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="echo redirect" category="Linux-FileModification">
+      <description>echo with redirection writes content to a file</description>
+      <copilot-command><![CDATA[echo "127.0.0.1 myapp.local" >> /etc/hosts]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="curl POST" category="Linux-Network">
+      <description>curl POST sends data to a URL (modifying API call)</description>
+      <copilot-command><![CDATA[curl -X POST http://localhost:8080/api/restart -H "Content-Type: application/json" -d '{"service":"nginx"}']]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="apt-get install" category="Linux-System">
+      <description>apt-get install installs packages with chained update (Debian/Ubuntu)</description>
+      <copilot-command><![CDATA[apt-get update && apt-get install -y docker.io]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-ComplexRead">
+      <description>Multi-line heredoc used with awk to generate a system report</description>
+      <copilot-command><![CDATA[cat <<'SCRIPT' | bash
+echo "===== System Health Report ====="
+echo "Hostname: $(hostname)"
+echo "Uptime:   $(uptime -p)"
+echo ""
+echo "--- Disk Usage ---"
+df -h / /home /var
+echo ""
+echo "--- Memory ---"
+free -m
+echo ""
+echo "--- Top 5 CPU Processes ---"
+ps aux --sort=-%cpu | head -6
+SCRIPT]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-Edge">
+      <description>git status matches trusted_pattern regex for read-only VCS commands</description>
+      <copilot-command><![CDATA[git status --porcelain]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="PowerShell">
+    <test-case expected="allow" reason="read-only" category="PowerShell-Process">
+      <description>Get-Process lists processes filtered by CPU usage</description>
+      <copilot-command><![CDATA[Get-Process | Where-Object CPU -gt 100 | Sort-Object CPU -Descending]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Stop-Process" category="PowerShell-Process">
+      <description>Stop-Process terminates a running process</description>
+      <copilot-command><![CDATA[Stop-Process -Name "notepad" -Force]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Set-Content" category="PowerShell-FileModification">
+      <description>Set-Content overwrites file content</description>
+      <copilot-command><![CDATA[Set-Content -Path "C:\temp\config.txt" -Value "new configuration data"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Stop-Process" category="PowerShell-ComplexModifying">
+      <description>PowerShell pipeline that terminates processes in a ForEach-Object block</description>
+      <copilot-command><![CDATA[Get-Process | ForEach-Object { Stop-Process $_.Id -Force }]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="PowerShell-ComplexRead">
+      <description>Multi-line try/catch block for reading remote registry values with backtick line continuation</description>
+      <copilot-command><![CDATA[$computers = Get-Content "C:\servers.txt"
+foreach ($computer in $computers) {
+    try {
+        $regVal = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" `
+            -ComputerName $computer -ErrorAction Stop
+        Write-Host "$computer : $($regVal.ProductName)"
+    }
+    catch [System.UnauthorizedAccessException] {
+        Write-Warning "Access denied on $computer"
+    }
+    catch {
+        Write-Warning "Failed to connect to $computer : $_"
+    }
+}]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="PowerShell-ComplexRead">
+      <description>Multi-line Invoke-Command with ScriptBlock querying remote disk info</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName "DC01", "DC02" -ScriptBlock {
+    Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType=3" |
+        Select-Object DeviceID, VolumeName, @{
+            Name='FreeSpaceGB'
+            Expression={[math]::Round($_.FreeSpace/1GB, 2)}
+        }, @{
+            Name='TotalSpaceGB'
+            Expression={[math]::Round($_.Size/1GB, 2)}
+        } | Format-Table -AutoSize
+}]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Invoke-Command" category="PowerShell-ComplexModifying">
+      <description>Multi-line Invoke-Command with ScriptBlock that installs a package on remote servers</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName (Get-Content "C:\serverlist.txt") -ScriptBlock {
+    $packagePath = "\\fileserver\installs\app.msi"
+    if (Test-Path $packagePath) {
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$packagePath`" /qn /norestart" -Wait
+        Write-Host "Package installed on $env:COMPUTERNAME" -ForegroundColor Green
+    }
+    else {
+        Write-Warning "Package not found at $packagePath"
+    }
+}]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="docker run" category="PowerShell-ComplexModifying">
+      <description>PowerShell wrapping Docker modify command via mixed shell context</description>
+      <copilot-command><![CDATA[docker ps -a --filter "status=exited" --format "{{.ID}}" | ForEach-Object { docker rm $_ }]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Docker">
+    <test-case expected="allow" reason="read-only" category="Docker-Read">
+      <description>docker ps lists running containers</description>
+      <copilot-command><![CDATA[docker ps -a]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="docker rm" category="Docker-Modify">
+      <description>docker rm removes a stopped container</description>
+      <copilot-command><![CDATA[docker rm -f my-old-container]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="docker run" category="Docker-Modify">
+      <description>docker run starts a new container (creates and modifies state)</description>
+      <copilot-command><![CDATA[docker run -d --name myapp -p 8080:80 nginx:latest]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="docker rm" category="Docker-Pipeline">
+      <description>Docker pipeline that formats container IDs and removes them with xargs</description>
+      <copilot-command><![CDATA[docker ps -a --format '{{.ID}}' | xargs docker rm]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Kubernetes">
+    <test-case expected="allow" reason="read-only" category="Kubernetes-Read">
+      <description>kubectl describe pod shows detailed pod information</description>
+      <copilot-command><![CDATA[kubectl describe pod myapp-deployment-7d9f8b6c4-x2k5p -n default]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="kubectl delete" category="Kubernetes-Modify">
+      <description>kubectl delete pod removes a pod from the cluster</description>
+      <copilot-command><![CDATA[kubectl delete pod myapp-deployment-7d9f8b6c4-x2k5p -n default]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="kubectl delete" category="Kubernetes-Pipeline">
+      <description>kubectl pipeline that filters pods by name and deletes them via xargs</description>
+      <copilot-command><![CDATA[kubectl get pods -o json | jq '.items[].metadata.name' | xargs kubectl delete pod]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="kubectl delete --all" category="Kubernetes-Edge">
+      <description>kubectl delete --all matches untrusted_pattern regex for destructive operations</description>
+      <copilot-command><![CDATA[kubectl delete --all pods -n production]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="AWS_CLI">
+    <test-case expected="allow" reason="read-only" category="AWS-Read">
+      <description>aws ec2 describe-instances lists running EC2 instances</description>
+      <copilot-command><![CDATA[aws ec2 describe-instances --filters "Name=instance-state-name,Values=running" --query "Reservations[*].Instances[*].[InstanceId,InstanceType,Tags[?Key=='Name'].Value]" --output table]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="terminate-instances" category="AWS-Modify">
+      <description>aws ec2 terminate-instances shuts down EC2 instances</description>
+      <copilot-command><![CDATA[aws ec2 terminate-instances --instance-ids i-0abc123def456]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Terraform">
+    <test-case expected="allow" reason="read-only" category="Terraform-Read">
+      <description>terraform validate checks configuration syntax</description>
+      <copilot-command><![CDATA[terraform validate]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Terraform-Read">
+      <description>terraform plan shows execution plan without applying changes</description>
+      <copilot-command><![CDATA[terraform plan -out=tfplan]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="terraform apply" category="Terraform-Modify">
+      <description>terraform apply creates/updates infrastructure resources</description>
+      <copilot-command><![CDATA[terraform apply tfplan]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="terraform destroy" category="Terraform-Modify">
+      <description>terraform destroy deletes all managed infrastructure</description>
+      <copilot-command><![CDATA[terraform destroy -auto-approve]]></copilot-command>
+    </test-case>
+  </category-group>
+
+</commands>
