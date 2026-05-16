@@ -426,7 +426,7 @@ Run the full test suite to verify everything works:
 
 ```powershell
 cd C:\git\cc\pretoolhook
-pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "C:\git\cc\pretoolhook\test-cases.xml"
+pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "C:\git\cc\pretoolhook\test\test-cases.xml"
 ```
 
 Expected: `339 passed, 0 failed, 100%`.

@@ -72,8 +72,10 @@ pretoolhook/
 │   ├── Logger.ps1            # Daily JSONL record files + human-readable text logs
 │   └── TestRunner.ps1        # TDD test runner for the test suite
 ├── config.json        # Runtime configuration — the classification database
-├── test-cases.xml              # Full test case database (339 test cases)
-├── test-cases.adhoc.xml        # Quick test subset (40 test cases)
+├── test/
+│   ├── test-cases.xml         # Full test case database (339 test cases)
+│   └── test-cases.adhoc.xml   # Quick test subset (40 test cases)
+├── debug/                     # Debug and verification scripts
 ├── README.md                 # This file
 ├── INSTALL.md                # Installation guide
 └── docs/
@@ -176,7 +178,7 @@ You should add new test cases here whenever you add patterns to `config.json`.
 ### Full Test Suite (339 tests)
 
 ```powershell
-pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "C:\path\to\pretoolhook\test-cases.xml"
+pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "C:\path\to\pretoolhook\test\test-cases.xml"
 ```
 
 ### Quick Test Subset (40 tests)
@@ -188,7 +190,7 @@ pwsh -NoProfile -File src/TestRunner.ps1
 ### Filter by Category
 
 ```powershell
-pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "test-cases.xml" -Filter "Docker"
+pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "test\test-cases.xml" -Filter "Docker"
 ```
 
 ### Test Runner Output
