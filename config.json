@@ -296,13 +296,15 @@
         { "name": "git log",       "patterns": ["git log*", "git log *"],                      "description": "Show commit logs" },
         { "name": "git diff",      "patterns": ["git diff*", "git diff *"],                    "description": "Show changes" },
         { "name": "git show",      "patterns": ["git show*", "git show *"],                    "description": "Show various objects" },
-        { "name": "git branch",    "patterns": ["git branch", "git branch -l*", "git branch --list*"], "description": "List branches (no write)" },
-        { "name": "git tag",       "patterns": ["git tag", "git tag -l*", "git tag --list*"],  "description": "List tags (no write)" },
-        { "name": "git remote",    "patterns": ["git remote", "git remote -*", "git remote -* *"], "description": "Manage remotes (read-only forms)" },
+        { "name": "git branch",    "patterns": ["^git branch$", "git branch -a*", "git branch -l*", "git branch --list*"], "description": "List branches (no write)" },
+        { "name": "git tag",       "patterns": ["^git tag$", "git tag -l*", "git tag --list*"],  "description": "List tags (no write)" },
+        { "name": "git remote",    "patterns": ["^git remote$", "git remote -v*", "git remote --verbose*"], "description": "List remotes (no write)" },
         { "name": "git fetch",     "patterns": ["git fetch*", "git fetch *"],                  "description": "Download objects and refs" },
-        { "name": "git pull",      "patterns": ["git pull*", "git pull *"],                    "risk": "low", "description": "Fetch and integrate (may modify working tree)" }
+        { "name": "git pull",      "patterns": ["git pull*", "git pull *"],                    "risk": "low", "description": "Fetch and integrate (may modify working tree)" },
+        { "name": "git switch",    "patterns": ["git switch$", "git switch *"],                  "description": "Switch to a branch (modifies working tree)" }
       ],
       "modifying": [
+        { "name": "git add",       "patterns": ["git add*", "git add *"],                         "risk": "low",    "description": "Stage file changes" },
         { "name": "git commit",    "patterns": ["git commit*", "git commit *"],                   "risk": "low",    "description": "Record changes to repository" },
         { "name": "git push",      "patterns": ["git push*", "git push *"],                       "risk": "medium", "description": "Update remote refs" },
         { "name": "git merge",     "patterns": ["git merge*", "git merge *"],                     "risk": "medium", "description": "Join development histories" },
@@ -311,8 +313,12 @@
         { "name": "git clean",     "patterns": ["git clean*", "git clean *"],                     "risk": "high",   "description": "Remove untracked files" },
         { "name": "git stash",     "patterns": ["git stash*", "git stash *"],                     "risk": "low",    "description": "Stash changes" },
         { "name": "git checkout",  "patterns": ["git checkout*", "git checkout *"],               "risk": "medium", "description": "Switch branches or restore files" },
-        { "name": "git branch -D", "patterns": ["git branch -D*", "git branch --delete*", "git branch -d*"], "risk": "medium", "description": "Delete branch" },
-        { "name": "git tag -d",    "patterns": ["git tag -d*", "git tag --delete*"],              "risk": "low",    "description": "Delete tag" }
+        { "name": "git restore",   "patterns": ["git restore*", "git restore *"],                 "risk": "medium", "description": "Restore working tree files" },
+        { "name": "git init",      "patterns": ["git init*", "git init *"],                       "risk": "low",    "description": "Create empty repository" },
+        { "name": "git clone",     "patterns": ["git clone*", "git clone *"],                     "risk": "low",    "description": "Clone repository" },
+        { "name": "git branch -D", "patterns": ["git branch -D*", "git branch --delete*", "git branch -d*", "git branch -m*", "git branch --move*"], "risk": "medium", "description": "Delete or rename branch" },
+        { "name": "git tag -d",    "patterns": ["git tag -d*", "git tag --delete*"],              "risk": "low",    "description": "Delete tag" },
+        { "name": "git remote modify", "patterns": ["git remote add*", "git remote remove*", "git remote set-url*", "git remote rename*"], "risk": "low", "description": "Modify remote configuration" }
       ]
     },
 
