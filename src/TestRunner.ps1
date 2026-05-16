@@ -58,8 +58,13 @@ for ($i = 0; $i -lt $total; $i++) {
     }
     $command = $command.Trim()
 
-    # Draw progress line
-    Write-Host -NoNewline "`r[$num/$total $pct% - $name]                    "
+    # Draw progress line — truncate to console width to avoid line wrapping
+    $consoleWidth = [Math]::Max(80, $Host.UI.RawUI.BufferSize.Width - 1)
+    $progressMsg = "[$num/$total $pct% - $name]"
+    if ($progressMsg.Length -gt $consoleWidth) {
+        $progressMsg = $progressMsg.Substring(0, $consoleWidth - 3) + "..."
+    }
+    Write-Host -NoNewline "`r$progressMsg"
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
@@ -68,7 +73,7 @@ for ($i = 0; $i -lt $total; $i++) {
             # Build a mock $rawInput PSCustomObject
             $rawInput = [PSCustomObject]@{
                 tool_name  = "run_in_terminal"
-                tool_input = $command
+                tool_input = [PSCustomObject]@{ command = $command }
             }
             $result = Invoke-Classify -RawInput $rawInput -IDE "ClaudeCode" -Config $config
         }

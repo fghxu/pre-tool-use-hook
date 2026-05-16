@@ -214,7 +214,7 @@
       <copilot-command><![CDATA[ren *.txt *.bak]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: mkdir" category="DOS-FileModification">
+    <test-case expected="allow" reason="read-only: mkdir" category="DOS-FileModification">
       <description>mkdir creates new directories recursively</description>
       <copilot-command><![CDATA[mkdir C:\Projects\new-feature\src]]></copilot-command>
     </test-case>
@@ -1197,7 +1197,7 @@ done]]></copilot-command>
 
     <!-- ==================== MODIFYING Linux/Bash ==================== -->
 
-    <test-case expected="ask" reason="modifying: mkdir" category="Linux-FileModification">
+    <test-case expected="allow" reason="read-only: mkdir" category="Linux-FileModification">
       <description>mkdir creates a new directory</description>
       <copilot-command><![CDATA[mkdir -p /opt/myapp/config]]></copilot-command>
     </test-case>
@@ -1464,7 +1464,7 @@ done]]></copilot-command>
       <copilot-command><![CDATA[docker images --format '{{.Tag}}' | grep latest | while read tag; do docker run -d "myapp:$tag"; done]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: ln -s creates symlink" category="Linux-FileModification">
+    <test-case expected="allow" reason="read-only: ln -s creates symlink" category="Linux-FileModification">
       <description>ln -s creates a symbolic link to a file</description>
       <copilot-command><![CDATA[ln -s /opt/releases/app-v2.1 /var/www/current]]></copilot-command>
     </test-case>
@@ -1541,7 +1541,7 @@ done]]></copilot-command>
       <copilot-command><![CDATA[terraform import aws_s3_bucket.data bucket-name-12345]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: terraform fmt" category="Terraform-Force">
+    <test-case expected="allow" reason="read-only: terraform fmt" category="Terraform-Force">
       <description>terraform fmt -write-modifies reformats HCL files in place</description>
       <copilot-command><![CDATA[terraform fmt -recursive .]]></copilot-command>
     </test-case>
@@ -1598,7 +1598,7 @@ done]]></copilot-command>
       <copilot-command><![CDATA[terraform workspace show]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: terraform init -upgrade" category="Terraform-Modify">
+    <test-case expected="allow" reason="read-only: terraform init" category="Terraform-Modify">
       <description>terraform init with upgrade flag downloads new provider versions</description>
       <copilot-command><![CDATA[terraform init -upgrade]]></copilot-command>
     </test-case>

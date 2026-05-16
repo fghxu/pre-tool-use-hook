@@ -154,9 +154,14 @@ function Get-CommandFromInput {
     }
 
     # Heuristic: walk the RawInput for any string field that looks like a command
-    # (contains shell operators | ; &&, known command prefixes like docker/kubectl/aws/npm/git)
+    # (contains shell operators | ; &&, known command prefixes from config)
     $commandPattern = '[|;&]|&&|\|\|'
-    $knownPrefixes = @('docker', 'kubectl', 'aws', 'npm', 'git', 'terraform', 'helm', 'gh', 'az', 'gcloud', 'python', 'node', 'ruby', 'go', 'cargo', 'dotnet', 'pwsh', 'powershell', 'cmd', 'bash', 'sh', 'curl', 'wget')
+    $knownPrefixes = if ($Config.known_command_prefixes) {
+        @($Config.known_command_prefixes)
+    } else {
+        # Minimal fallback if config key is missing
+        @('docker', 'kubectl', 'aws', 'npm', 'git', 'terraform', 'helm', 'pwsh', 'powershell', 'cmd', 'bash', 'sh', 'curl', 'dir', 'ls', 'cat', 'ping', 'ps', 'type')
+    }
 
     # Helper function to recursively walk an object and find command-like strings
     function _WalkForCommand {
