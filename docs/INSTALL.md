@@ -18,15 +18,28 @@ This guide walks through installing the PreToolUse hook system for Claude Code a
 
 ```powershell
 # Clone to a location of your choice:
-git clone <repo-url> C:\git\cc\pretoolhook
+git clone <repo-url> C:\git\pretoolusehook
 
 # Or just copy the folder anywhere you like — no installer needed.
 # The hook finds its own dependencies relative to Hook.ps1 via $PSScriptRoot.
 
 # Verify everything loads:
-cd C:\git\cc\pretoolhook
+cd C:\git\pretoolusehook
 pwsh -NoProfile -Command ". .\src\ConfigLoader.ps1; . .\src\Parser.ps1; . .\src\Resolver.ps1; . .\src\HookAdapter.ps1; . .\src\Classifier.ps1; Write-Host 'All modules loaded successfully'"
 ```
+
+### Step 3: Adjust the Config for Your System
+
+Under the root dir of the cloned location  (e.g. C:\git\pretoolusehook\).   Edit `config.json` to set your log path for the hook execution:
+
+```json
+{
+  "log_file_path": "C:/Users/<user>/pretoolusehook/logs/"
+}
+```
+
+On Windows, use a full path or a path relative to your user directory. On macOS/Linux, `~/pretoolusehook/logs/` is a good default.
+
 
 ## Where to Put the Project
 
@@ -36,8 +49,8 @@ Recommended locations:
 
 | Platform | Path |
 |----------|------|
-| Windows | `C:\git\cc\pretoolhook\` |
-| macOS/Linux | `~/.pretoolhook/` or `~/git/pretoolhook/` |
+| Windows | `C:\git\pretoolusehook\` |
+| macOS/Linux | `~/pretoolusehook/` or `~/git/pretoolusehook/` |
 
 ## Installing for Claude Code
 
@@ -85,7 +98,7 @@ Create or edit `.claude/settings.local.json` in your project root. This only aff
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File C:/git/cc/pretoolhook/src/Hook.ps1"
+            "command": "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1"
           }
         ]
       }
@@ -101,25 +114,14 @@ The `"matcher": "*"` forwards **all** tool calls to the hook script — regardle
 - Use forward slashes in paths (`C:/git/...`) — backslashes may be mangled by bash
 - Do NOT use `-NoLogo` in the pwsh command — it can cause pwsh to reject arguments in Claude Code's shell context
 
-#### Option B: User-Level Global (`~/.claude/settings.local.json`)
+#### Option B: User-Level Global (`~/.claude/settings.json`)
 
-Create or edit `~/.claude/settings.local.json` (user home `.claude` directory). This applies the hook to **all** your Claude Code projects.
+Create or edit `~/.claude/settings.json` (user home `.claude` directory). This applies the hook to **all** your Claude Code projects.
 
 Use the same format as Option A above, adjusting the path to Hook.ps1 if your clone location differs.
 
-> **Note:** Hooks should go in `settings.local.json`, not `settings.json`. The `.local` suffix keeps them separate from synced settings and prevents overwrites.
+> **Note:** Hooks should go in `settings.json`, not `settings.local.json`.
 
-### Step 3: Adjust the Config for Your System
-
-Edit `config.json` to set your log path:
-
-```json
-{
-  "log_file_path": "~/.pretoolhook/logs/"
-}
-```
-
-On Windows, use a full path or a path relative to your user directory. On macOS/Linux, `~/.pretoolhook/logs/` is a good default.
 
 ### Step 4: macOS/Linux Notes
 
@@ -134,7 +136,7 @@ On macOS and Linux, adjust the path separators and the PowerShell command:
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File ~/.pretoolhook/src/Hook.ps1"
+            "command": "pwsh -NoProfile -NonInteractive -File ~/pretoolusehook/src/Hook.ps1"
           }
         ]
       }
@@ -153,7 +155,7 @@ which pwsh
 
 ```powershell
 # Test that the hook loads and can classify a command:
-cd C:\git\cc\pretoolhook
+cd C:\git\pretoolusehook
 echo '{"tool_name":"Bash","tool_input":{"command":"Get-Process"},"hook_event_name":"PreToolUse","timestamp":"2026-05-15T14:30:00.123Z","tool_use_id":"test123","transcript_path":"C:\\Users\\Frank\\.claude\\projects\\test\\session.jsonl"}' | pwsh -NoProfile -NonInteractive -File src/Hook.ps1
 
 # Expected output (compressed JSON):
@@ -215,7 +217,7 @@ VS Code Copilot reads hook configuration from the workspace `.claude/settings.lo
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File C:/git/cc/pretoolhook/src/Hook.ps1"
+            "command": "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1"
           }
         ]
       }
@@ -233,14 +235,11 @@ Use the same format as Option A. This applies the hook to all VS Code workspaces
 ### Step 3: Verify
 
 ```powershell
-cd C:\git\cc\pretoolhook
+# Test from Claude Code CLI, sample prompt:
+Write a PowerShell code block to check if there is a file named test.txt under the c:\temp, if yes, output its content, use custom recursively function to search the file in each subdirectory, run the code block directly in the console, do not save scripts and run from disk.
 
-# Test with VS Code Copilot-style input (object tool_input):
-echo '{"tool_name":"run_in_terminal","tool_input":{"command":"Remove-Item -Path c:\\temp\\test.txt","explanation":"Test","goal":"Test","isBackground":false,"timeout":10000},"hook_event_name":"PreToolUse","timestamp":"2026-05-15T22:25:06.607Z","tool_use_id":"toolu_test__vscode-123","transcript_path":"C:\\Users\\Frank\\AppData\\Roaming\\Code\\User\\workspaceStorage\\test\\GitHub.copilot-chat\\transcripts\\test.jsonl"}' | pwsh -NoProfile -NonInteractive -File src/Hook.ps1
-
-# Expected output:
-# {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"Remove-Item (high)"}}
 ```
+
 
 Both Claude Code and VS Code Copilot use the same `hookSpecificOutput` wrapper output format.
 
@@ -259,15 +258,41 @@ Copilot CLI sends JSON with these differences:
 
 ### Step 2: Configure the Hook
 
+#### Option A: Workspace-Level (`Project/.github/hooks/pretooluse.json`)
+
+json file name does not matter.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1",
+        "timeout": 10
+      }
+    ]
+  }
+}
+```
+
+#### Option B: User-Level Global (`~/.copilot/hooks/pre-cli-hook.json`)
+
 Copilot CLI hook configuration is placed at `~/.copilot/hooks/pre-cli-hook.json`:
 
 ```json
 {
   "version": 1,
   "hooks": {
-    "preToolUse": [
+    "PreToolUse": [
       {
-        "command": "pwsh -NoProfile -NonInteractive -File C:/git/cc/pretoolhook/src/Hook.ps1"
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1"
+          }
+        ]
       }
     ]
   }
@@ -277,12 +302,11 @@ Copilot CLI hook configuration is placed at `~/.copilot/hooks/pre-cli-hook.json`
 ### Step 3: Verify
 
 ```powershell
-# Test with Copilot CLI-style input:
-echo '{"tool_name":"run_in_terminal","tool_input":"rm -rf /tmp/*","hook_event_name":"preToolUse","timestamp":"1715568000"}' | pwsh -NoProfile -NonInteractive -File src/Hook.ps1
+# Test from VScode copilot, sample prompt:
+Write a PowerShell code block to check if there is a file named test.txt under the c:\temp, if yes, output its content, use custom recursively function to search the file in each subdirectory, run the code block directly in the console, do not save scripts and run from disk.
 
-# Expected output (same hookSpecificOutput wrapper):
-# {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"rm (high)"}}
 ```
+
 
 ## Customizing the Configuration
 
@@ -416,7 +440,7 @@ The hook writes logs split by IDE into four files daily:
 Set the log directory in `config.json`:
 ```json
 {
-  "log_file_path": "~/.pretoolhook/logs/"
+  "log_file_path": "~/pretoolusehook/logs/"
 }
 ```
 
@@ -425,8 +449,8 @@ Set the log directory in `config.json`:
 Run the full test suite to verify everything works:
 
 ```powershell
-cd C:\git\cc\pretoolhook
-pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "C:\git\cc\pretoolhook\test\test-cases.xml"
+cd C:\git\pretoolusehook
+pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "C:\git\pretoolusehook\test\test-cases.xml"
 ```
 
 Expected: `339 passed, 0 failed, 100%`.
@@ -469,13 +493,13 @@ If the debug log shows `Hook PreToolUse:Bash (PreToolUse) error:` followed by pw
 - Backslash paths (`C:\\git\\...`) — use forward slashes (`C:/git/...`) which are safer through bash
 - Missing `-File` before the script path
 
-Correct command: `pwsh -NoProfile -NonInteractive -File C:/git/cc/pretoolhook/src/Hook.ps1`
+Correct command: `pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1`
 
 ### The hook runs but every command is "ask"
 
 Check that the hook config loaded correctly:
 ```powershell
-cd C:\git\cc\pretoolhook
+cd C:\git\pretoolusehook
 pwsh -NoProfile -Command ". .\src\ConfigLoader.ps1; `$c = Load-Config -Path '.\config.json'; `$c._compiled.trusted.Count; `$c._compiled.untrusted.Count"
 ```
 
