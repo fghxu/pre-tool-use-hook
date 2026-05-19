@@ -35,6 +35,21 @@
       <copilot-command><![CDATA[dir /s /b *.log]]></copilot-command>
     </test-case>
 
+    <test-case expected="allow" reason="read-only: cd" category="DOS-FileInspection">
+      <description>cd changes working directory (read-only for filesystem)</description>
+      <copilot-command><![CDATA[cd "C:/git/cc/comfy"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only: cd" category="DOS-FileInspection">
+      <description>cd with /d flag to change drive and directory</description>
+      <copilot-command><![CDATA[cd /d C:\Windows\System32]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only: cd" category="DOS-FileInspection">
+      <description>cd chained with git status via &&</description>
+      <copilot-command><![CDATA[cd "C:/git/cc/comfy" && git status 2>&1]]></copilot-command>
+    </test-case>
+
     <test-case expected="allow" reason="read-only: type" category="DOS-FileInspection">
       <description>type displays the contents of a text file</description>
       <copilot-command><![CDATA[type C:\inetpub\wwwroot\web.config]]></copilot-command>
@@ -948,6 +963,11 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
     <test-case expected="allow" reason="read-only: ls" category="Linux-FileInspection">
       <description>ls lists directory contents</description>
       <copilot-command><![CDATA[ls -la /var/log]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only: cd" category="Linux-FileInspection">
+      <description>cd changes working directory (read-only for filesystem)</description>
+      <copilot-command><![CDATA[cd /tmp]]></copilot-command>
     </test-case>
 
     <test-case expected="allow" reason="read-only: hostname" category="Linux-FileInspection">
