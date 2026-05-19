@@ -15,8 +15,10 @@
   ],
 
   "trusted_pattern": [
-	  "^trusted_command\\.ps1$",
-	  "^trusted_command\\s+$"
+	  "^docker exec comfyui .*",
+	  "^docker exec -d comfyui .*",
+	  "for i in.*docker exec comfyui .*",
+	  "for i in.*docker exec -d comfyui .*"
   ],
   "untrusted_pattern": [
 	  "^untrusted\\.ps1$",
@@ -36,6 +38,7 @@
 	  "read_file",
 	  "manage_todo_list",
 	  
+	  "Explore",
 	  "AskUserQuestion",
 	  "CronCreate",
 	  "CronDelete",
@@ -93,6 +96,8 @@
     "DOS_CMD": {
       "description": "DOS / Windows CMD commands",
       "read_only": [
+	  
+	    { "name": "nvidia-smi",      "patterns": ["nvidia-smi /s *"],                        "description": "show Nvidia gpu usage" },
         { "name": "dir",      "patterns": ["dir *", "dir /s *", "dir /b *"],                        "description": "List directory contents" },
         { "name": "type",     "patterns": ["type *"],                                                "description": "Display file contents" },
         { "name": "tree",     "patterns": ["tree *", "tree /f *"],                                   "description": "Display directory tree" },

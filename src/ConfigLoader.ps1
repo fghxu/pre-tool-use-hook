@@ -234,17 +234,17 @@ function Load-Config {
     $compiledContainer = [PSCustomObject]@{}
     $config | Add-Member -MemberType NoteProperty -Name '_compiled' -Value $compiledContainer -Force
 
-    # Compile trusted_pattern
+    # Compile trusted_pattern (Singleline so . matches \n for multi-line commands)
     $compiledTrusted = @()
     foreach ($pattern in $config.trusted_pattern) {
-        $compiledTrusted += [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+        $compiledTrusted += [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::Singleline)
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'trusted' -Value $compiledTrusted -Force
 
-    # Compile untrusted_pattern
+    # Compile untrusted_pattern (Singleline so . matches \n for multi-line commands)
     $compiledUntrusted = @()
     foreach ($pattern in $config.untrusted_pattern) {
-        $compiledUntrusted += [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+        $compiledUntrusted += [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline -bor [System.Text.RegularExpressions.RegexOptions]::Compiled)
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'untrusted' -Value $compiledUntrusted -Force
 
