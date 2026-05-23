@@ -89,9 +89,9 @@ $classifyResult = Invoke-Classify -RawInput $parsedInput -IDE $ide -Config $conf
 $elapsed = (Get-Date) - $startTime
 
 # ----------------------------------------------------
-# Step 10: Timeout checks — 500ms warning, 1000ms hard override
+# Step 10: Timeout checks — 500ms warning, 3000ms hard override
 # ----------------------------------------------------
-if ($elapsed.TotalMilliseconds -gt 1000) {
+if ($elapsed.TotalMilliseconds -gt 3000) {
     # Hard timeout: force "ask" regardless of classification result
     $classifyResult = [PSCustomObject]@{
         Decision    = "ask"

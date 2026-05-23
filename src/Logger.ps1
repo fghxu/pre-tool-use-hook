@@ -243,7 +243,7 @@ function Write-LogEntry {
         if ($commandText.Length -gt 10240) {
             $commandText = $commandText.Substring(0, 500) + "..."
         }
-        $body = "${reasonLine}  Command: [[[${commandText}]]]`n"
+        $body = "${reasonLine}  Command: ___ [${commandText}] ___`n"
     }
 
     $logEntry = $header + $body + "`n"
