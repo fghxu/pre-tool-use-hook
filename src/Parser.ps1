@@ -565,26 +565,130 @@ function Find-NestedCommands {
         return $nested
     }
 
-    # ssh host '<inner>' or ssh user@host '<inner>'
-    if ($trimmed -match '^ssh\s+\S+\s+["''](.+)["'']\s*$') {
+    # ssh [options] host <remote command...>
+    #
+    # Handles all SSH option patterns:
+    #   - ssh user@host "command"               (simple, no options)
+    #   - ssh -l user host "command"            (-l flag with space-separated login name)
+    #   - ssh -i keyfile user@host "command"    (-i flag with identity file)
+    #   - ssh -p port user@host "command"       (-p flag with port)
+    #   - ssh -o option=value user@host "cmd"   (-o flag with option string)
+    #   - ssh -v -T user@host "command"         (boolean flags)
+    #   - ssh user@host ls /home                (unquoted remote command)
+    #
+    # Flags that take a value argument: B,b,c,D,E,e,F,I,i,J,L,l,m,O,o,P,p,Q,R,S,W,w
+    # Boolean flags (no argument): 4,6,A,a,C,f,G,g,K,k,M,N,n,q,s,T,t,V,v,X,x,Y,y
+    if ($trimmed -match '^ssh\s') {
 
-        $innerCommand = $Matches[1]
-        $innerDomain = Get-CommandDomain -Command $innerCommand
+        # Tokenize the command respecting single/double quotes
+        $sshTokens = [System.Collections.Generic.List[string]]::new()
+        $currentToken = ''
+        $inSingle = $false
+        $inDouble = $false
 
-        $nested += [PSCustomObject]@{
-            CommandText   = $innerCommand
-            Domain        = $innerDomain
-            IsPipeline    = $false
-            ParentCommand = $trimmed
+        for ($tidx = 0; $tidx -lt $trimmed.Length; $tidx++) {
+            $ch = $trimmed[$tidx]
+            if ($ch -eq "'" -and -not $inDouble) {
+                $inSingle = -not $inSingle
+                $currentToken += $ch
+            }
+            elseif ($ch -eq '"' -and -not $inSingle) {
+                $inDouble = -not $inDouble
+                $currentToken += $ch
+            }
+            elseif (-not $inSingle -and -not $inDouble -and $ch -eq ' ') {
+                if ($currentToken.Length -gt 0) {
+                    $sshTokens.Add($currentToken)
+                    $currentToken = ''
+                }
+            }
+            else {
+                $currentToken += $ch
+            }
+        }
+        if ($currentToken.Length -gt 0) {
+            $sshTokens.Add($currentToken)
         }
 
-        $splitInner = Split-Commands -Command $innerCommand -Domain $innerDomain
-        foreach ($seg in $splitInner) {
-            $seg.ParentCommand = $trimmed
-        }
-        $nested += $splitInner
+        # Need at minimum: ssh + host + inner-command
+        if ($sshTokens.Count -ge 3) {
+            # SSH flags that take a value argument (case-sensitive: -c takes val, -C is boolean)
+            $flagTakesValue = [System.Collections.Generic.HashSet[string]]::new()
+            @('B','b','c','D','E','e','F','I','i','J','L','l','m','O','o','P','p','Q','R','S','W','w') | ForEach-Object { [void]$flagTakesValue.Add($_) }
 
-        return $nested
+            $i = 1  # Start after 'ssh'
+            $hostIndex = -1
+
+            while ($i -lt $sshTokens.Count) {
+                $tok = $sshTokens[$i]
+                if ($tok.StartsWith('-') -and $tok -ne '-') {
+                    # Extract the flag letter(s) without dashes
+                    $flagChars = $tok -replace '^-+', ''
+
+                    # Check if a value is embedded in the same token: -p2222, -oOption=val, -J[user@]host
+                    # Pattern: single flag letter followed immediately by digit, =, :, or [
+                    if ($flagChars -match '^([a-zA-Z])[=:_\[\d]') {
+                        # Value is baked in — don't skip the next token
+                        $i++
+                        continue
+                    }
+
+                    # Multiple flag letters smashed together (e.g. -it, -vT, -AX)
+                    # None of the multi-letter combos in SSH use value-taking flags,
+                    # so skip the whole token.
+                    if ($flagChars.Length -gt 1) {
+                        $i++
+                        continue
+                    }
+
+                    # Single flag letter — check if it takes a value
+                    if ($flagTakesValue.Contains($flagChars)) {
+                        # This flag takes a value spaced argument.
+                        # Skip both the flag and the next token (its value).
+                        $i += 2
+                        continue
+                    }
+
+                    # Boolean flag — skip just this token
+                    $i++
+                    continue
+                }
+                else {
+                    # First non-flag, non-flag-value token is the host
+                    $hostIndex = $i
+                    break
+                }
+            }
+
+            if ($hostIndex -ge 0 -and ($hostIndex + 1) -lt $sshTokens.Count) {
+                # Everything after the host is the remote command
+                $remoteArgs = $sshTokens[($hostIndex + 1)..($sshTokens.Count - 1)]
+                $innerCommand = ($remoteArgs -join ' ').Trim()
+
+                # Strip outer quotes from the inner command if present
+                if ($innerCommand -match '^"(.+)"$' -or $innerCommand -match "^'(.+)'$") {
+                    $innerCommand = $Matches[1]
+                }
+                $innerCommand = $innerCommand.Trim()
+
+                $innerDomain = Get-CommandDomain -Command $innerCommand
+
+                $nested += [PSCustomObject]@{
+                    CommandText   = $innerCommand
+                    Domain        = $innerDomain
+                    IsPipeline    = $false
+                    ParentCommand = $trimmed
+                }
+
+                $splitInner = Split-Commands -Command $innerCommand -Domain $innerDomain
+                foreach ($seg in $splitInner) {
+                    $seg.ParentCommand = $trimmed
+                }
+                $nested += $splitInner
+
+                return $nested
+            }
+        }
     }
 
     # docker exec <container> "<inner>" or docker exec -it <container> "<inner>"

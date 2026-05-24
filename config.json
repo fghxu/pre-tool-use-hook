@@ -47,7 +47,7 @@
 		"vscode_get_confirmation",
 		"vscode_get_confirmation_with_options",
 		"vscode_get_terminal_confirmation",
-		
+			
 		
 		"Bash",
 		"ExitPlanMode",
@@ -86,6 +86,8 @@
 		"vscode_askQuestions",
 		"switch_agent",
 		"tool_search",
+		
+		"mcp__brave-search__brave_web_search",
 
 	  
 		"Edit",
@@ -314,11 +316,11 @@
         { "name": "ping",     "patterns": ["ping *"],                                             "description": "Send ICMP echo requests" },
         { "name": "bash",     "patterns": ["bash", "sh *"],                                       "description": "Shell interpreter receiving piped/redirected input" },
         { "name": "sleep",    "patterns": ["sleep *"],                                            "description": "Delay/suspend execution" },
-        { "name": "ln",       "patterns": ["ln *"],                                               "risk": "low",    "description": "Create hard/symbolic links" },
-        { "name": "mkdir",    "patterns": ["mkdir *"],                                            "risk": "low",    "description": "Create directory" },
         { "name": "true",     "patterns": ["true"],                                               "description": "Return success (shell builtin)" }
       ],
       "modifying": [
+        { "name": "mkdir",    "patterns": ["mkdir *"],                                            "risk": "low",    "description": "Create directory" },
+        { "name": "ln",       "patterns": ["ln *"],                                               "risk": "low",    "description": "Create hard/symbolic links" },
         { "name": "rm",       "patterns": ["rm *"],                                               "risk": "high",   "description": "Remove files/directories" },
         { "name": "mv",       "patterns": ["mv *"],                                               "risk": "medium", "description": "Move/rename files" },
         { "name": "cp",       "patterns": ["cp *"],                                               "risk": "medium", "description": "Copy files" },

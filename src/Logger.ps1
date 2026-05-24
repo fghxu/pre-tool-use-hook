@@ -199,8 +199,8 @@ function Write-LogEntry {
         }
         else {
             $inputJson = $RawInput | ConvertTo-Json -Compress -Depth 5
-            if ($inputJson.Length -gt 50) {
-                $inputJson = $inputJson.Substring(0, 50)
+            if ($inputJson.Length -gt 360) {
+                $inputJson = $inputJson.Substring(0, 360)
             }
             $body = "  Input: ${inputJson}`n"
         }
@@ -239,9 +239,9 @@ function Write-LogEntry {
         }
 
         $commandText = if ($ClassifyResult.Command) { $ClassifyResult.Command } else { '' }
-        # Truncate commands >10KB to 500 chars in log (full command preserved in record)
+        # Truncate commands >10KB to 10240 chars in log (full command preserved in record)
         if ($commandText.Length -gt 10240) {
-            $commandText = $commandText.Substring(0, 500) + "..."
+            $commandText = $commandText.Substring(0, 10240) + "..."
         }
         $body = "${reasonLine}  Command: ___ [${commandText}] ___`n"
     }

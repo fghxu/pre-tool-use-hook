@@ -46,7 +46,7 @@
     </test-case>
 
     <test-case expected="allow" reason="read-only: cd" category="DOS-FileInspection">
-      <description>cd chained with git status via &&</description>
+      <description>cd chained with git status via &amp;&amp;</description>
       <copilot-command><![CDATA[cd "C:/git/cc/comfy" && git status 2>&1]]></copilot-command>
     </test-case>
 
@@ -229,7 +229,7 @@
       <copilot-command><![CDATA[ren *.txt *.bak]]></copilot-command>
     </test-case>
 
-    <test-case expected="allow" reason="read-only: mkdir" category="DOS-FileModification">
+    <test-case expected="ask" reason="modifying: mkdir" category="DOS-FileModification">
       <description>mkdir creates new directories recursively</description>
       <copilot-command><![CDATA[mkdir C:\Projects\new-feature\src]]></copilot-command>
     </test-case>
@@ -1217,7 +1217,7 @@ done]]></copilot-command>
 
     <!-- ==================== MODIFYING Linux/Bash ==================== -->
 
-    <test-case expected="allow" reason="read-only: mkdir" category="Linux-FileModification">
+    <test-case expected="ask" reason="modifying: mkdir" category="Linux-FileModification">
       <description>mkdir creates a new directory</description>
       <copilot-command><![CDATA[mkdir -p /opt/myapp/config]]></copilot-command>
     </test-case>
@@ -1484,7 +1484,7 @@ done]]></copilot-command>
       <copilot-command><![CDATA[docker images --format '{{.Tag}}' | grep latest | while read tag; do docker run -d "myapp:$tag"; done]]></copilot-command>
     </test-case>
 
-    <test-case expected="allow" reason="read-only: ln -s creates symlink" category="Linux-FileModification">
+    <test-case expected="ask" reason="modifying: ln" category="Linux-FileModification">
       <description>ln -s creates a symbolic link to a file</description>
       <copilot-command><![CDATA[ln -s /opt/releases/app-v2.1 /var/www/current]]></copilot-command>
     </test-case>
@@ -1503,6 +1503,539 @@ done]]></copilot-command>
       <description>ip route show displays the routing table (read-only)</description>
       <copilot-command><![CDATA[ip route show table all]]></copilot-command>
     </test-case>
+
+	<!-- =================================================================== -->
+	<!-- SSH wrapper commands — comprehensive flag and combination coverage    -->
+	<!--                                                                       -->
+	<!-- 22 value-taking flags: B,b,c,D,E,e,F,I,i,J,L,l,m,O,o,P,p,Q,R,S,W,w  -->
+	<!-- 23 boolean flags:      4,6,A,a,C,f,G,g,K,k,M,N,n,q,s,T,t,V,v,X,x,Y,y -->
+	<!--                                                                       -->
+	<!-- Inner read-only commands → "allow"                                    -->
+	<!-- Inner modifying commands → "ask"                                      -->
+	<!-- =================================================================== -->
+
+	<!-- ================================================================ -->
+    <!-- BASIC — no flags, simple usage                                    -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Basic">
+      <description>ssh user@host with quoted ls</description>
+      <copilot-command><![CDATA[ssh frank@serverA "ls /home/frank"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Basic">
+      <description>ssh user@host unquoted ls</description>
+      <copilot-command><![CDATA[ssh deploy@serverD ls /opt/app/logs]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Basic">
+      <description>ssh user@host with single-quoted command</description>
+      <copilot-command><![CDATA[ssh ops@monitor 'cat /etc/hostname']]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- AUTH / IDENTITY FLAGS: -i -l -I -K -k -o                          -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Auth">
+      <description>ssh -l user host with ls</description>
+      <copilot-command><![CDATA[ssh -l frank serverA "ls /home/frank"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Auth">
+      <description>ssh -i key -l user host with ls</description>
+      <copilot-command><![CDATA[ssh -i ~/.ssh/id_rsa -l frank serverA "ls /home/frank"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Auth">
+      <description>ssh -i keyfile user@host with cat (no -l)</description>
+      <copilot-command><![CDATA[ssh -i ~/.ssh/deploy_key ops@serverB "cat /etc/hosts"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Auth">
+      <description>ssh -I pkcs11 library user@host with whoami</description>
+      <copilot-command><![CDATA[ssh -I /usr/lib/opensc-pkcs11.so admin@serverC "whoami"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Auth">
+      <description>ssh -K (GSSAPI auth + delegation) user@host with hostname</description>
+      <copilot-command><![CDATA[ssh -K user@kerberos-host "hostname"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Auth">
+      <description>ssh -k (disable GSSAPI delegation) user@host with df</description>
+      <copilot-command><![CDATA[ssh -k user@storage "df -h"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Auth">
+      <description>ssh -o option user@host with grep</description>
+      <copilot-command><![CDATA[ssh -o StrictHostKeyChecking=no user@host "grep error /var/log/syslog"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Auth">
+      <description>ssh with two -o options user@host with wc</description>
+      <copilot-command><![CDATA[ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null user@host "wc -l /var/log/messages"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Auth">
+      <description>ssh -o option with baked-in value (no space)</description>
+      <copilot-command><![CDATA[ssh -oStrictHostKeyChecking=no user@host "whoami"]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- NETWORK / TRANSPORT FLAGS: -p -4 -6 -B -b -c -m -P                -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Network">
+      <description>ssh -p port user@host with cat</description>
+      <copilot-command><![CDATA[ssh -p 2222 admin@serverB "cat /etc/hosts"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Network">
+      <description>ssh -p with baked-in port value (no space)</description>
+      <copilot-command><![CDATA[ssh -p2222 admin@serverB "cat /etc/hosts"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Network">
+      <description>ssh -4 (IPv4 only) user@host with ping</description>
+      <copilot-command><![CDATA[ssh -4 user@v4-only "ping -c 1 localhost"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Network">
+      <description>ssh -6 (IPv6 only) user@host with ping6</description>
+      <copilot-command><![CDATA[ssh -6 admin@ipv6-host "ping -c 1 localhost"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Network">
+      <description>ssh -B bind_interface user@host with uname</description>
+      <copilot-command><![CDATA[ssh -B eth1 user@host "uname -a"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Network">
+      <description>ssh -b bind_address user@host with hostname</description>
+      <copilot-command><![CDATA[ssh -b 10.0.0.100 user@host "hostname"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Network">
+      <description>ssh -c cipher user@host with df</description>
+      <copilot-command><![CDATA[ssh -c aes256-gcm@openssh.com user@host "df -h"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Network">
+      <description>ssh -m mac_spec user@host with whoami</description>
+      <copilot-command><![CDATA[ssh -m hmac-sha2-512-etm@openssh.com user@host "whoami"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Network">
+      <description>ssh -P tag user@host with cat</description>
+      <copilot-command><![CDATA[ssh -P production user@host "cat /etc/motd"]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- PORT FORWARDING FLAGS: -L -R -D -w -g                             -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Tunnel">
+      <description>ssh -L local forward with ls</description>
+      <copilot-command><![CDATA[ssh -L 8080:localhost:80 user@host "ls /var/www"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Tunnel">
+      <description>ssh -L local forward with bind address</description>
+      <copilot-command><![CDATA[ssh -L 127.0.0.1:3306:db.internal:3306 user@bastion "ss -tlnp | grep 3306"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Tunnel">
+      <description>ssh -R remote forward with cat</description>
+      <copilot-command><![CDATA[ssh -R 9000:localhost:3000 user@host "cat /etc/nginx/nginx.conf"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Tunnel">
+      <description>ssh -R remote forward with bind address</description>
+      <copilot-command><![CDATA[ssh -R 0.0.0.0:8000:localhost:8000 user@public "ps aux | grep app"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Tunnel">
+      <description>ssh -D dynamic forward (SOCKS proxy) with ls</description>
+      <copilot-command><![CDATA[ssh -D 1080 user@host "ls -la /opt"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Tunnel">
+      <description>ssh -D dynamic forward with bind address</description>
+      <copilot-command><![CDATA[ssh -D 127.0.0.1:1080 user@host "df -h"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Tunnel">
+      <description>ssh -w tunnel device with uname</description>
+      <copilot-command><![CDATA[ssh -w 0:0 user@host "uname -r"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Tunnel">
+      <description>ssh -g (gateway mode) with -L forwarding and ls</description>
+      <copilot-command><![CDATA[ssh -g -L 8080:localhost:80 user@host "ls /tmp"]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- CONFIG / DEBUG FLAGS: -F -E -e -S -v -q -y                        -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Config">
+      <description>ssh -F configfile user@host with ls</description>
+      <copilot-command><![CDATA[ssh -F ~/.ssh/custom_config user@host "ls /opt"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Config">
+      <description>ssh -E log_file user@host with cat</description>
+      <copilot-command><![CDATA[ssh -E /tmp/ssh_debug.log user@host "cat /etc/issue"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Config">
+      <description>ssh -e escape_char user@host with grep</description>
+      <copilot-command><![CDATA[ssh -e ^ user@host "grep ERROR /var/log/app.log"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Config">
+      <description>ssh -S ctl_path user@host with whoami</description>
+      <copilot-command><![CDATA[ssh -S ~/.ssh/controlmasters/%r@%h:%p user@host "whoami"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Config">
+      <description>ssh -v (verbose) user@host with whoami</description>
+      <copilot-command><![CDATA[ssh -v frank@serverA "whoami"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Config">
+      <description>ssh -v -v (double verbose) user@host with head</description>
+      <copilot-command><![CDATA[ssh -v -v ops@serverA "head -10 /var/log/syslog"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Config">
+      <description>ssh -q (quiet) user@host with df</description>
+      <copilot-command><![CDATA[ssh -q frank@serverA "df -h"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Config">
+      <description>ssh -y (syslog logging) user@host with hostname</description>
+      <copilot-command><![CDATA[ssh -y admin@serverA "hostname"]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- TTY / INTERACTIVE FLAGS: -T -t -s -n                               -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-TTY">
+      <description>ssh -T (disable TTY) user@host with ps</description>
+      <copilot-command><![CDATA[ssh -T frank@serverA "ps aux"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-TTY">
+      <description>ssh -t (force TTY) user@host with uname</description>
+      <copilot-command><![CDATA[ssh -t admin@serverE "uname -a"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-TTY">
+      <description>ssh -t -t (double force TTY) user@host with ps</description>
+      <copilot-command><![CDATA[ssh -t -t ops@serverG "ps aux"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-TTY">
+      <description>ssh -n (stdin from /dev/null) user@host with du</description>
+      <copilot-command><![CDATA[ssh -n backup@serverF "du -sh /data"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-TTY">
+      <description>ssh -s sftp subsystem with user@host</description>
+      <copilot-command><![CDATA[ssh -s admin@nas-server sftp]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- X11 / AGENT FORWARDING FLAGS: -A -a -X -x -Y                       -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Forwarding">
+      <description>ssh -A (agent forwarding) -i key user@host with grep</description>
+      <copilot-command><![CDATA[ssh -A -i ~/.ssh/id_rsa frank@bastion "grep sshd /var/log/auth.log"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Forwarding">
+      <description>ssh -a (disable agent forwarding) user@host with ls</description>
+      <copilot-command><![CDATA[ssh -a user@host "ls /etc/ssh"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Forwarding">
+      <description>ssh -X (X11 forwarding) user@host with echo DISPLAY</description>
+      <copilot-command><![CDATA[ssh -X user@desktop "echo $DISPLAY"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Forwarding">
+      <description>ssh -x (disable X11 forwarding) user@host with cat</description>
+      <copilot-command><![CDATA[ssh -x user@host "cat /etc/X11/xorg.conf"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Forwarding">
+      <description>ssh -Y (trusted X11 forwarding) user@host with echo</description>
+      <copilot-command><![CDATA[ssh -Y user@workstation "echo $DISPLAY"]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- BACKGROUND / MULTIPLEXING FLAGS: -f -M -O -N -C                    -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Multiplex">
+      <description>ssh -f (background) user@host with sleep+echo (command still extracted)</description>
+      <copilot-command><![CDATA[ssh -f user@host "sleep 5 && echo done"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Multiplex">
+      <description>ssh -C (compression) user@host with head</description>
+      <copilot-command><![CDATA[ssh -C frank@serverA "head -20 /var/log/messages"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Multiplex">
+      <description>ssh -M (master mode) -S ctl_path user@host with ps</description>
+      <copilot-command><![CDATA[ssh -M -S ~/.ssh/ctl/%r@%h:%p user@host "ps aux | head -10"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Multiplex">
+      <description>ssh -O check (control master) -S ctl_path user@host with ls</description>
+      <copilot-command><![CDATA[ssh -O check -S ~/.ssh/ctl/socket user@host "ls /tmp"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Multiplex">
+      <description>ssh -N (no command) user@host still extracts trailing command if present</description>
+      <copilot-command><![CDATA[ssh -N user@host "whoami"]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- JUMP HOST FLAGS: -J                                                -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-JumpHost">
+      <description>ssh -J jump_host user@final with ls</description>
+      <copilot-command><![CDATA[ssh -J bastion user@internal "ls /opt/app"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-JumpHost">
+      <description>ssh -J jump with user and port</description>
+      <copilot-command><![CDATA[ssh -J ops@bastion:2222 deploy@app-server "cat /opt/app/version.txt"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-JumpHost">
+      <description>ssh -J multiple jump hops (comma-separated)</description>
+      <copilot-command><![CDATA[ssh -J user@hop1,user@hop2:2222 admin@target "hostname"]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- MIXED BOOLEAN FLAGS                                               -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-MixedBool">
+      <description>ssh -v -T user@host with hostname</description>
+      <copilot-command><![CDATA[ssh -v -T frank@serverA "hostname"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-MixedBool">
+      <description>ssh -v -q (verbose + quiet, last wins) user@host with ss check</description>
+      <copilot-command><![CDATA[ssh -v -q user@host "ss -tlnp | grep 22 && echo open"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-MixedBool">
+      <description>ssh -4 -C -q user@host with pgrep</description>
+      <copilot-command><![CDATA[ssh -4 -C -q user@host "pgrep -u root sshd"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-MixedBool">
+      <description>ssh -A -X -Y user@host with echo</description>
+      <copilot-command><![CDATA[ssh -A -X -Y user@workstation "echo Forwarding enabled"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-MixedBool">
+      <description>ssh -a -x -k user@host with ls (all-disable variant)</description>
+      <copilot-command><![CDATA[ssh -a -x -k user@host "ls -la /tmp"]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- COMPLEX COMBINATIONS — many flag types mixed                      -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh -i key -p port -l user host with ls (value flags only)</description>
+      <copilot-command><![CDATA[ssh -i ~/.ssh/deploy_key -p 2222 -l deploy serverC "ls -la /var/www"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh -v -p port -l user host with cat (boolean + value flags)</description>
+      <copilot-command><![CDATA[ssh -v -p 22 -l root serverA "cat /proc/cpuinfo"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh -v -i key -p port -l user -C host with grep (four value + two boolean)</description>
+      <copilot-command><![CDATA[ssh -v -i ~/.ssh/id_ed25519 -p 2222 -l admin -C app-server "grep ERROR /var/log/app/error.log"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh -4 -C -q -i key user@host with df</description>
+      <copilot-command><![CDATA[ssh -4 -C -q -i ~/.ssh/id_rsa backup@nas "df -h /mnt/backup"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh -t -A -i key -p port user@host with uname</description>
+      <copilot-command><![CDATA[ssh -t -A -i ~/.ssh/admin_key -p 2222 admin@jump "uname -a"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh -J jump -i key -p port -C user@target with ls</description>
+      <copilot-command><![CDATA[ssh -J bastion -i ~/.ssh/deploy -p 2222 -C app@target "ls -la /opt/releases"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh -o option -L forward -v user@host with ps</description>
+      <copilot-command><![CDATA[ssh -o StrictHostKeyChecking=no -L 8080:localhost:80 -v user@web "ps aux | grep nginx"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh -F config -E log -c cipher -m mac user@host with whoami</description>
+      <copilot-command><![CDATA[ssh -F ~/.ssh/custom -E /tmp/ssh.log -c aes256-ctr -m hmac-sha2-256 user@host "whoami"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh -D 1080 -C -q -f user@host with ss check</description>
+      <copilot-command><![CDATA[ssh -D 1080 -C -q -f user@proxy "ss -tlnp | grep 22 && echo OK"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh -L local -R remote -D dynamic all together</description>
+      <copilot-command><![CDATA[ssh -L 8080:localhost:80 -R 9000:localhost:3000 -D 1080 user@host "ss -tlnp"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Combined">
+      <description>ssh with maximum flags: value + boolean + tunnel + config</description>
+      <copilot-command><![CDATA[ssh -v -4 -C -A -X -i ~/.ssh/id_rsa -p 2222 -l admin -o StrictHostKeyChecking=no -F ~/.ssh/special -E /tmp/ssh.log -c chacha20-poly1305@openssh.com -m hmac-sha2-512-etm@openssh.com -L 8080:localhost:80 -D 1080 serverZ "id"]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- EDGE CASES                                                       -->
+    <!-- ================================================================ -->
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-EdgeCases">
+      <description>ssh with smashed boolean flags (-vT is -v -T)</description>
+      <copilot-command><![CDATA[ssh -vT user@host "hostname"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-EdgeCases">
+      <description>ssh with smashed boolean flags (-AX is -A -X)</description>
+      <copilot-command><![CDATA[ssh -AX user@host "echo $DISPLAY"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-EdgeCases">
+      <description>ssh -t -t -t (triple force TTY) user@host with uname</description>
+      <copilot-command><![CDATA[ssh -t -t -t admin@server "uname -r"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-EdgeCases">
+      <description>ssh with two -i options (multiple identity files)</description>
+      <copilot-command><![CDATA[ssh -i ~/.ssh/id_rsa -i ~/.ssh/id_ed25519 user@host "whoami"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-EdgeCases">
+      <description>ssh -p with baked-in port, -o with baked-in value</description>
+      <copilot-command><![CDATA[ssh -p2222 -oStrictHostKeyChecking=no user@host "ls"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-EdgeCases">
+      <description>ssh -J with baked-in port on jump host</description>
+      <copilot-command><![CDATA[ssh -J ops@bastion:2222 app@internal "cat /etc/motd"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown" category="Linux-SSH-EdgeCases">
+      <description>ssh -W host:port (stdin/stdout forward) user@host — no inner command, classifier sees unknown</description>
+      <copilot-command><![CDATA[ssh -W internal:80 user@bastion]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-EdgeCases">
+      <description>ssh -e none (disable escape char) user@host with ls</description>
+      <copilot-command><![CDATA[ssh -e none user@host "ls /home/admin"]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================ -->
+    <!-- MODIFYING INNER COMMANDS — should be "ask"                        -->
+    <!-- ================================================================ -->
+
+    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh user@host with rm (modifying)</description>
+      <copilot-command><![CDATA[ssh frank@serverA "rm -rf /tmp/test"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh -i key user@host with mkdir (modifying)</description>
+      <copilot-command><![CDATA[ssh -i ~/.ssh/key.pem deploy@serverA "mkdir -p /tmp/newdir"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh user@host with chmod (modifying)</description>
+      <copilot-command><![CDATA[ssh frank@serverB "chmod 755 /var/www/app"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh -p port user@host with mv (modifying)</description>
+      <copilot-command><![CDATA[ssh -p 2222 admin@serverC "mv /tmp/file /opt/data/"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh user@host with touch (modifying)</description>
+      <copilot-command><![CDATA[ssh ops@serverA "touch /var/log/app.deploy"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh user@host with cp (modifying)</description>
+      <copilot-command><![CDATA[ssh deploy@serverB "cp /opt/staging/app.jar /opt/releases/"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh -o option user@host with chown (modifying)</description>
+      <copilot-command><![CDATA[ssh -o StrictHostKeyChecking=no admin@host "chown app:app /var/www/html"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh -J jump user@host with rm (modifying nested in jump)</description>
+      <copilot-command><![CDATA[ssh -J bastion deploy@app-server "rm -rf /opt/app/old-releases/*"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh -L forward user@host with systemctl restart (modifying)</description>
+      <copilot-command><![CDATA[ssh -L 8080:localhost:80 user@web "systemctl restart nginx"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh -v -i key -p port user@host with sed -i (modifying in-place edit)</description>
+      <copilot-command><![CDATA[ssh -v -i ~/.ssh/deploy -p 2222 ops@server "sed -i 's/old/new/g' /etc/app/config.yml"]]></copilot-command>
+    </test-case>
+	
+	<test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh -v -i key -p port user@host with find -exec cat (find -exec excluded from read-only pattern)</description>
+      <copilot-command><![CDATA[ssh -v -i ~/.ssh/deploy -p 2222 ops@server "find /home/usrA/ -type f -name 'test*' -exec cat {} \;"]]></copilot-command>
+    </test-case>
+	
+	<test-case expected="allow" reason="query" category="Linux-SSH-Query-Only">
+      <description>ssh -v -i key -p port user@host with while-read loop (cat only, no modifying)</description>
+      <copilot-command><![CDATA[ssh -v -i ~/.ssh/deploy -p 2222 ops@server " find /home/usrA/ -type f -name 'test*' | while read -r file; do echo Processing; cat \$file; echo Done; done"]]></copilot-command>
+    </test-case>	
+	
+	<test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh -v -i key -p port user@host with -exec option and rm command)</description>
+      <copilot-command><![CDATA[ssh -v -i ~/.ssh/deploy -p 2222 ops@server "find /home/usrA/ -type f -name 'test*' -exec sh -c 'cat "$1"; rm "$1"' _ {} \;"]]></copilot-command>
+    </test-case>
+	
+	<test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
+      <description>ssh -v -i key -p port user@host with while-read loop containing rm</description>
+      <copilot-command><![CDATA[ssh -v -i ~/.ssh/deploy -p 2222 ops@server " find /home/usrA/ -type f -name 'test*' | while read -r file; do \
+    echo \"===== $file =====\"; \
+    cat \"$file\"; \
+	rm \"$file\"; \
+    echo -e \"\n\"; \
+  done"]]></copilot-command>
+    </test-case>
+
 
   </category-group>
 
