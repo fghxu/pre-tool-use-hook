@@ -15,7 +15,7 @@
   ],
 
   "trusted_pattern": [
-	"^trusted\\.ps1$",
+	"^trusted_pattern$",
 	"^trusted_stuff\\s+$"
   ],
   "untrusted_pattern": [
@@ -235,6 +235,8 @@
         { "name": "Get-Content",        "patterns": ["Get-Content *", "gc *", "cat *", "type *"],  "description": "Read file contents" },
         { "name": "Get-ChildItem",      "patterns": ["Get-ChildItem *", "dir *", "ls *", "gci *"], "description": "List directory contents" },
         { "name": "Select-String",      "patterns": ["Select-String *", "sls *"],                  "description": "Search text patterns in files" },
+        { "name": "ConvertFrom-Json",   "patterns": ["ConvertFrom-Json", "ConvertFrom-Json *"],    "description": "Convert from Json format" },
+        { "name": "ConvertTo-Json",     "patterns": ["ConvertTo-Json", "ConvertTo-Json *"],        "description": "Convert to Json format" },
         { "name": "Test-Connection",    "patterns": ["Test-Connection *"],                         "description": "Ping test" },
         { "name": "Test-NetConnection", "patterns": ["Test-NetConnection *"],                      "description": "check port" },
         { "name": "Test-Path",          "patterns": ["Test-Path *"],                               "description": "Check if path exists" },
@@ -534,9 +536,9 @@
 
     "AWS_CLI": {
       "description": "AWS CLI commands — classified by service and operation verb",
-      "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait "],
+      "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-"],
       "modifying_prefixes": {
-        "high":   ["delete-", "terminate-", "remove-", "detach-", "deactivate-", "disable-", "revoke-", "deregister-"],
+        "high":   ["delete-", "terminate-", "remove-", "detach-", "deactivate-", "disable-", "revoke-", "deregister-", "execute-"],
         "medium": ["create-", "put-", "update-", "modify-", "attach-", "enable-", "activate-", "register-", "import-", "copy-", "sync", "cp ", "mv ", "start-"]
       },
       "read_only": [
