@@ -104,6 +104,36 @@ function Resolve-Command {
     }
 
     # -------------------------------------------------
+    # Step 0c: Linux/DOS sudo prefix stripping
+    #   "sudo cat /opt/a.txt" → "cat /opt/a.txt"
+    #   "sudo -u root cat /opt/a.txt" → "cat /opt/a.txt"
+    # -------------------------------------------------
+    if ($domainLower -in @('linux', 'dos_cmd') -and $Command -match '^\s*sudo\s') {
+        $stripped = $Command -replace '^\s*sudo\s+', ''
+        $tokens = @($stripped -split '\s+')
+        $startIdx = 0
+        $valueFlags = @('-u', '-g', '-p', '-c', '-h',
+                        '--user', '--group', '--prompt', '--chdir',
+                        '--host', '--close-from', '--login-class', '--other-user')
+        while ($startIdx -lt $tokens.Count -and $tokens[$startIdx].StartsWith('-')) {
+            $flag = $tokens[$startIdx]
+            $startIdx++
+            if ($valueFlags -contains $flag -and $startIdx -lt $tokens.Count) {
+                $startIdx++
+            }
+        }
+        if ($startIdx -lt $tokens.Count -and $tokens[$startIdx] -eq '--') {
+            $startIdx++
+        }
+        if ($startIdx -lt $tokens.Count) {
+            $remainingCommand = ($tokens[$startIdx..($tokens.Count - 1)] -join ' ').Trim()
+            if ($remainingCommand) {
+                return Resolve-Command -Command $remainingCommand -Domain $Domain -Config $Config
+            }
+        }
+    }
+
+    # -------------------------------------------------
     # Step 1a: Check explicit read_only entries
     # -------------------------------------------------
     $hasReadOnly = Get-Member -InputObject $domainConfig -Name 'read_only' -MemberType NoteProperty -ErrorAction SilentlyContinue
