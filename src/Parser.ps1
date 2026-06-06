@@ -73,6 +73,22 @@ function Get-CommandDomain {
     }
 
     # -------------------------------------------------
+    # Step 0: PowerShell variable assignment strip
+    #   "$creds = aws sts get-caller-identity" → "aws sts get-caller-identity"
+    #   "$x = git status" → "git status"
+    #   Strips the first $var = prefix, then re-detects domain from remainder.
+    #   Safe against comparison operators (-eq, -ne, -lt) because they start
+    #   with '-', not '$'.  Chained assignments ($a = $b = cmd) are handled
+    #   by recursion.
+    # -------------------------------------------------
+    if ($trimmed -match '\$[\w:]+\s*=\s*') {
+        $stripped = [regex]::Replace($trimmed, '\$[\w:]+\s*=\s*', '', 1)
+        if ($stripped -and $stripped -ne $trimmed) {
+            return Get-CommandDomain -Command $stripped
+        }
+    }
+
+    # -------------------------------------------------
     # 1. PowerShell markers (strongest signal)
     # -------------------------------------------------
 
@@ -495,6 +511,13 @@ function Find-NestedCommands {
         }
         $nested += $splitInner
 
+        # Recurse: inner may itself be a wrapped command
+        $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
+        foreach ($in in $innerNested) {
+            $in.ParentCommand = $trimmed
+            $nested += $in
+        }
+
         return $nested
     }
 
@@ -518,6 +541,13 @@ function Find-NestedCommands {
         }
         $nested += $splitInner
 
+        # Recurse: inner may itself be a wrapped command
+        $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
+        foreach ($in in $innerNested) {
+            $in.ParentCommand = $trimmed
+            $nested += $in
+        }
+
         return $nested
     }
 
@@ -540,6 +570,13 @@ function Find-NestedCommands {
         }
         $nested += $splitInner
 
+        # Recurse: inner may itself be a wrapped command
+        $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
+        foreach ($in in $innerNested) {
+            $in.ParentCommand = $trimmed
+            $nested += $in
+        }
+
         return $nested
     }
 
@@ -561,6 +598,13 @@ function Find-NestedCommands {
             $seg.ParentCommand = $trimmed
         }
         $nested += $splitInner
+
+        # Recurse: inner may itself be a wrapped command
+        $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
+        foreach ($in in $innerNested) {
+            $in.ParentCommand = $trimmed
+            $nested += $in
+        }
 
         return $nested
     }
@@ -686,6 +730,13 @@ function Find-NestedCommands {
                 }
                 $nested += $splitInner
 
+                # Recurse: inner may itself be a wrapped command (e.g., ssh inside pwsh)
+                $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
+                foreach ($in in $innerNested) {
+                    $in.ParentCommand = $trimmed
+                    $nested += $in
+                }
+
                 return $nested
             }
         }
@@ -710,6 +761,13 @@ function Find-NestedCommands {
         }
         $nested += $splitInner
 
+        # Recurse: inner may itself be a wrapped command
+        $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
+        foreach ($in in $innerNested) {
+            $in.ParentCommand = $trimmed
+            $nested += $in
+        }
+
         return $nested
     }
 
@@ -731,6 +789,13 @@ function Find-NestedCommands {
             $seg.ParentCommand = $trimmed
         }
         $nested += $splitInner
+
+        # Recurse: inner may itself be a wrapped command
+        $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
+        foreach ($in in $innerNested) {
+            $in.ParentCommand = $trimmed
+            $nested += $in
+        }
 
         return $nested
     }
@@ -754,6 +819,13 @@ function Find-NestedCommands {
             $seg.ParentCommand = $trimmed
         }
         $nested += $splitInner
+
+        # Recurse: inner may itself be a wrapped command
+        $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
+        foreach ($in in $innerNested) {
+            $in.ParentCommand = $trimmed
+            $nested += $in
+        }
 
         return $nested
     }
@@ -1415,6 +1487,11 @@ function Get-AstWrapperInnerCommands {
                 $nextArg = $commandElements[$i + 1]
                 if ($nextArg -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
                     $innerCommand = $nextArg.Value
+                }
+                elseif ($nextArg -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+                    $innerCommand = $nextArg.Extent.Text.Trim('"').Trim("'")
+                }
+                if ($innerCommand) {
                     $innerDomain = Get-CommandDomain -Command $innerCommand
                     $null = $results.Add([PSCustomObject]@{
                         CommandText = $innerCommand
@@ -1455,6 +1532,11 @@ function Get-AstWrapperInnerCommands {
                 $nextArg = $commandElements[$i + 1]
                 if ($nextArg -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
                     $innerCommand = $nextArg.Value
+                }
+                elseif ($nextArg -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+                    $innerCommand = $nextArg.Extent.Text.Trim('"').Trim("'")
+                }
+                if ($innerCommand) {
                     $null = $results.Add([PSCustomObject]@{
                         CommandText = $innerCommand
                         Domain      = 'linux'
@@ -1477,6 +1559,11 @@ function Get-AstWrapperInnerCommands {
                 $nextArg = $commandElements[$i + 1]
                 if ($nextArg -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
                     $innerCommand = $nextArg.Value
+                }
+                elseif ($nextArg -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+                    $innerCommand = $nextArg.Extent.Text.Trim('"').Trim("'")
+                }
+                if ($innerCommand) {
                     $null = $results.Add([PSCustomObject]@{
                         CommandText = $innerCommand
                         Domain      = 'dos'

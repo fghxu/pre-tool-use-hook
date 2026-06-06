@@ -96,11 +96,17 @@ function Resolve-Command {
     $domainConfig = $Config.commands.$domainKey
 
     # -------------------------------------------------
-    # Step 0b: PowerShell variable assignment — strip "$var = " prefix
-    #   e.g., "$computers = Get-Content ..." → "Get-Content ..."
+    # Step 0b: Variable assignment strip (domain-agnostic)
+    #   "$computers = Get-Content ..." → "Get-Content ..."
+    #   "$creds = aws sts get-caller-identity" → "aws sts get-caller-identity"
+    #   After stripping, re-detect domain and recurse.
     # -------------------------------------------------
-    if ($domainLower -eq "powershell" -and $Command -match '^\s*\$[\w:]+\s*=\s*') {
-        $Command = $Command -replace '^\s*\$[\w:]+\s*=\s*', ''
+    if ($Command -match '^\s*\$[\w:]+\s*=\s*') {
+        $strippedCmd = $Command -replace '^\s*\$[\w:]+\s*=\s*', ''
+        if ($strippedCmd -and $strippedCmd -ne $Command) {
+            $redetectedDomain = Get-CommandDomain -Command $strippedCmd
+            return Resolve-Command -Command $strippedCmd -Domain $redetectedDomain -Config $Config
+        }
     }
 
     # -------------------------------------------------
