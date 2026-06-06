@@ -5,9 +5,88 @@
       <description>SSH remote git status (read-only)</description>
       <copilot-command><![CDATA[ssh user@host "git status"]]></copilot-command>
     </test-case>
-   
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
+      <description>SSH remote git -C /path status (read-only, -C flag stripped)</description>
+      <copilot-command><![CDATA[ssh user@host "git -C /opt/repo status"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
+      <description>SSH remote sudo git -C /path log --oneline (sudo stripped, git log read-only)</description>
+      <copilot-command><![CDATA[ssh user@host "sudo git -C /opt/che/cookbook log --oneline"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push" category="Linux-SSH-Git-Modifying">
+      <description>SSH remote git -C /path push origin main (modifying)</description>
+      <copilot-command><![CDATA[ssh user@host "git -C /opt/repo push origin main"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="sudo git push" category="Linux-SSH-Git-Modifying">
+      <description>SSH remote sudo git -C /path push (sudo stripped, git push modifying)</description>
+      <copilot-command><![CDATA[ssh admin@prod "sudo git -C /opt/site push origin master"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="unknown command" category="Linux-SSH-Git-Unknown">
+      <description>SSH remote sudo git -C /path --online -3 2>/dev/null (unknown git subcommand)</description>
+      <copilot-command><![CDATA[ssh user@host "sudo git -C /opt/che/cookbook --online -3 2>/dev/null"]]></copilot-command>
+    </test-case>
   </category-group>
-  
-  
+
+  <category-group name="DOS-Git">
+    <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
+      <description>git -C C:\repo status (read-only, -C flag stripped)</description>
+      <copilot-command><![CDATA[git -C C:\repo status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
+      <description>git -C "C:\Program Files\repo" log --oneline (read-only, quoted path, -C stripped)</description>
+      <copilot-command><![CDATA[git -C "C:\Program Files\repo" log --oneline]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
+      <description>git -c core.autocrlf=true -C C:\repo diff (read-only, multiple flags stripped)</description>
+      <copilot-command><![CDATA[git -c core.autocrlf=true -C C:\repo diff]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push" category="DOS-Git-Modifying">
+      <description>git -C C:\repo push origin main (modifying, -C flag stripped)</description>
+      <copilot-command><![CDATA[git -C C:\repo push origin main]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git reset" category="DOS-Git-Modifying">
+      <description>git -C C:\repo reset --hard HEAD~1 (modifying, high risk)</description>
+      <copilot-command><![CDATA[git -C C:\repo reset --hard HEAD~1]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="unknown command" category="DOS-Git-Unknown">
+      <description>git -C C:\repo --online -3 (unknown git subcommand)</description>
+      <copilot-command><![CDATA[git -C C:\repo --online -3]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="AWS-Strictness-Normal">
+    <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
+      <description>aws ec2 describe-instances with --filters flag (normal mode: --flags stripped, describe is read-only)</description>
+      <copilot-command><![CDATA[aws ec2 describe-instances --filters Name=tag:Name,Values=my-inst --region us-east-1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
+      <description>aws with global --profile and --region flags before subcommand (normal mode: flags stripped)</description>
+      <copilot-command><![CDATA[aws --profile prod ec2 describe-instances --region us-east-1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
+      <description>aws ec2 describe-instances with --unknown-flag (normal mode: unknown flag ignored)</description>
+      <copilot-command><![CDATA[aws ec2 describe-instances --unknown-flag some-value]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
+      <description>aws ec2 with service-level --flag before describe (normal mode: interleaved flag stripped)</description>
+      <copilot-command><![CDATA[aws ec2 --region us-west-2 describe-instances]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="terminate-instances" category="AWS-Normal-Modifying">
+      <description>aws ec2 terminate-instances with --instance-ids flag (normal mode: flags stripped, terminate is modifying)</description>
+      <copilot-command><![CDATA[aws ec2 terminate-instances --instance-ids i-1234567890abcdef0]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="terminate-instances" category="AWS-Normal-Modifying">
+      <description>aws --profile prod ec2 --region us-east-1 terminate-instances (normal mode: all flags stripped, terminate is modifying)</description>
+      <copilot-command><![CDATA[aws --profile prod ec2 --region us-east-1 terminate-instances --instance-ids i-123456]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="s3 rm" category="AWS-Normal-Modifying">
+      <description>aws s3 rm with --recursive and --exclude flags (normal mode: flags stripped, rm is modifying)</description>
+      <copilot-command><![CDATA[aws s3 rm s3://my-bucket/logs/ --recursive --exclude "*.gz"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="s3 sync" category="AWS-Normal-Modifying">
+      <description>aws s3 sync with --delete flag (normal mode: flags stripped, sync is modifying)</description>
+      <copilot-command><![CDATA[aws s3 sync ./build s3://my-bucket/ --delete --exclude "*.tmp"]]></copilot-command>
+    </test-case>
+  </category-group>
 
 </commands>

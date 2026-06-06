@@ -119,6 +119,16 @@ function Test-ConfigSchema {
         $Config | Add-Member -MemberType NoteProperty -Name 'log_file_path' -Value '' -Force
     }
 
+    # Default modifying_strictness to "normal" if missing, validate value
+    if (-not (Get-Member -InputObject $Config -Name 'modifying_strictness' -MemberType NoteProperty)) {
+        $Config | Add-Member -MemberType NoteProperty -Name 'modifying_strictness' -Value 'normal' -Force
+    }
+    else {
+        if ($Config.modifying_strictness -notin @('normal', 'strict')) {
+            throw "Configuration validation failed: 'modifying_strictness' must be 'normal' or 'strict', got '$($Config.modifying_strictness)'"
+        }
+    }
+
     # Validate regex patterns in trusted_pattern compile successfully
     foreach ($pattern in $Config.trusted_pattern) {
         try {

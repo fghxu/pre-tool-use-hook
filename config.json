@@ -4,6 +4,8 @@
 
   "log_file_path": "c:\\temp\\logs\\prehook\\",
 
+  "modifying_strictness": "normal",
+
   "known_command_prefixes": [
     "docker", "kubectl", "aws", "npm", "git", "terraform", "helm", "gh", "az", "gcloud",
     "python", "node", "ruby", "go", "cargo", "dotnet","java",
@@ -544,6 +546,7 @@
       },
       "read_only": [
         { "name": "aws s3 ls",                     "patterns": ["aws s3 ls*"],                      "description": "List S3 buckets/objects" },
+        { "name": "aws --version",                 "patterns": ["aws --version *","aws --version"], "description": "List version" },
         { "name": "aws s3api head-object",         "patterns": ["aws s3api head-object*"],          "description": "Get S3 object metadata" },
         { "name": "aws s3api list-objects",        "patterns": ["aws s3api list-objects*"],         "description": "List S3 objects via API" },
         { "name": "aws ec2 describe-*",            "patterns": ["aws ec2 describe-*"],              "description": "Describe EC2 resources" },
@@ -563,6 +566,7 @@
       ],
       "modifying": [
         { "name": "aws sso login",                 "patterns": ["aws sso login*"],                  "risk": "low",    "description": "Login to AWS accounts" },
+        { "name": "aws sts assume-role",           "patterns": ["aws sts assume-role*"],            "risk": "medium", "description": "Generates temporary credentials" },
         { "name": "aws ec2 terminate-instances",   "patterns": ["aws ec2 terminate-instances*"],    "risk": "high",   "description": "Terminate EC2 instances" },
         { "name": "aws s3 rm",                     "patterns": ["aws s3 rm*"],                      "risk": "high",   "description": "Delete S3 objects" },
         { "name": "aws s3 cp",                     "patterns": ["aws s3 cp*"],                      "risk": "medium", "description": "Copy to/from S3" },

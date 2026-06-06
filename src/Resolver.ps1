@@ -157,6 +157,46 @@ function Resolve-Command {
     }
 
     # -------------------------------------------------
+    # Step 0e: AWS flag stripping (normal mode)
+    #   In "normal" mode, strip --flags from AWS CLI commands so only
+    #   the service + verb determine classification.
+    #   "aws --profile prod ec2 --region us-east-1 describe-instances --filters ..."
+    #     → "aws ec2 describe-instances"
+    #   In "strict" mode, current behavior is preserved (unknown flags → ask).
+    # -------------------------------------------------
+    if ($domainLower -eq 'aws_cli' -and $Config.modifying_strictness -eq 'normal' -and $Command -match '^aws\s') {
+        $awsTokens = @($Command.Trim() -split '\s+')
+        $awsFiltered = [System.Collections.Generic.List[string]]::new()
+        $i = 0
+        while ($i -lt $awsTokens.Count) {
+            $tok = $awsTokens[$i]
+            if ($tok.StartsWith('--') -and $tok -ne '--') {
+                # --flag: strip it (and its value if not embedded with =)
+                if ($tok -match '=') {
+                    # --flag=value, value is embedded, skip this token
+                    $i++
+                }
+                elseif (($i + 1) -lt $awsTokens.Count -and -not $awsTokens[$i + 1].StartsWith('-')) {
+                    # --flag value, skip both the flag and its value
+                    $i += 2
+                }
+                else {
+                    # boolean --flag, skip this token
+                    $i++
+                }
+            }
+            else {
+                $awsFiltered.Add($tok)
+                $i++
+            }
+        }
+        $awsNormalized = ($awsFiltered -join ' ').Trim()
+        if ($awsNormalized -ne $Command.Trim()) {
+            return Resolve-Command -Command $awsNormalized -Domain $Domain -Config $Config
+        }
+    }
+
+    # -------------------------------------------------
     # Step 1a: Check explicit read_only entries
     # -------------------------------------------------
     $hasReadOnly = Get-Member -InputObject $domainConfig -Name 'read_only' -MemberType NoteProperty -ErrorAction SilentlyContinue
