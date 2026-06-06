@@ -128,8 +128,31 @@ function Resolve-Command {
         if ($startIdx -lt $tokens.Count) {
             $remainingCommand = ($tokens[$startIdx..($tokens.Count - 1)] -join ' ').Trim()
             if ($remainingCommand) {
-                return Resolve-Command -Command $remainingCommand -Domain $Domain -Config $Config
+                $redetectedDomain = Get-CommandDomain -Command $remainingCommand
+                return Resolve-Command -Command $remainingCommand -Domain $redetectedDomain -Config $Config
             }
+        }
+    }
+
+    # -------------------------------------------------
+    # Step 0d: Git global option stripping
+    #   "git -C /opt/repo status" → "git status"
+    #   "git -c user.name=foo -C /path log" → "git log"
+    #   Strips -C, -c, --git-dir, --work-tree, --namespace, --exec-path
+    #   Handles quoted paths: git -C "C:\Program Files\repo" status
+    # -------------------------------------------------
+    if ($domainLower -eq 'git' -and $Command -match '^\s*git\s') {
+        $stripped = $Command
+        # Quoted or unquoted value: "path with spaces", 'path', unquoted
+        $val = '("[^"]*"|''[^'']*''|\S+)'
+        do {
+            $prev = $stripped
+            $stripped = $stripped -replace "^\s*git\s+-C\s+$val\s+", 'git '
+            $stripped = $stripped -replace "^\s*git\s+-c\s+$val\s+", 'git '
+            $stripped = $stripped -replace "^\s*git\s+--(git-dir|work-tree|namespace|exec-path)=?$val\s+", 'git '
+        } while ($stripped -ne $prev)
+        if ($stripped -ne $Command) {
+            return Resolve-Command -Command $stripped.Trim() -Domain $Domain -Config $Config
         }
     }
 

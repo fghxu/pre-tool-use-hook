@@ -2,7 +2,7 @@
   "version": "1.0",
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
 
-  "log_file_path": "c:\\users\\frank\\prehook\\",
+  "log_file_path": "c:\\temp\\logs\\prehook\\",
 
   "known_command_prefixes": [
     "docker", "kubectl", "aws", "npm", "git", "terraform", "helm", "gh", "az", "gcloud",
@@ -367,6 +367,7 @@
       "read_only": [
         { "name": "git status",    "patterns": ["git status*", "git status *"],                  "description": "Show working tree status" },
         { "name": "git log",       "patterns": ["git log*", "git log *"],                        "description": "Show commit logs" },
+        { "name": "git ls-remote", "patterns": ["git ls-remote*", "git ls-remote *"],            "description": "Show commit logs" },
         { "name": "git diff",      "patterns": ["git diff*", "git diff *"],                      "description": "Show changes" },
         { "name": "git show",      "patterns": ["git show*", "git show *"],                      "description": "Show various objects" },
         { "name": "git branch",    "patterns": ["^git branch$", "git branch -a*", "git branch -l*", "git branch --list*"], "description": "List branches (no write)" },

@@ -2615,52 +2615,140 @@ done]]></copilot-command>
 
   </category-group>
 
-  <!-- =================================================================== -->
-  <!-- Trusted Pattern Gate (bypasses classification)                      -->
-  <!-- =================================================================== -->
-  <category-group name="TrustedPattern">
+  
+  
+  <category-group name="Linux-SSH-Git">
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
+      <description>SSH remote git status (read-only)</description>
+      <copilot-command><![CDATA[ssh user@host "git status"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
+      <description>SSH remote git -C /path status (read-only)</description>
+      <copilot-command><![CDATA[ssh user@host "git -C /opt/repo status"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
+      <description>SSH remote sudo git -C /path log --oneline (read-only)</description>
+      <copilot-command><![CDATA[ssh user@host "sudo git -C /opt/che/cookbook log --oneline"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
+      <description>SSH remote git -c user.name=test -C /tmp/repo diff HEAD~1 (read-only)</description>
+      <copilot-command><![CDATA[ssh user@host "git -c user.name=test -C /tmp/repo diff HEAD~1"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
+      <description>SSH remote sudo git -C /path log (sudo stripped, git log read-only)</description>
+      <copilot-command><![CDATA[ssh deploy@staging "sudo git -C /opt/app log -5"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
+      <description>SSH remote git -C /path status --porcelain (read-only, -C stripped)</description>
+      <copilot-command><![CDATA[ssh user@host "git -C /opt/repo status --porcelain"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="unknown command" category="Linux-SSH-Git-Unknown">
+      <description>SSH remote sudo git -C /path --online -3 2>/dev/null (unknown git subcommand)</description>
+      <copilot-command><![CDATA[ssh user@host "sudo git -C /opt/che/cookbook --online -3 2>/dev/null"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push" category="Linux-SSH-Git-Modifying">
+      <description>SSH remote git -C /path push origin main (modifying)</description>
+      <copilot-command><![CDATA[ssh user@host "git -C /opt/repo push origin main"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push" category="Linux-SSH-Git-Modifying">
+      <description>SSH remote sudo git -C /path push (sudo stripped, git push modifying)</description>
+      <copilot-command><![CDATA[ssh admin@prod "sudo git -C /opt/site push origin master"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="rm -rf" category="Linux-SSH-Git-Modifying">
+      <description>SSH remote sudo git -C /path clean -fd (modifying)</description>
+      <copilot-command><![CDATA[ssh user@host "sudo git -C /opt/repo clean -fd"]]></copilot-command>
+    </test-case>
+  </category-group>
 
-    <test-case expected="allow" reason="trusted pattern: docker exec comfyui" category="TrustedPattern-Gate">
-      <description>Single-line docker exec comfyui matches trusted pattern</description>
-      <copilot-command><![CDATA[docker exec comfyui nvidia-smi --query-gpu=memory.used --format=csv,noheader]]></copilot-command>
+  <category-group name="Linux-SSH">
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-ReadOnly">
+      <description>SSH remote cat (read-only)</description>
+      <copilot-command><![CDATA[ssh -i "c:\temp\a.pem" ec2-user@server "cat /var/log/syslog"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-ReadOnly">
+      <description>SSH remote sudo cat — sudo stripped, inner cat is read-only</description>
+      <copilot-command><![CDATA[ssh -i "c:\temp\a.pem" ec2-user@server "sudo cat /opt/a.txt"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-ReadOnly">
+      <description>SSH remote ls (read-only)</description>
+      <copilot-command><![CDATA[ssh user@host "ls -la /etc"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-ReadOnly">
+      <description>SSH remote sudo ls — sudo stripped, inner ls is read-only</description>
+      <copilot-command><![CDATA[ssh deploy@staging "sudo ls /root"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-ReadOnly">
+      <description>SSH with port flag, remote df (read-only)</description>
+      <copilot-command><![CDATA[ssh -i ~/.ssh/id_rsa -p 2222 admin@host "df -h"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-ReadOnly">
+      <description>SSH remote sudo -u root cat — sudo flag stripped, inner cat is read-only</description>
+      <copilot-command><![CDATA[ssh user@host "sudo -u root cat /etc/shadow"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Linux-SSH-ReadOnly">
+      <description>SSH remote sudo -E ps — sudo boolean flag stripped, inner ps is read-only</description>
+      <copilot-command><![CDATA[ssh user@host "sudo -E ps auxf"]]></copilot-command>
     </test-case>
 
-    <test-case expected="allow" reason="trusted pattern: docker exec -d comfyui" category="TrustedPattern-Gate">
-      <description>Detached docker exec comfyui matches trusted pattern</description>
-      <copilot-command><![CDATA[docker exec -d comfyui bash -c "nvidia-smi && echo done"]]></copilot-command>
+    <test-case expected="ask" reason="rm -rf" category="Linux-SSH-Modifying">
+      <description>SSH remote rm -rf (destructive)</description>
+      <copilot-command><![CDATA[ssh -i key.pem user@host "rm -rf /tmp/cache/*"]]></copilot-command>
     </test-case>
-
-    <test-case expected="allow" reason="trusted pattern: for i in with docker exec comfyui (single line)" category="TrustedPattern-Gate">
-      <description>Single-line for loop with docker exec comfyui matches trusted pattern</description>
-      <copilot-command><![CDATA[for i in 1 2 3; do docker exec comfyui echo $i; done]]></copilot-command>
+    <test-case expected="ask" reason="rm (via sudo)" category="Linux-SSH-Modifying">
+      <description>SSH remote sudo rm — sudo stripped, inner rm is modifying</description>
+      <copilot-command><![CDATA[ssh admin@host "sudo rm /var/log/old.log"]]></copilot-command>
     </test-case>
-
-    <test-case expected="allow" reason="trusted pattern: for i in with docker exec comfyui (multi-line)" category="TrustedPattern-Gate">
-      <description>Multi-line for loop with docker exec comfyui crosses newlines and matches trusted pattern via Singleline regex option</description>
-      <copilot-command><![CDATA[for i in 1 2 3 4 5 6 7 8; do
-  echo "=== T+${i}0s ==="
-  docker exec comfyui bash -c 'nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv,noheader'
-  sleep 10
-done]]></copilot-command>
+    <test-case expected="ask" reason="systemctl restart" category="Linux-SSH-Modifying">
+      <description>SSH remote systemctl restart (modifying service state)</description>
+      <copilot-command><![CDATA[ssh user@host "systemctl restart nginx"]]></copilot-command>
     </test-case>
-
-    <test-case expected="allow" reason="trusted pattern: for i in with docker exec -d comfyui (multi-line)" category="TrustedPattern-Gate">
-      <description>Multi-line for loop with docker exec -d comfyui matches trusted pattern</description>
-      <copilot-command><![CDATA[for i in 1 2 3 4 5 6 7 8; do
-  echo "=== Starting container $i ==="
-  docker exec -d comfyui bash -c "nvidia-smi > /tmp/gpu_status_$i.log 2>&1"
-  sleep 10
-done]]></copilot-command>
+    <test-case expected="ask" reason="systemctl stop (via sudo)" category="Linux-SSH-Modifying">
+      <description>SSH remote sudo systemctl stop — sudo stripped, inner systemctl stop is modifying</description>
+      <copilot-command><![CDATA[ssh deploy@prod "sudo systemctl stop apache2"]]></copilot-command>
     </test-case>
-
-    <test-case expected="ask" reason="modifying: for loop with docker run (NOT in trusted pattern)" category="TrustedPattern-Gate">
-      <description>Multi-line for loop with docker run (not in trusted pattern) should still ask</description>
-      <copilot-command><![CDATA[for i in 1 2 3; do
-  docker run -d --name "container_$i" nginx:latest
-  sleep 5
-done]]></copilot-command>
+    <test-case expected="ask" reason="mkdir" category="Linux-SSH-Modifying">
+      <description>SSH remote mkdir (modifying)</description>
+      <copilot-command><![CDATA[ssh user@host "sudo mkdir /opt/newapp"]]></copilot-command>
     </test-case>
+    <test-case expected="ask" reason="chmod" category="Linux-SSH-Modifying">
+      <description>SSH remote sudo chmod — sudo stripped, inner chmod is modifying</description>
+      <copilot-command><![CDATA[ssh user@host "sudo chmod 755 /opt/deploy/start.sh"]]></copilot-command>
+    </test-case>
+  </category-group>
 
+  <category-group name="DOS-Git">
+    <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
+      <description>git -C C:\repo status (read-only, -C flag stripped)</description>
+      <copilot-command><![CDATA[git -C C:\repo status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
+      <description>git -C "C:\Program Files\repo" log --oneline (read-only, -C flag stripped)</description>
+      <copilot-command><![CDATA[git -C "C:\Program Files\repo" log --oneline]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
+      <description>git -c core.autocrlf=true -C C:\repo diff (read-only, multiple flags stripped)</description>
+      <copilot-command><![CDATA[git -c core.autocrlf=true -C C:\repo diff]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
+      <description>git --git-dir=C:\repo\.git --work-tree=C:\repo status (read-only, long flags stripped)</description>
+      <copilot-command><![CDATA[git --git-dir=C:\repo\.git --work-tree=C:\repo status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push" category="DOS-Git-Modifying">
+      <description>git -C C:\repo push origin main (modifying, -C flag stripped)</description>
+      <copilot-command><![CDATA[git -C C:\repo push origin main]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git add" category="DOS-Git-Modifying">
+      <description>git -C C:\repo add . (modifying, -C flag stripped)</description>
+      <copilot-command><![CDATA[git -C C:\repo add .]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git reset" category="DOS-Git-Modifying">
+      <description>git -C C:\repo reset --hard HEAD~1 (modifying, high risk)</description>
+      <copilot-command><![CDATA[git -C C:\repo reset --hard HEAD~1]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="unknown command" category="DOS-Git-Unknown">
+      <description>git -C C:\repo --online -3 (unknown git subcommand)</description>
+      <copilot-command><![CDATA[git -C C:\repo --online -3]]></copilot-command>
+    </test-case>
   </category-group>
 
 </commands>
