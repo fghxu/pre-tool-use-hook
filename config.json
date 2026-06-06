@@ -6,6 +6,27 @@
 
   "modifying_strictness": "normal",
 
+  "system_paths": {
+    "description": "Parent directories where file writes (via > or >>) always require approval, even in normal strictness mode. All subdirectories under these paths are also blocked.",
+    "linux": [
+      "/etc/",
+      "/var/",
+      "/usr/",
+      "/boot/",
+      "/sys/",
+      "/proc/",
+      "/opt/"
+    ],
+    "windows": [
+      "[A-Za-z]:\\\\Windows\\\\",
+      "[A-Za-z]:\\\\Program Files\\\\",
+      "[A-Za-z]:\\\\Program Files \\(x86\\)\\\\",
+      "%SystemRoot%\\\\",
+      "%ProgramFiles%\\\\",
+      "%ProgramFiles(x86)%\\\\"
+    ]
+  },
+
   "known_command_prefixes": [
     "docker", "kubectl", "aws", "npm", "git", "terraform", "helm", "gh", "az", "gcloud",
     "python", "node", "ruby", "go", "cargo", "dotnet","java",

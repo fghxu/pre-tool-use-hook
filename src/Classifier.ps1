@@ -322,7 +322,7 @@ function Invoke-Classify {
     $subshellCommands = @(Split-SubshellCommands -Command $command)
 
     # -- 4c-3: Check redirection targets --
-    $redirectionResult = Test-RedirectionTarget -Command $command
+    $redirectionResult = Test-RedirectionTarget -Command $command -Config $Config
 
     # Combine all commands to classify.
     # Prefer AST-extracted commands for PowerShell; fall back to regex split.

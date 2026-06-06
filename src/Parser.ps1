@@ -1024,7 +1024,8 @@ function Split-SubshellCommands {
 
 function Test-RedirectionTarget {
     param(
-        [string]$Command
+        [string]$Command,
+        [PSCustomObject]$Config = $null
     )
 
     $result = [PSCustomObject]@{
@@ -1067,21 +1068,34 @@ function Test-RedirectionTarget {
     }
 
     # =========================================================================
-    # 3. Append redirection >> — always ask (modifying: appends data to file)
+    # 3. Append redirection >> — modifying in strict mode, allowed for non-system in normal mode
     # =========================================================================
     if ($trimmed -match '(?<![>])>>(?![>])') {
         $result.HasRedirection = $true
-        $result.Risk = "medium"
-        $result.Decision = "ask"
-        $result.Reason = "append redirection (modifying)"
 
-        # Extract the target path for richer diagnostics
-        if ($trimmed -match '(?<![>])>>\s*([^\s;|&]+)') {
-            $result.Target = $matches[1]
-            $result.Reason = "append redirect to $($matches[1]) (modifying)"
+        $targetPath = ""
+        if ($trimmed -match '(?<![>])>>\s*([^\s;|&]+)') { $targetPath = $matches[1] }
+
+        # Temp/discard paths always allowed
+        if ($targetPath -and $targetPath -match '^(/dev/null|NUL|/tmp/|/var/tmp/|%TEMP%|%TMP%|^\$env:TEMP|^\$env:TMP)') {
+            $result.Target = $targetPath
+            $result.Risk = "none"
+            $result.Decision = "allow"
+            $result.Reason = "append redirect to $targetPath (temp/discard)"
+        }
+        # In normal mode, allow non-system paths
+        elseif ($Config -and $Config.modifying_strictness -eq 'normal' -and
+            $targetPath -and $targetPath -notmatch $Config._systemPathRegex) {
+            $result.Target = $targetPath
+            $result.Risk = "low"
+            $result.Decision = "allow"
+            $result.Reason = "append redirect to $targetPath (allowed in normal mode)"
         }
         else {
-            $result.Target = "unknown"
+            $result.Risk = "medium"
+            $result.Decision = "ask"
+            $result.Reason = if ($targetPath) { "append redirect to $targetPath (modifying)" } else { "append redirection (modifying)" }
+            $result.Target = if ($targetPath) { $targetPath } else { "unknown" }
         }
         return $result
     }
@@ -1114,17 +1128,24 @@ function Test-RedirectionTarget {
                 $result.Decision = "allow"
                 $result.Reason = "redirect to temp path ($targetPath) (low risk)"
             }
-            # -- 4c. System paths (high risk) — Windows and Unix --
-            elseif ($targetPath -match '^(/etc/|/var/|/usr/|/boot/|/sys/|/proc/|[A-Za-z]:\\Windows\\|[A-Za-z]:\\Program\s*Files\\|[A-Za-z]:\\Program\s*Files\s*\(x86\)\\|%SystemRoot%|%ProgramFiles%)') {
+            # -- 4c. System paths (high risk) — from config.json system_paths --
+            elseif ($Config -and $targetPath -match $Config._systemPathRegex) {
                 $result.Risk = "high"
                 $result.Decision = "ask"
                 $result.Reason = "redirect to system path ($targetPath) (high risk)"
             }
-            # -- 4d. Other paths — generic modifying --
+            # -- 4d. Other paths — allow in normal mode, ask in strict mode --
             else {
-                $result.Risk = "medium"
-                $result.Decision = "ask"
-                $result.Reason = "output redirect to $targetPath (modifying)"
+                if ($Config -and $Config.modifying_strictness -eq 'normal') {
+                    $result.Risk = "low"
+                    $result.Decision = "allow"
+                    $result.Reason = "output redirect to $targetPath (allowed in normal mode)"
+                }
+                else {
+                    $result.Risk = "medium"
+                    $result.Decision = "ask"
+                    $result.Reason = "output redirect to $targetPath (modifying)"
+                }
             }
         }
         else {

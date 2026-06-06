@@ -1,6 +1,7 @@
 param(
     [string]$XmlPath = "$PSScriptRoot\..\test\test-cases.adhoc.xml",
-    [string]$Filter = ""
+    [string]$Filter = "",
+    [string]$Strictness = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,8 +19,11 @@ if (Test-Path "$PSScriptRoot\Classifier.ps1") {
     $ClassifierLoaded = $true
 }
 
-# Load config
+# Load config, optionally override strictness for testing
 $config = Load-Config -Path "$PSScriptRoot\..\config.json"
+if ($Strictness) {
+    $config.modifying_strictness = $Strictness
+}
 
 # Parse XML
 [xml]$xml = Get-Content $XmlPath -Encoding UTF8

@@ -129,6 +129,24 @@ function Test-ConfigSchema {
         }
     }
 
+    # Default system_paths if missing, compile into _systemPathRegex
+    if (-not (Get-Member -InputObject $Config -Name 'system_paths' -MemberType NoteProperty)) {
+        $Config | Add-Member -MemberType NoteProperty -Name 'system_paths' -Value ([PSCustomObject]@{linux=@();windows=@()}) -Force
+    }
+    $sysPaths = $Config.system_paths
+    $linuxPatterns = @()
+    if ($sysPaths.linux) {
+        foreach ($p in $sysPaths.linux) { $linuxPatterns += [regex]::Escape($p.ToString()) }
+    }
+    $winPatterns = @()
+    if ($sysPaths.windows) {
+        foreach ($p in $sysPaths.windows) { $winPatterns += $p.ToString() }
+    }
+    $allPatterns = $linuxPatterns + $winPatterns
+    $sysRegex = if ($allPatterns.Count -gt 0) { '^(' + ($allPatterns -join '|') + ')' } else { '^\b$' }
+    $Config | Add-Member -MemberType NoteProperty -Name '_systemPathRegex' -Value $sysRegex -Force
+    try { $null = [regex]::new($sysRegex) } catch { throw "Invalid system_paths regex: $sysRegex" }
+
     # Validate regex patterns in trusted_pattern compile successfully
     foreach ($pattern in $Config.trusted_pattern) {
         try {
