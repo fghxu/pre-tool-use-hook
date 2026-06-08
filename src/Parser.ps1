@@ -16,7 +16,7 @@
 # Regex constants
 # =============================================================================
 
-$script:VerbNounRegex = [regex]::new('[A-Z]\w+-[A-Z]\w+', 'Compiled')
+$script:VerbNounRegex = [regex]::new('^[A-Z]\w+-[A-Z]\w+', 'Compiled')
 
 $script:PowershellMarkerRegex = [regex]::new(
     '(_|PSItem|ForEach-Object|Where-Object)|(\$\(|@\(|\$\{)',

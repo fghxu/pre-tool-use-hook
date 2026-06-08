@@ -246,8 +246,8 @@ $log = git log --oneline -3]]></copilot-command>
       <description>ssh user@host with $var = git push inside (modifying)</description>
       <copilot-command><![CDATA[ssh user@host "$result = git push origin main"]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="pwsh unknown" category="VarAssignment-SSH">
-      <description>ssh user@host with $var = Get-ChildItem inside pwsh (double-nested: intermediate pwsh wrapper triggers ask)</description>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-SSH">
+      <description>ssh user@host with $var = Get-ChildItem inside pwsh (VerbNoun anchor fix correctly resolves inner Get-ChildItem)</description>
       <copilot-command><![CDATA[ssh user@host "pwsh -Command '$items = Get-ChildItem'"]]></copilot-command>
     </test-case>
   </category-group>
