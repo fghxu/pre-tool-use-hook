@@ -335,7 +335,7 @@
         { "name": "pgrep",    "patterns": ["pgrep *"],                                            "description": "Find processes by name" },
         { "name": "nslookup", "patterns": ["nslookup *"],                                         "description": "DNS lookup" },
         { "name": "dig",      "patterns": ["dig *"],                                              "description": "DNS lookup utility" },
-        { "name": "curl GET", "patterns": ["curl http*", "curl https*", "curl -*http*", "curl -*https*"], "description": "HTTP GET request (with or without flags before URL)" },
+        { "name": "curl GET", "patterns": ["curl http*", "curl https*", "curl (?!.*-X (POST|PUT|PATCH|DELETE))(?!.*(-d |--data ))-*http*", "curl (?!.*-X (POST|PUT|PATCH|DELETE))(?!.*(-d |--data ))-*https*"], "description": "HTTP GET request (excludes POST/PUT/PATCH/DELETE and --data/-d flags)" },
         { "name": "wget stdout", "patterns": ["wget *-O-*", "wget *-qO-*"],                       "description": "Download to stdout (read-only)" },
         { "name": "echo",     "patterns": ["echo *", "echo"],                                     "description": "Print text to stdout" },
         { "name": "ping",     "patterns": ["ping *"],                                             "description": "Send ICMP echo requests" },
@@ -414,6 +414,7 @@
         { "name": "git clean",     "patterns": ["git clean*", "git clean *"],                    "risk": "high",   "description": "Remove untracked files" },
         { "name": "git checkout",  "patterns": ["git checkout*", "git checkout *"],              "risk": "medium", "description": "Switch branches or restore files" },
         { "name": "git restore",   "patterns": ["git restore*", "git restore *"],                "risk": "medium", "description": "Restore working tree files" },
+        { "name": "git rev-parse",   "patterns": ["git rev-parse*", "git rev-parse *"],                "risk": "medium", "description": "rev-parse working tree files" },
         { "name": "git branch -D", "patterns": ["git branch -D*", "git branch --delete*", "git branch -d*", "git branch -m*", "git branch --move*"], "risk": "medium", "description": "Delete or rename branch" },
         { "name": "git remote modify", "patterns": ["git remote add*", "git remote remove*", "git remote set-url*", "git remote rename*"], "risk": "low", "description": "Modify remote configuration" }
       ]

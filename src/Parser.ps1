@@ -329,9 +329,10 @@ function Split-Commands {
 # Split-NotInQuotes (helper)
 #
 # Splits text on a single-character delimiter, but NOT when that delimiter
-# appears inside a quoted string (single or double quotes) or inside
-# curly braces {}. This prevents splitting inside script blocks,
-# hashtable expressions, and other brace-delimited constructs.
+# appears inside a quoted string (single or double quotes), inside
+# curly braces {}, or inside parentheses (). This prevents splitting
+# inside script blocks, hashtable expressions, for/if conditions, and
+# other brace/paren-delimited constructs.
 # =============================================================================
 
 function Split-NotInQuotes {
@@ -345,6 +346,7 @@ function Split-NotInQuotes {
     $inSingle = $false
     $inDouble = $false
     $braceDepth = 0
+    $parenDepth = 0
     $i = 0
 
     while ($i -lt $Text.Length) {
@@ -368,7 +370,17 @@ function Split-NotInQuotes {
             }
             $current += $ch
         }
-        elseif ($ch -eq $Delimiter -and -not $inSingle -and -not $inDouble -and $braceDepth -eq 0) {
+        elseif (-not $inSingle -and -not $inDouble -and $ch -eq '(') {
+            $parenDepth++
+            $current += $ch
+        }
+        elseif (-not $inSingle -and -not $inDouble -and $ch -eq ')') {
+            if ($parenDepth -gt 0) {
+                $parenDepth--
+            }
+            $current += $ch
+        }
+        elseif ($ch -eq $Delimiter -and -not $inSingle -and -not $inDouble -and $braceDepth -eq 0 -and $parenDepth -eq 0) {
             # Bash case terminators ;; and ;& (and bash 4.0+ ;;&) should NOT
             # be treated as two separate semicolon delimiters.  When we see
             # the first ; followed by another ; or &, consume the pair as a

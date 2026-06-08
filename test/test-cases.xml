@@ -2751,4 +2751,202 @@ done]]></copilot-command>
     </test-case>
   </category-group>
 
+
+  <category-group name="VarAssignment-PS-ForLoop">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PS-ForLoop">
+      <description>$var = for-loop with conditionals scanning array for SELECT statements (read-only, paren depth prevents ; split inside for condition)</description>
+      <copilot-command><![CDATA[$results = for ($i = 0; $i -lt $lines.count; $i++){
+  if ($lines[$i] -match "^\s*(select|SELECT)" -and ($i -eq 0 -or $lines[$i-1] -notmatch "union\s+all"){
+    "Line $($i+1): $($lines[$i].trim())"
+  }
+}
+if ($results) { $results } else {"nothing found"}
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-Foreach">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PS-Foreach">
+      <description>$var = Get-ChildItem | ForEach-Object filtering files by extension (read-only pipeline, read-only cmdlets)</description>
+      <copilot-command><![CDATA[$files = Get-ChildItem -Path C:\temp -Recurse | ForEach-Object {
+  if ($_.Extension -eq ".log" -and $_.Length -gt 1MB) {
+    [PSCustomObject]@{ Name = $_.FullName; SizeMB = [math]::Round($_.Length / 1MB, 2); Age = (Get-Date) - $_.LastWriteTime }
+  }
+}
+$files | Sort-Object SizeMB -Descending | Select-Object -First 20
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-TryCatch">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PS-TryCatch">
+      <description>$var = try/catch reading and validating JSON config (read-only, Get-Content + ConvertFrom-Json)</description>
+      <copilot-command><![CDATA[$config = try {
+  $raw = Get-Content -Path C:\app\settings.json -Raw
+  $json = $raw | ConvertFrom-Json
+  if (-not $json.version) { throw "missing version field" }
+  $json
+} catch {
+  Write-Warning "Config load failed: $_"
+  $null
+}
+if ($config) { "Version: $($config.version)" } else { "No config loaded" }
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-While">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PS-While">
+      <description>$var = while loop polling service status (read-only, Get-Service inside while body)</description>
+      <copilot-command><![CDATA[$status = while ($true) {
+  $svc = Get-Service -Name wuauserv
+  if ($svc.Status -eq "Stopped") {
+    "Service stopped at $(Get-Date -Format 'HH:mm:ss')"
+    break
+  }
+  Start-Sleep -Seconds 2
+  if ($attempts++ -ge 5) { "Timeout after 5 attempts"; break }
+}
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-Switch">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PS-Switch">
+      <description>$var = switch statement classifying log entries by severity (read-only, pure string matching)</description>
+      <copilot-command><![CDATA[$summary = switch -Regex (Get-Content C:\logs\app.log) {
+  '\bCRITICAL\b|FATAL'  { "CRIT: $_" }
+  '\bERROR\b'            { "ERR:  $_" }
+  '\bWARN(ING)?\b'       { "WARN: $_" }
+  default                { "INFO: $_" }
+}
+$summary | Group-Object { $_.Substring(0,4) } | Select-Object Count, Name
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-IfElse">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PS-IfElse">
+      <description>$result = if/elseif/else block checking OS info (read-only, Get-CimInstance + comparisons)</description>
+      <copilot-command><![CDATA[$result = if ($env:OS -eq "Windows_NT") {
+  $os = Get-CimInstance Win32_OperatingSystem
+  if ($os.TotalVisibleMemorySize -lt 4GB) {
+    "Low memory: $([math]::Round($os.FreePhysicalMemory/1MB,0))MB free"
+  } elseif ($os.FreePhysicalMemory -lt 512MB) {
+    "Critical: only $([math]::Round($os.FreePhysicalMemory/1MB,0))MB free"
+  } else {
+    "OK: $([math]::Round($os.FreePhysicalMemory/1MB,0))MB free of $([math]::Round($os.TotalVisibleMemorySize/1MB,0))MB"
+  }
+} else {
+  "Non-Windows OS detected"
+}
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-ForLoop-Modify">
+    <test-case expected="ask" reason="modifying" category="VarAssignment-PS-ForLoop-Modify">
+      <description>$var = for-loop stopping processes matching a name pattern (modifying, Stop-Process inside for body)</description>
+      <copilot-command><![CDATA[$stopped = for ($i = 0; $i -lt $procs.Count; $i++) {
+  if ($procs[$i].Name -match "notepad|calc|mspaint") {
+    Stop-Process -Id $procs[$i].Id -Force
+    "Stopped: $($procs[$i].Name) (PID $($procs[$i].Id))"
+  }
+}
+if ($stopped) { $stopped } else { "No matching processes found" }
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-Foreach-Modify">
+    <test-case expected="ask" reason="modifying" category="VarAssignment-PS-Foreach-Modify">
+      <description>$var = Get-ChildItem | ForEach-Object removing old temp files (modifying, Remove-Item in pipeline body)</description>
+      <copilot-command><![CDATA[$cleaned = Get-ChildItem -Path C:\temp\logs -Filter "*.log" | ForEach-Object {
+  if ($_.LastWriteTime -lt (Get-Date).AddDays(-30)) {
+    Remove-Item -Path $_.FullName -Force
+    "Removed: $($_.Name)"
+  }
+}
+"Cleaned $($cleaned.Count) old log files"
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-TryCatch-Modify">
+    <test-case expected="ask" reason="modifying" category="VarAssignment-PS-TryCatch-Modify">
+      <description>$var = try/catch deploying a config file (modifying, Set-Content + Copy-Item in try block)</description>
+      <copilot-command><![CDATA[$deployed = try {
+  $source = Join-Path $env:APPDATA "myapp\config.json"
+  $backup = Join-Path $env:TEMP "config.backup.json"
+  Copy-Item -Path $source -Destination $backup -Force
+  $newConfig = Get-Content $source | ConvertFrom-Json
+  $newConfig.lastDeploy = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+  $newConfig | ConvertTo-Json -Depth 5 | Set-Content -Path $source -Encoding UTF8
+  "Deployed config v$($newConfig.version) to $source"
+} catch {
+  Write-Error "Deploy failed: $_"
+  "FAILED"
+}
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-While-Modify">
+    <test-case expected="ask" reason="modifying" category="VarAssignment-PS-While-Modify">
+      <description>$var = while loop restarting a stuck service (modifying, Start-Service + Restart-Service in while body)</description>
+      <copilot-command><![CDATA[$result = while ($retries -lt 3) {
+  $svc = Get-Service -Name MyAppService
+  if ($svc.Status -ne "Running") {
+    if ($svc.Status -eq "Stopped") {
+      Start-Service -Name MyAppService
+      "Started service (attempt $($retries+1))"
+    } else {
+      Restart-Service -Name MyAppService -Force
+      "Restarted service (attempt $($retries+1))"
+    }
+  }
+  $retries++
+  Start-Sleep -Seconds 3
+  $svc = Get-Service -Name MyAppService
+  if ($svc.Status -eq "Running") { "Service is now running"; break }
+}
+if ($retries -ge 3) { "Service still down after 3 attempts" }
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-Switch-Modify">
+    <test-case expected="ask" reason="modifying" category="VarAssignment-PS-Switch-Modify">
+      <description>$var = switch dispatching file actions by type (modifying, Move-Item/Rename-Item/Remove-Item in switch arms)</description>
+      <copilot-command><![CDATA[$processed = switch -Wildcard (Get-ChildItem C:\incoming\*.*) {
+  "*.csv"  { Move-Item $_.FullName C:\data\csv\ -Force;   "Moved CSV: $($_.Name)" }
+  "*.json" { Move-Item $_.FullName C:\data\json\ -Force;   "Moved JSON: $($_.Name)" }
+  "*.tmp"  { Remove-Item $_.FullName -Force;                "Removed TMP: $($_.Name)" }
+  "*.bak"  { Rename-Item $_.FullName "$($_.BaseName).old" ; "Renamed BAK: $($_.Name)" }
+  default  { "Skipped: $($_.Name)" }
+}
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PS-IfElse-Modify">
+    <test-case expected="ask" reason="modifying" category="VarAssignment-PS-IfElse-Modify">
+      <description>$result = if/else setting registry values based on condition (modifying, Set-ItemProperty in branches)</description>
+      <copilot-command><![CDATA[$result = if (Test-Path "HKLM:\Software\MyApp") {
+  $val = Get-ItemProperty -Path "HKLM:\Software\MyApp" -Name "LogLevel"
+  if ($val.LogLevel -ne "Verbose") {
+    Set-ItemProperty -Path "HKLM:\Software\MyApp" -Name "LogLevel" -Value "Verbose"
+    "Updated LogLevel to Verbose"
+  } else {
+    "LogLevel already Verbose"
+  }
+} else {
+  New-Item -Path "HKLM:\Software\MyApp" -Force | Out-Null
+  New-ItemProperty -Path "HKLM:\Software\MyApp" -Name "LogLevel" -Value "Verbose" -PropertyType String
+  "Created registry key with LogLevel=Verbose"
+}
+]]></copilot-command>
+    </test-case>
+  </category-group>
+
 </commands>
