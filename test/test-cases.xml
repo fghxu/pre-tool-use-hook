@@ -2151,8 +2151,8 @@ done]]></copilot-command>
       <copilot-command><![CDATA[terraform workspace show]]></copilot-command>
     </test-case>
 
-    <test-case expected="allow" reason="read-only: terraform init" category="Terraform-Modify">
-      <description>terraform init with upgrade flag downloads new provider versions</description>
+    <test-case expected="ask" reason="terraform init (modifying)" category="Terraform-Modify">
+      <description>terraform init -upgrade downloads new provider versions and writes .terraform directory (modifying)</description>
       <copilot-command><![CDATA[terraform init -upgrade]]></copilot-command>
     </test-case>
 

@@ -425,8 +425,6 @@
     "Terraform": {
       "description": "HashiCorp Terraform IaC commands",
       "read_only": [
-        { "name": "terraform init",         "patterns": ["terraform *init*"],                      "risk": "low",    "description": "Initialize working directory" },
-        { "name": "terraform get",          "patterns": ["terraform get *"],                       "risk": "low",    "description": "Download modules" },
         { "name": "terraform fmt -check",   "patterns": ["terraform *fmt*-check*"],               "description": "Check config formatting (dry-run, read-only)" },
         { "name": "terraform plan",         "patterns": ["terraform plan*"],                       "description": "Show execution plan" },
         { "name": "terraform state list",   "patterns": ["terraform *state list*"],                "description": "List resources in state" },
@@ -435,13 +433,12 @@
         { "name": "terraform console",      "patterns": ["terraform *console*"],                   "description": "Interactive console" },
         { "name": "terraform fmt -check",   "patterns": ["terraform *fmt -check*", "terraform *fmt --check*"], "description": "Check formatting (no write)" },
         { "name": "terraform validate",     "patterns": ["terraform *validate*"],                  "description": "Validate configuration" },
-        { "name": "terraform providers",    "patterns": ["terraform *providers*"],                 "description": "Show required providers" },
+        { "name": "terraform providers",    "patterns": ["terraform providers", "terraform *providers schema*", "terraform *providers lock*"], "description": "Show required providers (read-only subcommands)" },
         { "name": "terraform graph",        "patterns": ["terraform *graph*"],                     "description": "Generate dependency graph" },
         { "name": "terraform version",      "patterns": ["terraform *version*"],                   "description": "Show Terraform version" },
         { "name": "terraform show",         "patterns": ["terraform *show*"],                      "description": "Show state or plan" },
         { "name": "terraform workspace list","patterns": ["terraform *workspace list*"],           "description": "List workspaces" },
-        { "name": "terraform workspace show","patterns": ["terraform *workspace show*"],           "description": "Show current workspace" },
-        { "name": "terraform providers mirror","patterns": ["terraform *providers mirror*"],       "description": "Mirror providers to local filesystem" }
+        { "name": "terraform workspace show","patterns": ["terraform *workspace show*"],           "description": "Show current workspace" }
       ],
       "modifying": [
         { "name": "terraform apply",         "patterns": ["terraform *apply*"],                    "risk": "high",   "description": "Apply changes to infrastructure" },
@@ -456,6 +453,9 @@
         { "name": "terraform taint",         "patterns": ["terraform *taint*"],                    "risk": "medium", "description": "Mark resource for recreation" },
         { "name": "terraform untaint",       "patterns": ["terraform *untaint*"],                  "risk": "medium", "description": "Remove taint from resource" },
         { "name": "terraform refresh",       "patterns": ["terraform *refresh*"],                  "risk": "medium", "description": "Refresh state against real resources" },
+        { "name": "terraform init",          "patterns": ["terraform *init*"],                     "risk": "low",    "description": "Initialize working directory, download providers" },
+        { "name": "terraform get",           "patterns": ["terraform get*"],                       "risk": "low",    "description": "Download and install modules" },
+        { "name": "terraform providers mirror","patterns": ["terraform *providers mirror*"],       "risk": "low",    "description": "Mirror providers to local filesystem" },
         { "name": "terraform fmt",           "patterns": ["terraform fmt*", "terraform *fmt*"],        "risk": "low",    "description": "Reformat config files in place" }
       ]
     },
