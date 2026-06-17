@@ -35,6 +35,15 @@ function Detect-IDE {
     # Majority vote wins for signals 1-3. If signal 4 fires, it may override.
     # Default tie goes to "ClaudeCode".
 
+    # Signal 0: tool_use_id contains "__vscode-" → VS Code Copilot (decisive)
+    # VS Code Copilot shares Claude Code's protocol (PascalCase, ISO timestamp,
+    # tool_use_id present) but its tool_use_id always ends with __vscode-<uuid>.
+    # This must fire BEFORE the Codex signals to avoid misdetection.
+    if ($InputObject.PSObject.Properties.Name -contains "tool_use_id" -and
+        $InputObject.tool_use_id -match '__vscode-') {
+        return "Copilot"
+    }
+
     # Signal 5: turn_id field — unique to Codex CLI (decisive)
     if ($InputObject.PSObject.Properties.Name -contains "turn_id" -and $InputObject.turn_id) {
         return "Codex"

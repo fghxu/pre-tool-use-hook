@@ -102,7 +102,17 @@ $vscodeCopilotInput = [PSCustomObject]@{
 }
 Assert-Equal "VS Code Copilot detected via transcript_path" "Copilot" (Detect-IDE -InputObject $vscodeCopilotInput)
 
-# 1g: Edge case — null input defaults to ClaudeCode
+# 1g: VS Code Copilot via __vscode- without transcript_path (bug fix — was logging to claude.log)
+$vscodeCopilotNoTranscript = [PSCustomObject]@{
+    hook_event_name = "PreToolUse"
+    tool_name       = "run_in_terminal"
+    tool_use_id     = "toolu_bdrk_abc__vscode-xyz"
+    timestamp       = "2026-06-15T14:30:00.123Z"
+    tool_input      = [PSCustomObject]@{ command = "Get-Process" }
+}
+Assert-Equal "VS Code Copilot detected via __vscode- without transcript_path" "Copilot" (Detect-IDE -InputObject $vscodeCopilotNoTranscript)
+
+# 1h: Edge case — null input defaults to ClaudeCode
 Assert-Equal "Null input defaults to ClaudeCode" "ClaudeCode" (Detect-IDE -InputObject $null)
 
 # =============================================================================

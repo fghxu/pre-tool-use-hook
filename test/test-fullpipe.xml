@@ -49,6 +49,10 @@
       <description>Copilot: unknown tool (exit 2, genuine error)</description>
       <hook-input><![CDATA[{"tool_name":"made_up_tool","tool_input":{"command":"foo"},"hook_event_name":"preToolUse","timestamp":"1715568004"}]]></hook-input>
     </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="Stop-Process" category="CP-FullPipe-VSCode-NoTranscript">
+      <description>VS Code Copilot: __vscode- in tool_use_id, no transcript_path (bug fix — was misdetected as ClaudeCode)</description>
+      <hook-input><![CDATA[{"tool_name":"run_in_terminal","tool_input":{"command":"Stop-Process -Name notepad"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:00.123Z","tool_use_id":"toolu_bdrk_abc__vscode-xyz"}]]></hook-input>
+    </test-case>
   </category-group>
 
   <category-group name="Codex-FullPipe" ide="Codex">
