@@ -4,7 +4,7 @@ A cross-IDE preToolUse hook that intercepts terminal commands before execution, 
 
 ## What It Does
 
-When an AI coding assistant (Claude Code, GitHub Copilot) invokes a terminal tool like `run_in_terminal` or `bash`, this hook intercepts the request and runs it through a multi-stage classification pipeline:
+When an AI coding assistant (Claude Code, GitHub Copilot, Codex CLI) invokes a terminal tool like `run_in_terminal`, `bash`, or `Bash`, this hook intercepts the request and runs it through a multi-stage classification pipeline:
 
 ```
 Input JSON (stdin)
@@ -71,11 +71,15 @@ pretoolhook/
 │   ├── Resolver.ps1          # Pattern matching engine against config
 │   ├── ConfigLoader.ps1      # JSON config loading, validation, regex compilation
 │   ├── Logger.ps1            # Daily JSONL record files + human-readable text logs
-│   └── TestRunner.ps1        # TDD test runner for the test suite
+│   └── TestRunner.ps1        # TDD test runner for the classification suite
 ├── config.json        # Runtime configuration — the classification database
 ├── test/
-│   ├── test-cases.xml         # Full test case database (339 test cases)
-│   └── test-cases.adhoc.xml   # Quick test subset (40 test cases)
+│   ├── test-cases.xml             # Full test case database (479 test cases)
+│   ├── test-cases.adhoc.xml       # Quick test subset (40 test cases)
+│   ├── test-cases.*.xml           # Domain-specific subsets (var-assignment, redirect)
+│   ├── test-cases.codex.ps1       # Codex IDE detection + output mapping unit tests
+│   ├── FullPipeTestRunner.ps1     # Data-driven full-pipe integration test runner
+│   └── test-fullpipe.xml          # Per-IDE full-pipe test cases (Claude, Copilot, Codex)
 ├── debug/                     # Debug and verification scripts
 ├── README.md                 # This file
 ├── INSTALL.md                # Installation guide
@@ -159,7 +163,7 @@ This is the **runtime configuration** that controls everything. You edit this to
 
 ### `test-cases.xml` — The Test Database
 
-The full test suite (339 test cases). Each entry specifies:
+The full test suite (479 test cases). Each entry specifies:
 - The command text (exactly what the IDE would send)
 - The expected classification (`allow` or `ask`)
 - A human-readable description and category
@@ -176,40 +180,65 @@ You should add new test cases here whenever you add patterns to `config.json`.
 
 ## How to Run the Tests
 
-### Full Test Suite (339 tests)
+The project has a two-layer test architecture:
+
+### Layer 1: Classification Tests (`TestRunner.ps1`)
+
+Tests the classification engine in isolation (no process spawning). Validates that commands are correctly classified as `allow` or `ask`.
+
+**Full Test Suite (479 tests):**
 
 ```powershell
 pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "C:\path\to\pretoolhook\test\test-cases.xml"
 ```
 
-### Quick Test Subset (40 tests)
+**Quick Test Subset (40 tests):**
 
 ```powershell
 pwsh -NoProfile -File src/TestRunner.ps1
 ```
 
-### Filter by Category
+**Filter by Category:**
 
 ```powershell
 pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "test\test-cases.xml" -Filter "Docker"
 ```
 
-### Test Runner Output
-
+**Test Runner Output:**
 ```
-[1/339 0% - DOS-FileInspection - dir lists directory contents with details]
-[2/339 0% - DOS-FileInspection - dir recursive search for .log files]
+[1/479 0% - DOS-FileInspection - dir lists directory contents with details]
+[2/479 0% - DOS-FileInspection - dir recursive search for .log files]
 ...
 ========================================
 Test Run Complete
 ========================================
-Total:    339
-Passed:   339 (100%)
+Total:    479
+Passed:   479 (100%)
 Failed:   0
-Duration: 2.2s
+Duration: 5.3s
 Config:   config.json
 ========================================
 ```
+
+### Layer 2: Full-Pipe Integration Tests (`FullPipeTestRunner.ps1`)
+
+Spawns `Hook.ps1` as a child process, pipes JSON to stdin, and validates stdout (permissionDecision), stderr, and exit code. Data-driven via XML — one `<category-group>` per IDE.
+
+**Run all IDE integration tests (18 cases):**
+
+```powershell
+pwsh -NoProfile -File test/FullPipeTestRunner.ps1
+```
+
+### Layer 2b: Codex Unit Tests (`test-cases.codex.ps1`)
+
+Validates Codex-specific functions (`Detect-IDE`, `Format-Output`) in isolation (16 cases).
+
+```powershell
+pwsh -NoProfile -File test/test-cases.codex.ps1
+```
+
+**Adding a new IDE:** Create a new `<category-group>` in `test-fullpipe.xml` with the IDE's payload format and expected decisions. No runner changes needed.
 
 Any failure prints the test number, command, expected vs actual, and the classifier's reasoning — making it easy to debug classification issues.
 
@@ -234,8 +263,8 @@ Subcommand-based classification: `docker ps` matches read-only patterns, `docker
 ## Performance
 
 - **Target**: < 500ms per classification
-- **Hard cap**: 1000ms (exceeding forces an "ask" decision to stay safe)
-- **Typical**: ~6ms average across 339 tests
+- **Hard cap**: 3000ms (exceeding forces an "ask" decision to stay safe)
+- **Typical**: ~6ms average across 479 tests
 - **Logging**: Append-only JSONL + text files, crash-safe
 
 ## License

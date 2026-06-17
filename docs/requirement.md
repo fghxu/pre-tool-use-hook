@@ -22,12 +22,13 @@ The PreToolUse Hook System intercepts AI-generated shell commands before executi
 
 ### 1.4 Scope
 
-This project targets two AI coding environments:
+This project targets three AI coding environments:
 
-1. **GitHub Copilot** — via VS Code extension hook mechanism
-2. **Claude Code** — via pretooluse hook configuration
+1. **Claude Code** — via pretooluse hook configuration
+2. **GitHub Copilot** — via VS Code extension hook mechanism
+3. **Codex CLI** — via hooks.json or config.toml hook configuration
 
-The system supports two deployment models: local-first (user-specific settings that only affect the current machine) and repository-level (shared `.pretooluse` or `.github/hooks/` configuration that applies to all contributors). Both modes are supported simultaneously.
+The system supports two deployment models: local-first (user-specific settings that only affect the current machine) and repository-level (shared `.pretooluse`, `.github/hooks/`, or `.codex/hooks.json` configuration that applies to all contributors). Both modes are supported simultaneously.
 
 ---
 
@@ -408,6 +409,6 @@ The PreToolUse Hook System is considered production-ready when:
 1. All commands in `test-cases.xml` are correctly classified by Layer 1 pattern matching (verified via automated test)
 2. Zero modifying commands are auto-approved without user confirmation (safety invariant — verified by adversarial tests)
 3. Average hook latency for simple commands is < 100ms and complex chains < 500ms
-4. Both Claude Code and GitHub Copilot integrations pass integration tests on all three supported operating systems (Windows, macOS, Linux)
+4. All three IDE integrations (Claude Code, GitHub Copilot, Codex CLI) pass integration tests on all three supported operating systems (Windows, macOS, Linux)
 5. Audit log captures 100% of intercepted commands with correct metadata
 6. A team can deploy a shared `.pretooluse/` configuration that new contributors adopt automatically upon first use

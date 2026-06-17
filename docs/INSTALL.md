@@ -1,6 +1,6 @@
 # Installing the PreToolUse Hook
 
-This guide walks through installing the PreToolUse hook system for Claude Code and GitHub Copilot. No prior hook experience is assumed.
+This guide walks through installing the PreToolUse hook system for Claude Code, GitHub Copilot, and Codex CLI. No prior hook experience is assumed.
 
 ## Prerequisites
 
@@ -310,11 +310,11 @@ Write a PowerShell code block to check if there is a file named test.txt under t
 
 ## Installing for Codex CLI
 
-Codex CLI hooks support both JSON and TOML configuration formats.
+Codex CLI supports hooks in both JSON (`hooks.json`) and TOML (`config.toml`) formats. Hooks are **enabled by default** (disable with `[features] hooks = false` in `config.toml`).
 
 ### Step 1: Understand How Codex CLI Hooks Work
 
-Codex CLI sends JSON to the hook's stdin. The payload shares Claude Code's protocol (PascalCase `PreToolUse` event name, `tool_use_id` present, ISO 8601 timestamps) with one critical addition — a `turn_id` field:
+Codex CLI sends JSON to the hook's stdin. The payload shares Claude Code's protocol (PascalCase `PreToolUse` event name, `tool_use_id` present, ISO 8601 timestamps) with two unique fields — `turn_id` and `model`:
 
 ```json
 {
@@ -336,9 +336,22 @@ Codex CLI sends JSON to the hook's stdin. The payload shares Claude Code's proto
 
 The hook **must** return `"deny"` (not `"ask"`) for blocked commands — Codex parses `"ask"` but does not support it, causing the hook to be marked as failed and the tool call to proceed anyway.
 
+**What Codex PreToolUse intercepts:** `Bash` (shell commands), `apply_patch` (file edits, also matched via `Edit`/`Write` aliases), and `mcp__*` (MCP tool calls). It does NOT intercept `WebSearch` or other non-shell/non-MCP tools.
+
 ### Step 2: Configure the Hook
 
-**Option A: User-Level Global (`~/.codex/hooks.json`)**
+**Hook configuration locations (all loaded, higher priority does not replace lower):**
+
+| Location | Scope |
+|----------|-------|
+| `~/.codex/hooks.json` | User-wide, all projects |
+| `~/.codex/config.toml` (inline `[hooks]`) | User-wide, all projects |
+| `<repo>/.codex/hooks.json` | Project-specific |
+| `<repo>/.codex/config.toml` (inline `[hooks]`) | Project-specific |
+
+If both `hooks.json` and inline `[hooks]` exist in the same layer, Codex merges them and warns at startup. Prefer one format per layer.
+
+**Option A: JSON Format (`~/.codex/hooks.json`)**
 
 ```json
 {
@@ -349,7 +362,9 @@ The hook **must** return `"deny"` (not `"ask"`) for blocked commands — Codex p
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1"
+            "command": "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1",
+            "timeout": 30,
+            "statusMessage": "Checking command safety"
           }
         ]
       }
@@ -358,11 +373,7 @@ The hook **must** return `"deny"` (not `"ask"`) for blocked commands — Codex p
 }
 ```
 
-**Option B: Project-Level (`<repo>/.codex/hooks.json`)**
-
-Same format as Option A. Place the file in your repository root under `.codex/hooks.json`.
-
-**Option C: TOML Format (`~/.codex/config.toml`)**
+**Option B: TOML Format (`~/.codex/config.toml`)**
 
 ```toml
 [[hooks.PreToolUse]]
@@ -371,9 +382,22 @@ matcher = "*"
 [[hooks.PreToolUse.hooks]]
 type = "command"
 command = "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1"
+timeout = 30
+statusMessage = "Checking command safety"
 ```
 
-### Step 3: Verify
+**On Windows**, add a `commandWindows` override if needed:
+
+```json
+"command": "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1",
+"commandWindows": "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1"
+```
+
+### Step 3: Trust the Hook
+
+Before a non-managed command hook runs for the first time, Codex requires you to **review and trust** the exact hook definition. Trust is recorded against the hook's hash. If the hook script changes, it must be re-trusted.
+
+### Step 4: Verify
 
 ```powershell
 # Test that the hook detects Codex input and maps ask to deny:
@@ -386,9 +410,10 @@ echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/test"},"hook_even
 
 ### Codex Hook Limitations
 
-- `permissionDecision: "ask"` is parsed but unsupported — the hook uses `"deny"` instead
+- `permissionDecision: "ask"` is parsed but unsupported — the hook maps to `"deny"` instead
 - `WebSearch` and other non-shell, non-MCP tools are not intercepted
 - The newer `unified_exec` mechanism has incomplete hook interception
+- Default hook timeout is 600 seconds; set `timeout` (in seconds) per hook handler to override
 
 ## Customizing the Configuration
 
@@ -494,7 +519,7 @@ Then add the binary prefix to `KnownBinaryPrefixes` in `src/Parser.ps1` and add 
 
 ## Logs
 
-The hook writes logs split by IDE into four files daily:
+The hook writes logs split by IDE into six files daily:
 
 | File | Content | IDE |
 |------|---------|-----|
@@ -502,6 +527,8 @@ The hook writes logs split by IDE into four files daily:
 | `YYYY-MM-DD.claude.log` | Human-readable classification log | Claude Code |
 | `YYYY-MM-DD.copilot.records.jsonl` | Raw JSON input records | Copilot |
 | `YYYY-MM-DD.copilot.log` | Human-readable classification log | Copilot |
+| `YYYY-MM-DD.codex.records.jsonl` | Raw JSON input records | Codex CLI |
+| `YYYY-MM-DD.codex.log` | Human-readable classification log | Codex CLI |
 
 **JSONL Records** (e.g., `2026-05-15.claude.records.jsonl`):
 ```
@@ -535,7 +562,7 @@ cd C:\git\pretoolusehook
 pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath "C:\git\pretoolusehook\test\test-cases.xml"
 ```
 
-Expected: `339 passed, 0 failed, 100%`.
+Expected: `479 passed, 0 failed, 100%`.
 
 If you change `config.json`, re-run the tests to verify nothing broke.
 
@@ -606,7 +633,7 @@ The hook logs a warning if classification exceeds 500ms. If you see this frequen
 - Reduce the number of patterns in `config.json`
 - Consider removing unused domains from the config
 
-If classification exceeds **1000ms**, the hook forces an "ask" decision as a safety fallback.
+If classification exceeds **3000ms**, the hook forces an "ask" decision as a safety fallback.
 
 ### Hook works in terminal but not in the IDE
 
