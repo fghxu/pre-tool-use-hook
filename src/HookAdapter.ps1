@@ -35,6 +35,16 @@ function Detect-IDE {
     # Majority vote wins for signals 1-3. If signal 4 fires, it may override.
     # Default tie goes to "ClaudeCode".
 
+    # Signal 5: turn_id field — unique to Codex CLI (decisive)
+    if ($InputObject.PSObject.Properties.Name -contains "turn_id" -and $InputObject.turn_id) {
+        return "Codex"
+    }
+
+    # Signal 6: model field — unique to Codex CLI (decisive)
+    if ($InputObject.PSObject.Properties.Name -contains "model" -and $InputObject.model) {
+        return "Codex"
+    }
+
     $signals = @{ Claude = 0; Copilot = 0 }
 
     # Signal 1: hook_event_name
@@ -220,10 +230,16 @@ function Format-Output {
     #
     # Return PSCustomObject (NOT JSON string — caller will ConvertTo-Json)
 
+    # Map internal "ask" to "deny" for Codex (Codex parses "ask" but errors on it)
+    $decision = $ClassifyResult.Decision
+    if ($IDE -eq 'Codex' -and $decision -eq 'ask') {
+        $decision = 'deny'
+    }
+
     return [PSCustomObject]@{
         hookSpecificOutput = [PSCustomObject]@{
             hookEventName            = "PreToolUse"
-            permissionDecision       = $ClassifyResult.Decision
+            permissionDecision       = $decision
             permissionDecisionReason = $ClassifyResult.Reason
         }
     }

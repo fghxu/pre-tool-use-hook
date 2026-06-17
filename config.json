@@ -73,10 +73,7 @@
 			
 		
 		"Bash",
-		"ExitPlanMode",
-		"NotebookEdit",
-		"PowerShell",
-		"TaskStop"
+		"PowerShell"
   ],
   "ignore_tool_name": [
 	  "get_vscode_api",
@@ -135,8 +132,13 @@
 		"ToolSearch",
 		"WebFetch",
 		"WebSearch",
-		"Write"
-	  
+		"Write",
+		"ExitPlanMode",
+		"NotebookEdit",
+		"TaskStop",
+		"Agent",
+		"ScheduleWakeup"
+
   ],
 
   "tool_name_mapping": {

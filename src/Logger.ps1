@@ -51,7 +51,7 @@ function Write-RecordEntry {
     .PARAMETER LogDir
         Path to the log directory.
     .PARAMETER IDE
-        The IDE identifier ("ClaudeCode" or "Copilot"). Used to split logs by IDE.
+        The IDE identifier ("ClaudeCode", "Copilot", or "Codex"). Used to split logs by IDE.
     #>
     param(
         [PSCustomObject]$RawInput,
@@ -92,7 +92,7 @@ function Write-RecordEntry {
 
     $jsonLine = $record | ConvertTo-Json -Compress -Depth 10
 
-    $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } else { 'claude' }
+    $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } elseif ($IDE -eq 'Codex') { 'codex' } else { 'claude' }
     $fileName = $utcNow.ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.records.jsonl'
     $filePath = Join-Path $LogDir $fileName
 
@@ -137,7 +137,7 @@ function Write-LogEntry {
     .PARAMETER LogDir
         Path to the log directory.
     .PARAMETER IDE
-        The IDE identifier ("ClaudeCode" or "Copilot"). Used to split logs by IDE.
+        The IDE identifier ("ClaudeCode", "Copilot", or "Codex"). Used to split logs by IDE.
     #>
     param(
         [PSCustomObject]$RawInput,
@@ -249,7 +249,7 @@ function Write-LogEntry {
     $logEntry = $header + $body + "`n"
 
     # --- Write to file (UTF-8 without BOM, LF line endings) ---
-    $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } else { 'claude' }
+    $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } elseif ($IDE -eq 'Codex') { 'codex' } else { 'claude' }
     $logFileName = (Get-Date -AsUTC).ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.log'
     $logFilePath = Join-Path $LogDir $logFileName
 
