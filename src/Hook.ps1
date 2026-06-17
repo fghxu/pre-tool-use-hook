@@ -96,7 +96,7 @@ if ($elapsed.TotalMilliseconds -gt 3000) {
     $classifyResult = [PSCustomObject]@{
         Decision    = "ask"
         Reason      = "classification timed out"
-        ExitCode    = 2
+        ExitCode    = 0
         IDE         = $ide
         ToolName    = $classifyResult.ToolName
         Command     = $classifyResult.Command

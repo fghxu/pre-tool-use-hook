@@ -100,7 +100,7 @@ function Test-TrustedUntrusted {
                 return [PSCustomObject]@{
                     Decision = "ask"
                     Reason   = "matched untrusted pattern: $patternText"
-                    ExitCode = 2
+                    ExitCode = 0
                 }
             }
         }
@@ -440,7 +440,7 @@ function Invoke-Classify {
         return (Repair-ResultProperties ([PSCustomObject]@{
             Decision    = "ask"
             Reason      = $reason
-            ExitCode    = 2
+            ExitCode    = 0
             IDE         = $IDE
             ToolName    = $toolName
             Command     = $command
