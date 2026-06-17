@@ -62,40 +62,40 @@
   </category-group>
 
   <!-- ============================================================
-  AWS Strictness Normal — 8 cases
+  PowerShell Remoting — 8 cases
   ============================================================ -->
-  <category-group name="AWS-Strictness-Normal">
-    <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
-      <description>aws ec2 describe-instances with --filters flag (normal mode: --flags stripped, describe is read-only)</description>
-      <copilot-command><![CDATA[aws ec2 describe-instances --filters Name=tag:Name,Values=my-inst --region us-east-1]]></copilot-command>
+  <category-group name="PowerShell-Remoting">
+    <test-case expected="allow" reason="Get-Process (Get-* read-only verb)" category="PSRemoting-ReadOnly">
+      <description>Invoke-Command -ComputerName with Get-Process (read-only)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Get-Process -Name pwsh }]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
-      <description>aws with global --profile and --region flags before subcommand (normal mode: flags stripped)</description>
-      <copilot-command><![CDATA[aws --profile prod ec2 describe-instances --region us-east-1]]></copilot-command>
+    <test-case expected="allow" reason="Get-Service (Get-* read-only verb)" category="PSRemoting-ReadOnly">
+      <description>Invoke-Command -Session with Get-Service (read-only)</description>
+      <copilot-command><![CDATA[Invoke-Command -Session $session -ScriptBlock { Get-Service -Name wuauserv }]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
-      <description>aws ec2 describe-instances with --unknown-flag (normal mode: unknown flag ignored)</description>
-      <copilot-command><![CDATA[aws ec2 describe-instances --unknown-flag some-value]]></copilot-command>
+    <test-case expected="allow" reason="Get-ChildItem (Get-* read-only verb)" category="PSRemoting-ReadOnly">
+      <description>Invoke-Command with Get-ChildItem recursively listing files (read-only)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Get-ChildItem -Path C:\logs -Recurse -ErrorAction SilentlyContinue }]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
-      <description>aws ec2 with service-level --flag before describe (normal mode: interleaved flag stripped)</description>
-      <copilot-command><![CDATA[aws ec2 --region us-west-2 describe-instances]]></copilot-command>
+    <test-case expected="allow" reason="Get-EventLog (Get-* read-only verb)" category="PSRemoting-ReadOnly">
+      <description>Invoke-Command with Get-EventLog (read-only)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Get-EventLog -LogName Application -Newest 50 }]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="terminate-instances" category="AWS-Normal-Modifying">
-      <description>aws ec2 terminate-instances with --instance-ids flag (normal mode: flags stripped, terminate is modifying)</description>
-      <copilot-command><![CDATA[aws ec2 terminate-instances --instance-ids i-1234567890abcdef0]]></copilot-command>
+    <test-case expected="ask" reason="Stop-Process (Stop-* modifying verb)" category="PSRemoting-Modifying">
+      <description>Invoke-Command with Stop-Process (modifying, Stop-* verb)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Stop-Process -Name notepad -Force }]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="terminate-instances" category="AWS-Normal-Modifying">
-      <description>aws --profile prod ec2 --region us-east-1 terminate-instances (normal mode: all flags stripped, terminate is modifying)</description>
-      <copilot-command><![CDATA[aws --profile prod ec2 --region us-east-1 terminate-instances --instance-ids i-123456]]></copilot-command>
+    <test-case expected="ask" reason="Remove-Item (Remove-* modifying verb)" category="PSRemoting-Modifying">
+      <description>Invoke-Command with Remove-Item (modifying, Remove-* verb)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Remove-Item -Path C:\temp\*.log -Force }]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="s3 rm" category="AWS-Normal-Modifying">
-      <description>aws s3 rm with --recursive and --exclude flags (normal mode: flags stripped, rm is modifying)</description>
-      <copilot-command><![CDATA[aws s3 rm s3://my-bucket/logs/ --recursive --exclude "*.gz"]]></copilot-command>
+    <test-case expected="ask" reason="Set-Service (Set-* modifying verb)" category="PSRemoting-Modifying">
+      <description>Invoke-Command with Set-Service (modifying, Set-* verb)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Set-Service -Name wuauserv -StartupType Disabled }]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="s3 sync" category="AWS-Normal-Modifying">
-      <description>aws s3 sync with --delete flag (normal mode: flags stripped, sync is modifying)</description>
-      <copilot-command><![CDATA[aws s3 sync ./build s3://my-bucket/ --delete --exclude "*.tmp"]]></copilot-command>
+    <test-case expected="ask" reason="Restart-Service (Restart-* modifying verb)" category="PSRemoting-Modifying">
+      <description>Invoke-Command with Restart-Service (modifying, Restart-* high risk verb)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Restart-Service -Name spooler }]]></copilot-command>
     </test-case>
   </category-group>
 
