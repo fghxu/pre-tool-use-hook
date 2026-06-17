@@ -427,7 +427,7 @@
       "read_only": [
         { "name": "terraform init",         "patterns": ["terraform *init*"],                      "risk": "low",    "description": "Initialize working directory" },
         { "name": "terraform get",          "patterns": ["terraform get *"],                       "risk": "low",    "description": "Download modules" },
-        { "name": "terraform fmt",          "patterns": ["terraform *fmt*"],                       "risk": "low",    "description": "Reformat config files" },
+        { "name": "terraform fmt -check",   "patterns": ["terraform *fmt*-check*"],               "description": "Check config formatting (dry-run, read-only)" },
         { "name": "terraform plan",         "patterns": ["terraform plan*"],                       "description": "Show execution plan" },
         { "name": "terraform state list",   "patterns": ["terraform *state list*"],                "description": "List resources in state" },
         { "name": "terraform state show",   "patterns": ["terraform *state show*"],                "description": "Show resource in state" },
@@ -455,7 +455,8 @@
         { "name": "terraform workspace delete","patterns": ["terraform *workspace delete*"],       "risk": "high",   "description": "Delete workspace" },
         { "name": "terraform taint",         "patterns": ["terraform *taint*"],                    "risk": "medium", "description": "Mark resource for recreation" },
         { "name": "terraform untaint",       "patterns": ["terraform *untaint*"],                  "risk": "medium", "description": "Remove taint from resource" },
-        { "name": "terraform refresh",       "patterns": ["terraform *refresh*"],                  "risk": "medium", "description": "Refresh state against real resources" }
+        { "name": "terraform refresh",       "patterns": ["terraform *refresh*"],                  "risk": "medium", "description": "Refresh state against real resources" },
+        { "name": "terraform fmt",           "patterns": ["terraform fmt*", "terraform *fmt*"],        "risk": "low",    "description": "Reformat config files in place" }
       ]
     },
 

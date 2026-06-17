@@ -2094,8 +2094,8 @@ done]]></copilot-command>
       <copilot-command><![CDATA[terraform import aws_s3_bucket.data bucket-name-12345]]></copilot-command>
     </test-case>
 
-    <test-case expected="allow" reason="read-only: terraform fmt" category="Terraform-Force">
-      <description>terraform fmt -write-modifies reformats HCL files in place</description>
+    <test-case expected="ask" reason="terraform fmt (modifying)" category="Terraform-Modify">
+      <description>terraform fmt -recursive . rewrites HCL files in place (modifying without -check)</description>
       <copilot-command><![CDATA[terraform fmt -recursive .]]></copilot-command>
     </test-case>
 
