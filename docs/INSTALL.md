@@ -308,6 +308,88 @@ Write a PowerShell code block to check if there is a file named test.txt under t
 ```
 
 
+## Installing for Codex CLI
+
+Codex CLI hooks support both JSON and TOML configuration formats.
+
+### Step 1: Understand How Codex CLI Hooks Work
+
+Codex CLI sends JSON to the hook's stdin. The payload shares Claude Code's protocol (PascalCase `PreToolUse` event name, `tool_use_id` present, ISO 8601 timestamps) with one critical addition — a `turn_id` field:
+
+```json
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "rm -rf /tmp/build"
+  },
+  "tool_use_id": "call_abc123",
+  "hook_event_name": "PreToolUse",
+  "turn_id": "turn_xyz789",
+  "timestamp": "2026-06-15T14:30:00.123Z",
+  "session_id": "...",
+  "cwd": "/path/to/project",
+  "transcript_path": "/home/user/.codex/projects/.../session.jsonl",
+  "permission_mode": "default",
+  "model": "gpt-5.5"
+}
+```
+
+The hook **must** return `"deny"` (not `"ask"`) for blocked commands — Codex parses `"ask"` but does not support it, causing the hook to be marked as failed and the tool call to proceed anyway.
+
+### Step 2: Configure the Hook
+
+**Option A: User-Level Global (`~/.codex/hooks.json`)**
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Option B: Project-Level (`<repo>/.codex/hooks.json`)**
+
+Same format as Option A. Place the file in your repository root under `.codex/hooks.json`.
+
+**Option C: TOML Format (`~/.codex/config.toml`)**
+
+```toml
+[[hooks.PreToolUse]]
+matcher = "*"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "pwsh -NoProfile -NonInteractive -File C:/git/pretoolusehook/src/Hook.ps1"
+```
+
+### Step 3: Verify
+
+```powershell
+# Test that the hook detects Codex input and maps ask to deny:
+cd C:\git\pretoolusehook
+echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/test"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:00.123Z","tool_use_id":"test123","turn_id":"turn_test"}' | pwsh -NoProfile -NonInteractive -File src/Hook.ps1
+
+# Expected output (note "deny" not "ask"):
+# {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"rm -rf (...)"}}
+```
+
+### Codex Hook Limitations
+
+- `permissionDecision: "ask"` is parsed but unsupported — the hook uses `"deny"` instead
+- `WebSearch` and other non-shell, non-MCP tools are not intercepted
+- The newer `unified_exec` mechanism has incomplete hook interception
+
 ## Customizing the Configuration
 
 ### Adding a New Read-Only Command

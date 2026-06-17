@@ -43,8 +43,9 @@ Output JSON (stdout): { permissionDecision, permissionDecisionReason }
 |-----|-----------|------------------|
 | **Claude Code** | `PreToolUse` | PascalCase event name, presence of `tool_use_id`, ISO 8601 timestamps |
 | **GitHub Copilot** | `preToolUse` | camelCase event name, absence of `tool_use_id`, Unix epoch timestamps |
+| **Codex CLI** | `PreToolUse` | PascalCase event name, presence of `turn_id` or `model` fields |
 
-IDE detection uses a three-signal majority vote (see HookAdapter.ps1). The output format adapts automatically — Claude Code expects a `hookSpecificOutput` wrapper; Copilot expects a flat decision object.
+IDE detection uses multi-signal voting with decisive short-circuit signals (see HookAdapter.ps1). The output format adapts automatically per-IDE — Codex uses `permissionDecision: "deny"` instead of `"ask"`.
 
 ## Supported Command Domains
 
