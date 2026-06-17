@@ -62,40 +62,42 @@
   </category-group>
 
   <!-- ============================================================
-  PowerShell Remoting — 8 cases
+  PowerShell Remoting + Full-Path — 8 cases
+  Tests full-path executables invoked inside Invoke-Command,
+  pwsh -Command, and Enter-PSSession wrappers.
   ============================================================ -->
-  <category-group name="PowerShell-Remoting">
-    <test-case expected="allow" reason="Get-Process (Get-* read-only verb)" category="PSRemoting-ReadOnly">
-      <description>Invoke-Command -ComputerName with Get-Process (read-only)</description>
-      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Get-Process -Name pwsh }]]></copilot-command>
+  <category-group name="PSRemoting-FullPath">
+    <test-case expected="allow" reason="findstr (read-only)" category="PSRemoting-FullPath-Windows-ReadOnly">
+      <description>Invoke-Command with full-path findstr.exe (inner read-only after path strip)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { & "C:\Windows\System32\findstr.exe" /n "error" *.log }]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="Get-Service (Get-* read-only verb)" category="PSRemoting-ReadOnly">
-      <description>Invoke-Command -Session with Get-Service (read-only)</description>
-      <copilot-command><![CDATA[Invoke-Command -Session $session -ScriptBlock { Get-Service -Name wuauserv }]]></copilot-command>
+    <test-case expected="ask" reason="taskkill (modifying)" category="PSRemoting-FullPath-Windows-Modifying">
+      <description>Invoke-Command with full-path taskkill.exe (inner modifying after path strip)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { & "C:\Windows\System32\taskkill.exe" /f /im notepad.exe }]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="Get-ChildItem (Get-* read-only verb)" category="PSRemoting-ReadOnly">
-      <description>Invoke-Command with Get-ChildItem recursively listing files (read-only)</description>
-      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Get-ChildItem -Path C:\logs -Recurse -ErrorAction SilentlyContinue }]]></copilot-command>
+    <test-case expected="ask" reason="unknown command" category="PSRemoting-FullPath-Windows-Unknown">
+      <description>Invoke-Command with full-path custom exe "C:\test program\delete.exe" (unknown command after path strip)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { & "C:\test program\delete.exe" /force /quiet }]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="Get-EventLog (Get-* read-only verb)" category="PSRemoting-ReadOnly">
-      <description>Invoke-Command with Get-EventLog (read-only)</description>
-      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Get-EventLog -LogName Application -Newest 50 }]]></copilot-command>
+    <test-case expected="allow" reason="findstr (read-only)" category="PSRemoting-FullPath-Unquoted">
+      <description>Invoke-Command with unquoted full path C:\Windows\System32\findstr.exe (inner read-only after path strip)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { C:\Windows\System32\findstr.exe /n "TODO" *.ps1 }]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="Stop-Process (Stop-* modifying verb)" category="PSRemoting-Modifying">
-      <description>Invoke-Command with Stop-Process (modifying, Stop-* verb)</description>
-      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Stop-Process -Name notepad -Force }]]></copilot-command>
+    <test-case expected="allow" reason="grep (read-only)" category="PSRemoting-FullPath-Linux-ReadOnly">
+      <description>pwsh -Command with Linux full path /usr/bin/grep (inner read-only after path strip)</description>
+      <copilot-command><![CDATA[pwsh -Command "/usr/bin/grep ERROR /var/log/syslog"]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="Remove-Item (Remove-* modifying verb)" category="PSRemoting-Modifying">
-      <description>Invoke-Command with Remove-Item (modifying, Remove-* verb)</description>
-      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Remove-Item -Path C:\temp\*.log -Force }]]></copilot-command>
+    <test-case expected="ask" reason="rm (modifying)" category="PSRemoting-FullPath-Linux-Modifying">
+      <description>pwsh -Command with Linux full path /bin/rm (inner modifying after path strip)</description>
+      <copilot-command><![CDATA[pwsh -Command "/bin/rm -rf /tmp/cache/"]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="Set-Service (Set-* modifying verb)" category="PSRemoting-Modifying">
-      <description>Invoke-Command with Set-Service (modifying, Set-* verb)</description>
-      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Set-Service -Name wuauserv -StartupType Disabled }]]></copilot-command>
+    <test-case expected="ask" reason="systemctl stop (modifying)" category="PSRemoting-FullPath-SSH-Systemctl">
+      <description>ssh to pwsh wrapping full-path systemctl stop (double-nested, inner modifying)</description>
+      <copilot-command><![CDATA[ssh user@host "pwsh -Command '/usr/bin/systemctl stop nginx'"]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="Restart-Service (Restart-* modifying verb)" category="PSRemoting-Modifying">
-      <description>Invoke-Command with Restart-Service (modifying, Restart-* high risk verb)</description>
-      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { Restart-Service -Name spooler }]]></copilot-command>
+    <test-case expected="allow" reason="read-only" category="PSRemoting-FullPath-Mixed-Pipeline">
+      <description>Invoke-Command with piped full-path commands: findstr piped to sort (all read-only after path strip)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName server01 -ScriptBlock { C:\Windows\System32\findstr.exe /n "ERROR" *.log | C:\Windows\System32\sort.exe }]]></copilot-command>
     </test-case>
   </category-group>
 
