@@ -86,4 +86,16 @@ The existing nested-command extraction in `Parser.ps1` (`Find-NestedCommands`, `
 | File | Change |
 |------|--------|
 | `src/Resolver.ps1` | New Step 0f: full-path detection and stripping with domain re-detection |
-| `test/test-cases.adhoc.xml` | Rewritten with 20 full-path test cases across Windows, Linux, SSH, and PS remoting |
+| `test/test-cases.adhoc.xml` | Replaced SSH-Git and DOS-Git groups with full-path SSH and DOS cases (12), plus PS remoting full-path cases (8) |
+| `test/test-cases.fullpath.xml` | New: 20 full-path test cases covering Windows, Linux, SSH, and PS remoting |
+
+## Test Results (Post-Implementation)
+
+| Suite | Cases | Result |
+|-------|-------|--------|
+| Classification regression (`test-cases.xml`) | 479 | 479/479 |
+| Full-path (`test-cases.fullpath.xml`) | 20 | 20/20 |
+| Adhoc quick suite (`test-cases.adhoc.xml`) | 20 | 20/20 |
+| Codex unit (`test-cases.codex.ps1`) | 17 | 17/17 |
+| Full-pipe IDE (`FullPipeTestRunner.ps1`) | 19 | 19/19 |
+| **Total** | **555** | **555/555** |

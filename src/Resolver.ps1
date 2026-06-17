@@ -203,6 +203,61 @@ function Resolve-Command {
     }
 
     # -------------------------------------------------
+    # Step 0f: Full-path stripping (domain-agnostic)
+    #   "C:\Program Files\Git\bin\git.exe" status → "git status"
+    #   "/usr/bin/grep pattern file" → "grep pattern file"
+    #   Strips directory prefix, strips .exe/.com extensions,
+    #   re-detects domain, and recurses.
+    # -------------------------------------------------
+    $trimmedForPath = $Command.Trim()
+
+    # Strip PowerShell call operator & (e.g., & "C:\tools\tool.exe" args)
+    $trimmedForPath = $trimmedForPath -replace '^\s*&\s+', ''
+
+    # Extract first token (handling quoted paths with spaces)
+    $firstToken = $null
+    $rest = ''
+    if ($trimmedForPath -match '^"([^"]+)"\s*(.*)$') {
+        $firstToken = $matches[1]
+        $rest = $matches[2]
+    }
+    else {
+        if ($trimmedForPath -match '^(\S+)\s*(.*)$') {
+            $firstToken = $matches[1]
+            $rest = $matches[2]
+        }
+    }
+
+    $isFullPath = $false
+    $programName = $null
+
+    # Windows full path: starts with drive letter + colon + backslash
+    if ($firstToken -and $firstToken -match '^[A-Za-z]:\\') {
+        $isFullPath = $true
+        $basename = $firstToken -replace '^.*\\', ''
+        # Strip .exe and .com extensions (keep .bat/.cmd/.ps1 — they are scripts)
+        if ($basename -match '^(.+)\.(exe|com)$') {
+            $programName = $matches[1]
+        }
+        else {
+            $programName = $basename
+        }
+    }
+    # Linux full path: starts with /, has at least one directory separator
+    elseif ($firstToken -and $firstToken -match '^/(?:[^/\s]+/)+[^/\s]+$') {
+        $isFullPath = $true
+        $programName = $firstToken -replace '^.*/', ''
+    }
+
+    if ($isFullPath -and $programName) {
+        $newCmd = if ($rest) { "$programName $rest" } else { $programName }
+        if ($newCmd -ne $Command.Trim()) {
+            $redetectedDomain = Get-CommandDomain -Command $newCmd
+            return Resolve-Command -Command $newCmd -Domain $redetectedDomain -Config $Config
+        }
+    }
+
+    # -------------------------------------------------
     # Step 1a: Check explicit read_only entries
     # -------------------------------------------------
     $hasReadOnly = Get-Member -InputObject $domainConfig -Name 'read_only' -MemberType NoteProperty -ErrorAction SilentlyContinue
