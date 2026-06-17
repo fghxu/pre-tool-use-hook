@@ -2,62 +2,66 @@
 <commands>
 
   <!-- ============================================================
-  Linux SSH + Git — 6 cases
+  SSH + Full-Path Executables — 6 cases
+  Full-path commands wrapped in SSH, quoted and unquoted,
+  Windows and Linux targets.
   ============================================================ -->
-  <category-group name="Linux-SSH-Git">
-    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
-      <description>SSH remote git status (read-only)</description>
-      <copilot-command><![CDATA[ssh user@host "git status"]]></copilot-command>
+  <category-group name="SSH-FullPath">
+    <test-case expected="allow" reason="grep (read-only)" category="SSH-FullPath-Linux-ReadOnly">
+      <description>SSH with Linux full path /usr/bin/grep (inner read-only after path strip)</description>
+      <copilot-command><![CDATA[ssh user@host "/usr/bin/grep ERROR /var/log/app.log"]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
-      <description>SSH remote git -C /path status (read-only, -C flag stripped)</description>
-      <copilot-command><![CDATA[ssh user@host "git -C /opt/repo status"]]></copilot-command>
+    <test-case expected="ask" reason="rm (modifying, high)" category="SSH-FullPath-Linux-Modifying">
+      <description>SSH with Linux full path /bin/rm (inner modifying after path strip)</description>
+      <copilot-command><![CDATA[ssh user@host "/bin/rm -rf /tmp/cache/"]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
-      <description>SSH remote sudo git -C /path log --oneline (sudo stripped, git log read-only)</description>
-      <copilot-command><![CDATA[ssh user@host "sudo git -C /opt/che/cookbook log --oneline"]]></copilot-command>
+    <test-case expected="ask" reason="systemctl restart (modifying)" category="SSH-FullPath-Linux-Systemctl">
+      <description>SSH with Linux full path /usr/bin/systemctl restart (inner modifying after path strip)</description>
+      <copilot-command><![CDATA[ssh -i key.pem admin@host "/usr/bin/systemctl restart apache2"]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="git push" category="Linux-SSH-Git-Modifying">
-      <description>SSH remote git -C /path push origin main (modifying)</description>
-      <copilot-command><![CDATA[ssh user@host "git -C /opt/repo push origin main"]]></copilot-command>
+    <test-case expected="allow" reason="findstr (read-only)" category="SSH-FullPath-Windows-ReadOnly">
+      <description>SSH with Windows full path C:\Windows\System32\findstr.exe (inner read-only after path strip)</description>
+      <copilot-command><![CDATA[ssh user@host "C:\Windows\System32\findstr.exe /n error *.log"]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="sudo git push" category="Linux-SSH-Git-Modifying">
-      <description>SSH remote sudo git -C /path push (sudo stripped, git push modifying)</description>
-      <copilot-command><![CDATA[ssh admin@prod "sudo git -C /opt/site push origin master"]]></copilot-command>
+    <test-case expected="ask" reason="taskkill (modifying)" category="SSH-FullPath-Windows-Modifying">
+      <description>SSH with quoted Windows full path "C:\Program Files\tool.exe" (inner unknown after path strip, ask)</description>
+      <copilot-command><![CDATA[ssh user@host "\"C:\Program Files\MyApp\tool.exe\" /status"]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="unknown command" category="Linux-SSH-Git-Unknown">
-      <description>SSH remote sudo git -C /path --online -3 2>/dev/null (unknown git subcommand)</description>
-      <copilot-command><![CDATA[ssh user@host "sudo git -C /opt/che/cookbook --online -3 2>/dev/null"]]></copilot-command>
+    <test-case expected="allow" reason="read-only" category="SSH-FullPath-Sudo-Git">
+      <description>SSH with sudo and full path /usr/bin/git status (sudo stripped, git status read-only after path strip)</description>
+      <copilot-command><![CDATA[ssh user@host "sudo /usr/bin/git -C /opt/repo status"]]></copilot-command>
     </test-case>
   </category-group>
 
   <!-- ============================================================
-  DOS Git — 6 cases
+  DOS + Full-Path Executables — 6 cases
+  Full-path commands including git, aws, kubectl, and native
+  Windows tools, quoted and unquoted paths.
   ============================================================ -->
-  <category-group name="DOS-Git">
-    <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
-      <description>git -C C:\repo status (read-only, -C flag stripped)</description>
-      <copilot-command><![CDATA[git -C C:\repo status]]></copilot-command>
+  <category-group name="DOS-FullPath">
+    <test-case expected="allow" reason="git status (read-only)" category="DOS-FullPath-Git-ReadOnly">
+      <description>Quoted full path "C:\Program Files\Git\bin\git.exe" status (git status read-only after path strip)</description>
+      <copilot-command><![CDATA["C:\Program Files\Git\bin\git.exe" status]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
-      <description>git -C "C:\Program Files\repo" log --oneline (read-only, quoted path, -C stripped)</description>
-      <copilot-command><![CDATA[git -C "C:\Program Files\repo" log --oneline]]></copilot-command>
+    <test-case expected="ask" reason="git push (modifying)" category="DOS-FullPath-Git-Modifying">
+      <description>Quoted full path "C:\Program Files\Git\bin\git.exe" push origin main (git push modifying after path strip)</description>
+      <copilot-command><![CDATA["C:\Program Files\Git\bin\git.exe" push origin main]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
-      <description>git -c core.autocrlf=true -C C:\repo diff (read-only, multiple flags stripped)</description>
-      <copilot-command><![CDATA[git -c core.autocrlf=true -C C:\repo diff]]></copilot-command>
+    <test-case expected="ask" reason="taskkill (modifying)" category="DOS-FullPath-Windows-Modifying">
+      <description>Unquoted full path C:\Windows\System32\taskkill.exe (taskkill modifying after path strip)</description>
+      <copilot-command><![CDATA[C:\Windows\System32\taskkill.exe /f /im notepad.exe]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="git push" category="DOS-Git-Modifying">
-      <description>git -C C:\repo push origin main (modifying, -C flag stripped)</description>
-      <copilot-command><![CDATA[git -C C:\repo push origin main]]></copilot-command>
+    <test-case expected="allow" reason="netstat (read-only)" category="DOS-FullPath-Windows-ReadOnly">
+      <description>Unquoted full path C:\Windows\System32\netstat.exe (netstat read-only after path strip)</description>
+      <copilot-command><![CDATA[C:\Windows\System32\netstat.exe -ano]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="git reset" category="DOS-Git-Modifying">
-      <description>git -C C:\repo reset --hard HEAD~1 (modifying, high risk)</description>
-      <copilot-command><![CDATA[git -C C:\repo reset --hard HEAD~1]]></copilot-command>
+    <test-case expected="allow" reason="aws describe-* (read-only)" category="DOS-FullPath-AWS-ReadOnly">
+      <description>Quoted full path "C:\Program Files\Amazon\AWSCLI\bin\aws.exe" ec2 describe-instances (aws describe read-only after path strip)</description>
+      <copilot-command><![CDATA["C:\Program Files\Amazon\AWSCLI\bin\aws.exe" ec2 describe-instances --region us-east-1]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="unknown command" category="DOS-Git-Unknown">
-      <description>git -C C:\repo --online -3 (unknown git subcommand)</description>
-      <copilot-command><![CDATA[git -C C:\repo --online -3]]></copilot-command>
+    <test-case expected="ask" reason="kubectl delete (modifying)" category="DOS-FullPath-Kubectl-Modifying">
+      <description>Unquoted full path D:\tools\kubectl.exe delete pod (kubectl delete modifying after path strip)</description>
+      <copilot-command><![CDATA[D:\tools\kubectl.exe delete pod my-pod -n default]]></copilot-command>
     </test-case>
   </category-group>
 
