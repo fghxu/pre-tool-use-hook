@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <commands>
+
+  <!-- ============================================================
+  Linux SSH + Git — 6 cases
+  ============================================================ -->
   <category-group name="Linux-SSH-Git">
     <test-case expected="allow" reason="read-only" category="Linux-SSH-Git-ReadOnly">
       <description>SSH remote git status (read-only)</description>
@@ -27,6 +31,9 @@
     </test-case>
   </category-group>
 
+  <!-- ============================================================
+  DOS Git — 6 cases
+  ============================================================ -->
   <category-group name="DOS-Git">
     <test-case expected="allow" reason="read-only" category="DOS-Git-ReadOnly">
       <description>git -C C:\repo status (read-only, -C flag stripped)</description>
@@ -54,6 +61,9 @@
     </test-case>
   </category-group>
 
+  <!-- ============================================================
+  AWS Strictness Normal — 8 cases
+  ============================================================ -->
   <category-group name="AWS-Strictness-Normal">
     <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
       <description>aws ec2 describe-instances with --filters flag (normal mode: --flags stripped, describe is read-only)</description>
