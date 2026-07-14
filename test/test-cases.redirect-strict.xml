@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<commands>
+
+  <category-group name="Redirect-Strict-Basic">
+    <test-case expected="ask" reason="modifying" category="Redirect-Strict-NonSystem">
+      <description>echo &gt; /home/user/file.txt (non-system, but strict mode = ask)</description>
+      <copilot-command><![CDATA[echo hello > /home/user/output.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying" category="Redirect-Strict-NonSystem">
+      <description>echo &gt;&gt; /home/user/log.txt (non-system append, strict mode = ask)</description>
+      <copilot-command><![CDATA[echo "log entry" >> /home/user/app.log]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying" category="Redirect-Strict-NonSystem">
+      <description>git status &gt; /home/dev/repo-status.txt (non-system, strict mode = ask)</description>
+      <copilot-command><![CDATA[git status > /home/dev/repo-status.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying" category="Redirect-Strict-NonSystem">
+      <description>ls &gt; ~/output.txt (non-system, strict mode = ask)</description>
+      <copilot-command><![CDATA[ls -la > ~/output.txt]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Strict-TempDiscard">
+    <test-case expected="allow" reason="read-only" category="Redirect-Strict-Temp">
+      <description>ls &gt; /tmp/output.txt (temp path, always allowed regardless of mode)</description>
+      <copilot-command><![CDATA[ls -la > /tmp/output.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Strict-Temp">
+      <description>cat &gt; /dev/null (discard, always allowed)</description>
+      <copilot-command><![CDATA[cat access.log > /dev/null]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Strict-Temp">
+      <description>dir &gt; NUL (DOS discard, always allowed)</description>
+      <copilot-command><![CDATA[dir > NUL]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Strict-Temp">
+      <description>type data.txt &gt; %TEMP%\out.txt (temp path, always allowed)</description>
+      <copilot-command><![CDATA[type data.txt > %TEMP%\out.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Strict-Temp">
+      <description>echo &gt;&gt; /tmp/app.log (append to temp is safe in both modes, same as overwrite to temp)</description>
+      <copilot-command><![CDATA[echo "log" >> /tmp/app.log]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Strict-ReadOnly">
+    <test-case expected="allow" reason="read-only" category="Redirect-Strict-Fd">
+      <description>command 2&gt;&amp;1 (fd redirect, always allowed)</description>
+      <copilot-command><![CDATA[git status 2>&1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Strict-Input">
+      <description>cat &lt; /etc/hostname (input redirect, always allowed)</description>
+      <copilot-command><![CDATA[cat < /etc/hostname]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Strict-HereString">
+      <description>grep &lt;&lt;&lt; "pattern" (here-string, always allowed)</description>
+      <copilot-command><![CDATA[grep error <<< "error: disk full"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Strict-System">
+    <test-case expected="ask" reason="high risk" category="Redirect-Strict-SystemPath">
+      <description>echo &gt; /etc/config.conf (system path, always ask)</description>
+      <copilot-command><![CDATA[echo "debug=true" > /etc/config.conf]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Strict-SystemPath">
+      <description>echo &gt;&gt; /etc/hosts (system path append, always ask)</description>
+      <copilot-command><![CDATA[echo "127.0.0.1 myapp" >> /etc/hosts]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Strict-SystemPath">
+      <description>echo &gt;&gt; /var/log/app.log (system path, /var/ blocked)</description>
+      <copilot-command><![CDATA[echo "error" >> /var/log/app.log]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Strict-SystemPath">
+      <description>echo &gt; /opt/config/settings.conf (system path, /opt/ blocked)</description>
+      <copilot-command><![CDATA[echo "key=val" > /opt/config/settings.conf]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Strict-SystemPath">
+      <description>echo &gt; /usr/local/bin/script (system path, /usr/ blocked)</description>
+      <copilot-command><![CDATA[echo "#!/bin/sh" > /usr/local/bin/script.sh]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Strict-Windows-System">
+    <test-case expected="ask" reason="high risk" category="Redirect-Strict-WinSystem">
+      <description>dir &gt; C:\Windows\System32\file.txt (windows system, always ask)</description>
+      <copilot-command><![CDATA[dir > C:\Windows\System32\file.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Strict-WinSystem">
+      <description>dir &gt; C:\Windows\Temp\file.txt (windows system path under C:\Windows, always ask)</description>
+      <copilot-command><![CDATA[dir > C:\Windows\Temp\file.txt]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Strict-SSH">
+    <test-case expected="ask" reason="modifying" category="Redirect-Strict-SSH">
+      <description>ssh user@host "ls &gt; /home/user/out.txt" (non-system, strict mode = ask)</description>
+      <copilot-command><![CDATA[ssh user@host "ls -la > /home/user/out.txt"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Strict-SSH">
+      <description>ssh user@host "echo x &gt;&gt; /etc/hosts" (system path, always ask)</description>
+      <copilot-command><![CDATA[ssh user@host "echo '127.0.0.1 app' >> /etc/hosts"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Strict-PSRemoting">
+    <test-case expected="ask" reason="unknown" category="Redirect-Strict-PSRemoting">
+      <description>Invoke-Command with Get-Service &gt; C:\temp\svc.txt (strict mode, C:\temp not in temp patterns)</description>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { Get-Service > C:\temp\svc.txt }]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="unknown" category="Redirect-Strict-PSRemoting">
+      <description>pwsh wrapping ssh with cat &gt; /tmp/out.txt (double-nested wrapper limitation, safe default ask)</description>
+      <copilot-command><![CDATA[pwsh -Command "ssh user@host 'cat /var/log/syslog > /tmp/out.txt'"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Strict-PowerShell-Cmdlets">
+    <test-case expected="ask" reason="modifying" category="Redirect-Strict-PS-Cmdlet">
+      <description>Get-Process | Out-File C:\temp\proc.txt (Out-* modifying verb)</description>
+      <copilot-command><![CDATA[Get-Process | Out-File C:\temp\proc.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying" category="Redirect-Strict-PS-Cmdlet">
+      <description>Set-Content -Path C:\temp\file.txt -Value hello (Set-* modifying verb)</description>
+      <copilot-command><![CDATA[Set-Content -Path C:\temp\file.txt -Value hello]]></copilot-command>
+    </test-case>
+  </category-group>
+
+</commands>

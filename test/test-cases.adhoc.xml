@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<commands>
+  <category-group name="Quick-Smoke">
+    <test-case expected="allow" reason="read-only" category="Quick-Smoke">
+      <description>Smoke test: dir lists directory contents (read-only)</description>
+      <copilot-command><![CDATA[dir C:\temp]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <!-- =================================================================== -->
+  <!-- Parameter-Value-Aware Classification                                -->
+  <!-- TDD RED until parameter_commands is implemented (see spec           -->
+  <!-- 2026-07-13-parameter-commands-and-editable-paths-design.md).        -->
+  <!-- The point of this group: the deciding parameter (Method, d, X,      -->
+  <!-- version) appears at ANY position in the line.                       -->
+  <!-- =================================================================== -->
+
+  <category-group name="Parameter-PS-RestMethod">
+
+    <!-- read-only: Get / Head / absent -->
+    <test-case expected="allow" reason="read-only: Invoke-RestMethod -Method Get" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod GET (Method at end) — read-only</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Uri "https://example.com" -Method Get]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: Invoke-RestMethod default GET (no -Method)" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod with no -Method defaults to GET — read-only</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: Invoke-RestMethod -Method Head" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod HEAD — read-only</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Uri "https://example.com" -Method Head]]></copilot-command>
+    </test-case>
+
+    <!-- modifying: Post/Put/Patch/Delete at any position -->
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Post" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod POST (Method first) — modifying</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method Post -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Put" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod PUT (Method last) — modifying</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Uri "https://example.com" -Method Put]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Patch" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod PATCH (Method first) — modifying</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method Patch -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Delete (high)" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod DELETE (uppercase, reordered) — modifying</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method DELETE -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method:Post (colon form)" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod colon-form -Method:Post — modifying</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method:Post -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="ask: Invoke-RestMethod -Method Custom (unrecognized value, normal mode)" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod with an unrecognized -Method value — ask in strict/normal (forces explicit config)</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method Custom -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+
+    <!-- Invoke-WebRequest + aliases -->
+    <test-case expected="allow" reason="read-only: Invoke-WebRequest -Method Get" category="Parameter-PS-RestMethod">
+      <description>Invoke-WebRequest GET — read-only</description>
+      <copilot-command><![CDATA[Invoke-WebRequest -Uri "https://example.com" -Method Get]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-WebRequest -Method Delete (high)" category="Parameter-PS-RestMethod">
+      <description>Invoke-WebRequest DELETE — modifying</description>
+      <copilot-command><![CDATA[Invoke-WebRequest -Uri "https://example.com" -Method Delete]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: irm alias -Method Post" category="Parameter-PS-RestMethod">
+      <description>irm alias POST — modifying (alias resolved)</description>
+      <copilot-command><![CDATA[irm -Uri "https://example.com" -Method Post]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: iwr alias -Method Get (reordered)" category="Parameter-PS-RestMethod">
+      <description>iwr alias GET with Method first — read-only (alias + reorder)</description>
+      <copilot-command><![CDATA[iwr -Method Get -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+
+    <!-- variable assignment wrapping a modifying call -->
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Post (after var-assignment strip)" category="Parameter-PS-RestMethod">
+      <description>$response = Invoke-RestMethod ... -Method Post — var stripped, then rule fires</description>
+      <copilot-command><![CDATA[$response = Invoke-RestMethod -Uri "https://example.com" -Method Post]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="Parameter-PS-Embedded">
+
+    <test-case expected="allow" reason="read-only: Invoke-RestMethod -Method Get inside remoting" category="Parameter-PS-Embedded">
+      <description>Invoke-Command remoting wrapping a GET — read-only</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName SRV1 -ScriptBlock { Invoke-RestMethod -Uri "https://example.com" -Method Get }]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Post inside remoting" category="Parameter-PS-Embedded">
+      <description>Invoke-Command remoting wrapping a POST — modifying (inner command classified)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName SRV1 -ScriptBlock { Invoke-RestMethod -Uri "https://example.com" -Method Post }]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Delete inside pwsh -Command" category="Parameter-PS-Embedded">
+      <description>pwsh -Command wrapping a DELETE — modifying (inner extracted from quoted string)</description>
+      <copilot-command><![CDATA[pwsh -Command "Invoke-RestMethod -Method Delete -Uri https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Post in a chained line" category="Parameter-PS-Embedded">
+      <description>Chained: POST call ; Get-Process — modifying sub-command wins</description>
+      <copilot-command><![CDATA[$r = Invoke-RestMethod -Method Post -Uri https://example.com; Get-Process]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="Parameter-Linux-Curl">
+
+    <!-- modifying: -d (short) and long data flag at any position -->
+    <test-case expected="ask" reason="modifying: curl -d (data before URL)" category="Parameter-Linux-Curl">
+      <description>curl POST via -d before the URL — modifying</description>
+      <copilot-command><![CDATA[curl -H "Content-Type: application/json" -d '{"name":"John","age":30}' https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl -d (data after URL)" category="Parameter-Linux-Curl">
+      <description>curl POST via -d AFTER the URL — modifying (position-independent)</description>
+      <copilot-command><![CDATA[curl https://example.com -H "Content-Type: application/json" -d '{"name":"John","age":30}']]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl --data" category="Parameter-Linux-Curl">
+      <description>curl POST via long --data flag — modifying</description>
+      <copilot-command><![CDATA[curl --data '{"a":1}' https://example.com]]></copilot-command>
+    </test-case>
+
+    <!-- modifying: -X verb (space and attached forms) -->
+    <test-case expected="ask" reason="modifying: curl -X POST" category="Parameter-Linux-Curl">
+      <description>curl explicit POST — modifying</description>
+      <copilot-command><![CDATA[curl -X POST https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl -X PUT" category="Parameter-Linux-Curl">
+      <description>curl explicit PUT — modifying</description>
+      <copilot-command><![CDATA[curl -X PUT https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl -X DELETE" category="Parameter-Linux-Curl">
+      <description>curl explicit DELETE (spaced) — modifying</description>
+      <copilot-command><![CDATA[curl -X DELETE https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl -XDELETE (attached)" category="Parameter-Linux-Curl">
+      <description>curl DELETE attached (-XDELETE, no space) — modifying (currently mis-classified as allow; this is the bug being fixed)</description>
+      <copilot-command><![CDATA[curl -XDELETE https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="ask: curl -X FROG (unrecognized verb, normal mode)" category="Parameter-Linux-Curl">
+      <description>curl with an unrecognized -X verb — ask in strict/normal (currently mis-allowed; another position/value bug being fixed)</description>
+      <copilot-command><![CDATA[curl -X FROG https://example.com]]></copilot-command>
+    </test-case>
+
+    <!-- modifying: upload flags -->
+    <test-case expected="ask" reason="modifying: curl -F (form upload)" category="Parameter-Linux-Curl">
+      <description>curl multipart form upload (-F) — modifying</description>
+      <copilot-command><![CDATA[curl -F 'file=@report.txt' https://example.com/upload]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl -T (file upload)" category="Parameter-Linux-Curl">
+      <description>curl file upload (-T) — modifying</description>
+      <copilot-command><![CDATA[curl -T archive.zip https://example.com/upload]]></copilot-command>
+    </test-case>
+
+    <!-- read-only: plain GET -->
+    <test-case expected="allow" reason="read-only: curl -X GET" category="Parameter-Linux-Curl">
+      <description>curl explicit GET — read-only</description>
+      <copilot-command><![CDATA[curl -X GET https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: curl silent GET" category="Parameter-Linux-Curl">
+      <description>curl silent GET — read-only (no modifying flag)</description>
+      <copilot-command><![CDATA[curl -s https://httpbin.org/ip]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: curl plain GET" category="Parameter-Linux-Curl">
+      <description>curl plain GET — read-only</description>
+      <copilot-command><![CDATA[curl https://example.com]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="Parameter-Linux-Python">
+
+    <test-case expected="allow" reason="read-only: python --version" category="Parameter-Linux-Python">
+      <description>python --version with stderr redirect — read-only</description>
+      <copilot-command><![CDATA[python --version 2>&1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: python -V" category="Parameter-Linux-Python">
+      <description>python -V short flag — read-only</description>
+      <copilot-command><![CDATA[python -V]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: python --help" category="Parameter-Linux-Python">
+      <description>python --help — read-only</description>
+      <copilot-command><![CDATA[python --help]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: python3 --version (alias)" category="Parameter-Linux-Python">
+      <description>python3 alias --version — read-only</description>
+      <copilot-command><![CDATA[python3 --version]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying: python runs a script (default)" category="Parameter-Linux-Python">
+      <description>python runs a script — modifying (no read-only flag, default modifying)</description>
+      <copilot-command><![CDATA[python gen_t4.py]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: python3 runs a script with args (alias)" category="Parameter-Linux-Python">
+      <description>python3 runs a training script with args — modifying</description>
+      <copilot-command><![CDATA[python3 train.py --epochs 10]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: py alias runs a script" category="Parameter-Linux-Python">
+      <description>py alias runs a script — modifying</description>
+      <copilot-command><![CDATA[py script.py]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+</commands>

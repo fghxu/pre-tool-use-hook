@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<commands>
+
+  <!-- =================================================================== -->
+  <!-- Trusted Pattern Gate (bypasses classification)                      -->
+  <!-- To successful test, add below to the "trusted_pattern" in config    -->
+  <!--   "docker\\s+exec\\s+(?:-\\S+\\s+)?comfyui\\b"                      -->
+  
+  <!-- =================================================================== -->
+  <category-group name="TrustedPattern">
+
+    <test-case expected="allow" reason="trusted pattern: docker exec comfyui" category="TrustedPattern-Gate">
+      <description>Single-line docker exec comfyui matches trusted pattern</description>
+      <copilot-command><![CDATA[docker exec comfyui nvidia-smi --query-gpu=memory.used --format=csv,noheader]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted pattern: docker exec -d comfyui" category="TrustedPattern-Gate">
+      <description>Detached docker exec comfyui matches trusted pattern</description>
+      <copilot-command><![CDATA[docker exec -d comfyui bash -c "nvidia-smi && echo done"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted pattern: for i in with docker exec comfyui (single line)" category="TrustedPattern-Gate">
+      <description>Single-line for loop with docker exec comfyui matches trusted pattern</description>
+      <copilot-command><![CDATA[for i in 1 2 3; do docker exec comfyui echo $i; done]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted pattern: for i in with docker exec comfyui (multi-line)" category="TrustedPattern-Gate">
+      <description>Multi-line for loop with docker exec comfyui crosses newlines and matches trusted pattern via Singleline regex option</description>
+      <copilot-command><![CDATA[for i in 1 2 3 4 5 6 7 8; do
+  echo "=== T+${i}0s ==="
+  docker exec comfyui bash -c 'nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv,noheader'
+  sleep 10
+done]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted pattern: for i in with docker exec -d comfyui (multi-line)" category="TrustedPattern-Gate">
+      <description>Multi-line for loop with docker exec -d comfyui matches trusted pattern</description>
+      <copilot-command><![CDATA[for i in 1 2 3 4 5 6 7 8; do
+  echo "=== Starting container $i ==="
+  docker exec -d comfyui bash -c "nvidia-smi > /tmp/gpu_status_$i.log 2>&1"
+  sleep 10
+done]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying: for loop with docker run (NOT in trusted pattern)" category="TrustedPattern-Gate">
+      <description>Multi-line for loop with docker run (not in trusted pattern) should still ask</description>
+      <copilot-command><![CDATA[for i in 1 2 3; do
+  docker run -d --name "container_$i" nginx:latest
+  sleep 5
+done]]></copilot-command>
+    </test-case>
+
+  </category-group>
+  
+  
+
+</commands>

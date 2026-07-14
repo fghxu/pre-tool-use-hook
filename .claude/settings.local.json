@@ -1,14 +1,30 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch",
-      "mcp__plugin_everything-claude-code_context7__resolve-library-id",
-      "mcp__plugin_everything-claude-code_context7__query-docs",
-      "Bash(chmod +x *)",
-      "Bash(grep -E \"\\\\.\\(sh|ps1\\)$\")",
-      "Bash(pwsh *)",
-      "Bash(tee test-output.log)",
-      "Bash(git add *)"
+      "mcp__brave-search__brave_web_search",
+      "WebFetch(domain:docs.github.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:code.visualstudio.com)",
+      "TaskOutput",
+      "TaskCreate"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "brave-search",
+    "ddg-search"
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -NonInteractive -File C:/git/cc/pretoolhook/src/Hook.ps1"
+          }
+        ]
+      }
     ]
   }
 }

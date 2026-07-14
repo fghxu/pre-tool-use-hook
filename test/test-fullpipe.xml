@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<commands>
+
+  <category-group name="ClaudeCode-FullPipe" ide="ClaudeCode">
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="CC-FullPipe-ReadOnly">
+      <description>ClaudeCode: ls (read-only, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"ls -la /tmp"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:00.123Z","tool_use_id":"call_test001","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="rm" category="CC-FullPipe-Modifying">
+      <description>ClaudeCode: rm -rf (modifying, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/build"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:01.123Z","tool_use_id":"call_test002","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="2" expected-reason="unknown tool" category="CC-FullPipe-Unknown">
+      <description>ClaudeCode: unknown tool (exit 2, genuine error)</description>
+      <hook-input><![CDATA[{"tool_name":"SomeUnknownTool","tool_input":{"command":"whatever"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:02.123Z","tool_use_id":"call_test003","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="2" expected-reason="could not extract command" category="CC-FullPipe-NoCommand">
+      <description>ClaudeCode: Bash with no command field (exit 2, genuine error)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"not_a_command":"oops"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:03.123Z","tool_use_id":"call_test004","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="CC-FullPipe-Trusted">
+      <description>ClaudeCode: git status (trusted for purpose of test, exit 0 — NOTE: git status is classified via full pipeline)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"docker ps"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:04.123Z","tool_use_id":"call_test005","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="ignored tool" category="CC-FullPipe-Skip">
+      <description>ClaudeCode: Read (ignored tool, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:05.123Z","tool_use_id":"call_test006","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+    </test-case>
+  </category-group>
+
+  <category-group name="Copilot-FullPipe" ide="Copilot">
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="CP-FullPipe-ReadOnly">
+      <description>Copilot: dir (read-only, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"run_in_terminal","tool_input":{"command":"dir C:\\temp"},"hook_event_name":"preToolUse","timestamp":"1715568000"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="del" category="CP-FullPipe-Modifying">
+      <description>Copilot: del (modifying, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"run_in_terminal","tool_input":{"command":"del C:\\temp\\test.txt"},"hook_event_name":"preToolUse","timestamp":"1715568001"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="CP-FullPipe-Docker">
+      <description>Copilot: docker ps (read-only, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"run_in_terminal","tool_input":{"command":"docker ps"},"hook_event_name":"preToolUse","timestamp":"1715568002"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="docker stop" category="CP-FullPipe-Modifying">
+      <description>Copilot: docker stop (modifying, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"run_in_terminal","tool_input":{"command":"docker stop my-container"},"hook_event_name":"preToolUse","timestamp":"1715568003"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="2" expected-reason="unknown tool" category="CP-FullPipe-Unknown">
+      <description>Copilot: unknown tool (exit 2, genuine error)</description>
+      <hook-input><![CDATA[{"tool_name":"made_up_tool","tool_input":{"command":"foo"},"hook_event_name":"preToolUse","timestamp":"1715568004"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="Stop-Process" category="CP-FullPipe-VSCode-NoTranscript">
+      <description>VS Code Copilot: __vscode- in tool_use_id, no transcript_path (bug fix — was misdetected as ClaudeCode)</description>
+      <hook-input><![CDATA[{"tool_name":"run_in_terminal","tool_input":{"command":"Stop-Process -Name notepad"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:00.123Z","tool_use_id":"toolu_bdrk_abc__vscode-xyz"}]]></hook-input>
+    </test-case>
+  </category-group>
+
+  <category-group name="Codex-FullPipe" ide="Codex">
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="CX-FullPipe-ReadOnly">
+      <description>Codex: ls (read-only, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"ls -la /tmp"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:00.123Z","tool_use_id":"call_cx001","turn_id":"turn_abc123"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="deny" expected-exit="0" expected-reason="rm" category="CX-FullPipe-Modifying">
+      <description>Codex: rm -rf (modifying, exit 0, deny)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/build"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:01.123Z","tool_use_id":"call_cx002","turn_id":"turn_def456"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="CX-FullPipe-Docker">
+      <description>Codex: docker ps (read-only, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"docker ps"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:02.123Z","tool_use_id":"call_cx003","turn_id":"turn_ghi789"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="deny" expected-exit="0" expected-reason="Stop-Process" category="CX-FullPipe-PowerShell">
+      <description>Codex: Stop-Process (PowerShell modifying, deny, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"Stop-Process -Name notepad"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:03.123Z","tool_use_id":"call_cx004","turn_id":"turn_jkl012"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="deny" expected-exit="0" expected-reason="terraform apply" category="CX-FullPipe-Terraform">
+      <description>Codex: terraform apply (modifying, deny, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"terraform apply -auto-approve"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:04.123Z","tool_use_id":"call_cx005","turn_id":"turn_mno345"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="deny" expected-exit="0" expected-reason="kubectl delete" category="CX-FullPipe-Kubernetes">
+      <description>Codex: kubectl delete pod (modifying, deny, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"kubectl delete pod my-pod -n default"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:05.123Z","tool_use_id":"call_cx006","turn_id":"turn_pqr678"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="deny" expected-exit="2" expected-reason="unknown tool" category="CX-FullPipe-Unknown">
+      <description>Codex: unknown tool (exit 2, genuine error — Format-Output maps all ask→deny including errors)</description>
+      <hook-input><![CDATA[{"tool_name":"SomeUnknownTool","tool_input":{"command":"whatever"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:06.123Z","tool_use_id":"call_cx007","turn_id":"turn_stu901"}]]></hook-input>
+    </test-case>
+  </category-group>
+
+</commands>
