@@ -124,10 +124,35 @@ function Test-ConfigSchema {
         $Config | Add-Member -MemberType NoteProperty -Name 'modifying_strictness' -Value 'normal' -Force
     }
     else {
-        if ($Config.modifying_strictness -notin @('normal', 'strict')) {
-            throw "Configuration validation failed: 'modifying_strictness' must be 'normal' or 'strict', got '$($Config.modifying_strictness)'"
+        if ($Config.modifying_strictness -notin @('normal', 'strict', 'loose')) {
+            throw "Configuration validation failed: 'modifying_strictness' must be 'normal', 'strict', or 'loose', got '$($Config.modifying_strictness)'"
         }
     }
+
+    # Default editable_paths if missing, compile into _editablePathRegex (string;
+    # used with PowerShell's case-insensitive -match, like _systemPathRegex).
+    # _editablePathsEnabled is true only when patterns are declared (opt-in).
+    if (-not (Get-Member -InputObject $Config -Name 'editable_paths' -MemberType NoteProperty)) {
+        $Config | Add-Member -MemberType NoteProperty -Name 'editable_paths' -Value ([PSCustomObject]@{patterns=@()}) -Force
+    }
+    $editablePatterns = @()
+    if ($Config.editable_paths.patterns) {
+        foreach ($p in $Config.editable_paths.patterns) { $editablePatterns += $p.ToString() }
+    }
+    $editableRegex = if ($editablePatterns.Count -gt 0) { '^(' + ($editablePatterns -join '|') + ')' } else { '^\b$' }
+    $Config | Add-Member -MemberType NoteProperty -Name '_editablePathRegex' -Value $editableRegex -Force
+    $Config | Add-Member -MemberType NoteProperty -Name '_editablePathsEnabled' -Value ([bool]($editablePatterns.Count -gt 0)) -Force
+    try { $null = [regex]::new($editableRegex) } catch { throw "Invalid editable_paths regex: $editableRegex" }
+
+    # Capture the current working directory. CWD (and everything under it) is
+    # always editable, in every strictness mode. Stored with unified separators
+    # and a trailing separator; _cwdNorm is the lowercased form for prefix
+    # comparison.
+    $script:_cwdSep = [System.IO.Path]::DirectorySeparatorChar
+    $script:_cwdUnified = ((Get-Location).Path -replace '[/\\]', $script:_cwdSep)
+    if (-not $script:_cwdUnified.EndsWith($script:_cwdSep)) { $script:_cwdUnified += $script:_cwdSep }
+    $Config | Add-Member -MemberType NoteProperty -Name '_cwd' -Value $script:_cwdUnified -Force
+    $Config | Add-Member -MemberType NoteProperty -Name '_cwdNorm' -Value $script:_cwdUnified.ToLowerInvariant() -Force
 
     # Default system_paths if missing, compile into _systemPathRegex
     if (-not (Get-Member -InputObject $Config -Name 'system_paths' -MemberType NoteProperty)) {
@@ -204,6 +229,36 @@ function Test-ConfigSchema {
                         catch {
                             throw "Invalid regex pattern in config (domain '$domainKey', modifying entry '$($entry.name)'): $pattern"
                         }
+                    }
+                }
+            }
+        }
+
+        # Validate parameter_commands (optional, per-domain)
+        $hasParamCmds = Get-Member -InputObject $domain -Name 'parameter_commands' -MemberType NoteProperty -ErrorAction SilentlyContinue
+        if ($hasParamCmds) {
+            foreach ($cmdName in $domain.parameter_commands.PSObject.Properties.Name) {
+                $pEntry = $domain.parameter_commands.$cmdName
+                if (-not (Get-Member -InputObject $pEntry -Name 'rules' -MemberType NoteProperty) -or -not $pEntry.rules) {
+                    throw "Configuration validation failed: parameter_commands entry '$cmdName' (domain '$domainKey') must have a non-empty 'rules' array"
+                }
+                if (-not (Get-Member -InputObject $pEntry -Name 'default' -MemberType NoteProperty) -or $pEntry.default -notin @('read-only','modifying')) {
+                    throw "Configuration validation failed: parameter_commands entry '$cmdName' (domain '$domainKey') must have 'default' of 'read-only' or 'modifying'"
+                }
+                foreach ($rule in $pEntry.rules) {
+                    if (-not (Get-Member -InputObject $rule -Name 'param' -MemberType NoteProperty)) {
+                        throw "Configuration validation failed: rule in '$cmdName' (domain '$domainKey') missing 'param'"
+                    }
+                    if (-not (Get-Member -InputObject $rule -Name 'match' -MemberType NoteProperty) -or $rule.match -notin @('present','values')) {
+                        throw "Configuration validation failed: rule in '$cmdName' (domain '$domainKey') must have 'match' of 'present' or 'values'"
+                    }
+                    if ($rule.match -eq 'values') {
+                        if (-not (Get-Member -InputObject $rule -Name 'values' -MemberType NoteProperty) -or -not $rule.values) {
+                            throw "Configuration validation failed: values-rule in '$cmdName' (domain '$domainKey') must have a non-empty 'values' array"
+                        }
+                    }
+                    if (-not (Get-Member -InputObject $rule -Name 'decision' -MemberType NoteProperty) -or $rule.decision -notin @('read-only','modifying')) {
+                        throw "Configuration validation failed: rule in '$cmdName' (domain '$domainKey') must have 'decision' of 'read-only' or 'modifying'"
                     }
                 }
             }
@@ -316,6 +371,21 @@ function Load-Config {
                 }
                 $entry | Add-Member -MemberType NoteProperty -Name '_compiledPatterns' -Value $compiledPatterns -Force
             }
+        }
+
+        # Build parameter_commands lookup: lowercased command-name + each alias -> entry
+        if (Get-Member -InputObject $domain -Name 'parameter_commands' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $paramLookup = @{}
+            foreach ($cmdName in $domain.parameter_commands.PSObject.Properties.Name) {
+                $pEntry = $domain.parameter_commands.$cmdName
+                $paramLookup[$cmdName.ToLowerInvariant()] = $pEntry
+                if (Get-Member -InputObject $pEntry -Name 'aliases' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+                    foreach ($alias in $pEntry.aliases) {
+                        $paramLookup[$alias.ToString().ToLowerInvariant()] = $pEntry
+                    }
+                }
+            }
+            $domain | Add-Member -MemberType NoteProperty -Name '_parameterCommandLookup' -Value $paramLookup -Force
         }
     }
 

@@ -1,7 +1,9 @@
 param(
     [string]$XmlPath = "$PSScriptRoot\..\test\test-cases.adhoc.xml",
     [string]$Filter = "",
-    [string]$Strictness = ""
+    [string]$Strictness = "",
+    [string]$Cwd = "",
+    [string]$EditablePaths = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +25,22 @@ if (Test-Path "$PSScriptRoot\Classifier.ps1") {
 $config = Load-Config -Path "$PSScriptRoot\..\config.json"
 if ($Strictness) {
     $config.modifying_strictness = $Strictness
+}
+# Optional CWD override (re-normalize like ConfigLoader does)
+if ($Cwd) {
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $cwdResolved = ($Cwd -replace '[/\\]', $sep)
+    if (-not $cwdResolved.EndsWith($sep)) { $cwdResolved += $sep }
+    $config._cwd = $cwdResolved
+    $config._cwdNorm = $cwdResolved.ToLowerInvariant()
+}
+# Optional editable_paths override (comma-separated regex patterns)
+if ($EditablePaths) {
+    $epPatterns = @($EditablePaths -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($epPatterns.Count -gt 0) {
+        $config._editablePathRegex = '^(' + ($epPatterns -join '|') + ')'
+        $config._editablePathsEnabled = $true
+    }
 }
 
 # Parse XML

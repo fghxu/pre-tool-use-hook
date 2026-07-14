@@ -258,6 +258,66 @@ function Resolve-Command {
     }
 
     # -------------------------------------------------
+    # Step 7: parameter_commands (value/presence-aware classification)
+    #   If this command (by name or alias) has a parameter_commands entry, classify
+    #   it SOLELY from its parameter rules: modifying rules -> read-only rules ->
+    #   no-match resolution (absent param => default; present-but-unrecognized
+    #   value => ask in strict/normal, default in loose). On parse/tokenize
+    #   failure, SKIP this step (fail-safe).
+    #
+    #   Looked up first in the detected domain's _parameterCommandLookup. As a
+    #   cross-domain fallback, PowerShell cmdlet ALIASES (irm, iwr) that are NOT
+    #   Verb-Noun may misdetect as linux/dos — so if the detected domain misses,
+    #   also try the PowerShell domain's lookup and, on a hit, use the AST parser.
+    # -------------------------------------------------
+    $paramLookup = $null
+    if (Get-Member -InputObject $domainConfig -Name '_parameterCommandLookup' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $paramLookup = $domainConfig._parameterCommandLookup
+    }
+    # Resolve the PowerShell domain's lookup once (for the alias fallback).
+    $psLookup = $null
+    if ($domainLower -ne 'powershell') {
+        foreach ($pk in $Config.commands.PSObject.Properties.Name) {
+            if ($pk.ToLowerInvariant() -eq 'powershell') {
+                $psDom = $Config.commands.$pk
+                if (Get-Member -InputObject $psDom -Name '_parameterCommandLookup' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+                    $psLookup = $psDom._parameterCommandLookup
+                }
+                break
+            }
+        }
+    }
+
+    $firstToken = ($Command.Trim() -split '\s+')[0]
+    if ($firstToken) {
+        $ftLower = $firstToken.ToLowerInvariant()
+        $entry = $null
+        $asPowerShell = $false
+        if ($paramLookup -and $paramLookup.ContainsKey($ftLower)) {
+            $entry = $paramLookup[$ftLower]
+        }
+        elseif ($psLookup -and $psLookup.ContainsKey($ftLower)) {
+            $entry = $psLookup[$ftLower]
+            $asPowerShell = $true
+        }
+
+        if ($entry) {
+            if ($domainLower -eq 'powershell' -or $asPowerShell) {
+                $paramMap = Get-PowerShellParameterMap -Command $Command -FirstToken $firstToken
+            }
+            else {
+                $paramMap = Get-ShellParameterMap -Command $Command -Entry $entry
+            }
+            # A $null map means the AST parse failed -> skip (fall through).
+            # An empty map (no flags) is valid -> evaluate -> default.
+            if ($null -ne $paramMap) {
+                $pResult = Evaluate-ParameterRules -Entry $entry -ParamMap $paramMap -Config $Config -Command $Command -DisplayName $firstToken
+                if ($pResult) { return $pResult }
+            }
+        }
+    }
+
+    # -------------------------------------------------
     # Step 1a: Check explicit read_only entries
     # -------------------------------------------------
     $hasReadOnly = Get-Member -InputObject $domainConfig -Name 'read_only' -MemberType NoteProperty -ErrorAction SilentlyContinue
@@ -582,4 +642,253 @@ function Resolve-Command {
     # -------------------------------------------------
     $truncatedCommand = $Command.Substring(0, [Math]::Min(80, $Command.Length))
     return New-ResolutionResult -Decision "ask" -Reason "unknown command: $truncatedCommand" -MatchedPattern $null -Risk "unknown"
+}
+
+# =============================================================================
+# Parameter-commands helpers (Step 7)
+#
+# Build a {paramNameLower -> value} map for a command, then evaluate the
+# command's parameter_rules. PowerShell uses the AST (position-independent,
+# quote-safe); Linux/DOS use a quote-aware tokenizer. Both produce the same
+# map shape so Evaluate-ParameterRules is shared.
+# =============================================================================
+
+function Get-AstLeafValue {
+    param($Ast)
+    if ($null -eq $Ast) { return $null }
+    if ($Ast -is [System.Management.Automation.Language.StringConstantExpressionAst]) { return $Ast.Value }
+    if ($Ast -is [System.Management.Automation.Language.ConstantExpressionAst]) { return $Ast.Value }
+    return $Ast.Extent.Text
+}
+
+function Get-PowerShellParameterMap {
+    param(
+        [string]$Command,
+        [string]$FirstToken
+    )
+    $astType = 'System.Management.Automation.Language.Parser' -as [type]
+    if (-not $astType) { return $null }
+
+    $tokens = $null
+    $errors = $null
+    try {
+        $ast = $astType::ParseInput($Command, [ref]$tokens, [ref]$errors)
+    }
+    catch { return $null }
+    if ($errors -and $errors.Count -gt 0) { return $null }
+    if (-not $ast) { return $null }
+
+    $commandAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true)
+    $targetCmd = $null
+    $ftLower = $FirstToken.ToLowerInvariant()
+    foreach ($c in $commandAsts) {
+        if ($c.CommandElements.Count -gt 0) {
+            if ($c.CommandElements[0].Extent.Text.ToLowerInvariant() -eq $ftLower) { $targetCmd = $c; break }
+        }
+    }
+    if (-not $targetCmd) { return $null }
+
+    $map = @{}
+    $elements = $targetCmd.CommandElements
+    for ($i = 1; $i -lt $elements.Count; $i++) {
+        $el = $elements[$i]
+        if ($el -is [System.Management.Automation.Language.CommandParameterAst]) {
+            $pName = $el.ParameterName.ToLowerInvariant()
+            $val = $null
+            if ($el.Argument) {
+                # -Method:Post  (colon form binds the argument directly)
+                $val = Get-AstLeafValue -Ast $el.Argument
+            }
+            elseif (($i + 1) -lt $elements.Count) {
+                $nextEl = $elements[$i + 1]
+                if (-not ($nextEl -is [System.Management.Automation.Language.CommandParameterAst])) {
+                    # -Method Post  (value is the next element)
+                    $val = Get-AstLeafValue -Ast $nextEl
+                    $i++
+                }
+            }
+            $map[$pName] = $val
+        }
+    }
+    return $map
+}
+
+function Get-ShellTokens {
+    # Quote-aware tokenizer; surrounding quotes are stripped from values.
+    param([string]$Text)
+    $tokens = New-Object System.Collections.Generic.List[string]
+    if (-not $Text) { return $tokens.ToArray() }
+    $cur = ''
+    $inSingle = $false
+    $inDouble = $false
+    for ($i = 0; $i -lt $Text.Length; $i++) {
+        $ch = $Text[$i]
+        if ($ch -eq "'" -and -not $inDouble) { $inSingle = -not $inSingle; continue }
+        if ($ch -eq '"' -and -not $inSingle) { $inDouble = -not $inDouble; continue }
+        if ((-not $inSingle -and -not $inDouble) -and $ch -eq ' ') {
+            if ($cur.Length -gt 0) { $tokens.Add($cur); $cur = '' }
+            continue
+        }
+        $cur += $ch
+    }
+    if ($cur.Length -gt 0) { $tokens.Add($cur) }
+    return $tokens.ToArray()
+}
+
+function Get-ShellParameterMap {
+    param(
+        [string]$Command,
+        $Entry
+    )
+    # Value-taking flag names (lowercased) come from the entry's 'values' rules.
+    $valueTaking = @{}
+    foreach ($rule in $Entry.rules) {
+        if ($rule.match -eq 'values') {
+            $names = @($rule.param)
+            if ($names -is [string]) { $names = @($names) }
+            foreach ($n in $names) { $valueTaking[$n.ToLowerInvariant()] = $true }
+        }
+    }
+
+    $tokens = Get-ShellTokens -Text $Command
+    $map = @{}
+    if ($tokens.Count -lt 2) { return $map }   # only program token (or none)
+
+    for ($i = 1; $i -lt $tokens.Count; $i++) {
+        $tok = $tokens[$i]
+        $lower = $tok.ToLowerInvariant()
+
+        if ($lower -match '^--') {
+            # long flag: --name=value | --name value | --name (boolean)
+            if ($lower -match '^(--[^=]+)=(.*)$') {
+                $map[$matches[1].ToLowerInvariant()] = $matches[2]
+            }
+            else {
+                $name = $lower
+                if ($valueTaking.ContainsKey($name) -and ($i + 1) -lt $tokens.Count -and -not ($tokens[$i + 1] -match '^[-/]')) {
+                    $map[$name] = $tokens[$i + 1]; $i++
+                }
+                else { $map[$name] = $null }
+            }
+        }
+        elseif ($lower -match '^/[^/]') {
+            # DOS-style: /name:value | /name value | /name (boolean)
+            if ($lower -match '^(/[^=:]+)[:=](.*)$') {
+                $map[$matches[1].ToLowerInvariant()] = $matches[2]
+            }
+            else {
+                $name = $lower
+                if ($valueTaking.ContainsKey($name) -and ($i + 1) -lt $tokens.Count -and -not ($tokens[$i + 1] -match '^[-/]')) {
+                    $map[$name] = $tokens[$i + 1]; $i++
+                }
+                else { $map[$name] = $null }
+            }
+        }
+        elseif ($lower -match '^-[^-]') {
+            # short flag or cluster: -x, -xVALUE, -x value, -x=value, -abc
+            $rest = $tok.Substring(1)
+            for ($j = 0; $j -lt $rest.Length; $j++) {
+                $shortLower = ('-' + $rest[$j]).ToLowerInvariant()
+                if ($valueTaking.ContainsKey($shortLower)) {
+                    $remainder = $rest.Substring($j + 1)
+                    if ($remainder -match '^=(.*)$') { $remainder = $matches[1] }
+                    if ($remainder.Length -gt 0) {
+                        $map[$shortLower] = $remainder
+                    }
+                    elseif (($i + 1) -lt $tokens.Count -and -not ($tokens[$i + 1] -match '^[-/]')) {
+                        $map[$shortLower] = $tokens[$i + 1]; $i++
+                    }
+                    else { $map[$shortLower] = $null }
+                    break   # remainder of cluster consumed as this flag's value
+                }
+                else {
+                    $map[$shortLower] = $null   # boolean short flag; keep scanning cluster
+                }
+            }
+        }
+        # else: positional argument -> ignored
+    }
+    return $map
+}
+
+function Test-ParamRule {
+    param($Rule, $ParamMap)
+    $names = @($Rule.param)
+    if ($names -is [string]) { $names = @($names) }
+    foreach ($nm in $names) {
+        $key = $nm.ToLowerInvariant()
+        if ($ParamMap.ContainsKey($key)) {
+            if ($Rule.match -eq 'present') { return $true }
+            $val = $ParamMap[$key]
+            if ($null -ne $val) {
+                $valLower = "$val".ToLowerInvariant()
+                foreach ($v in $Rule.values) {
+                    if ("$v".ToLowerInvariant() -eq $valLower) { return $true }
+                }
+            }
+        }
+    }
+    return $false
+}
+
+function Evaluate-ParameterRules {
+    param(
+        $Entry,
+        $ParamMap,
+        $Config,
+        [string]$Command,
+        [string]$DisplayName
+    )
+
+    # 1. modifying rules first (fail-safe: any modifying match => ask)
+    foreach ($rule in $Entry.rules) {
+        if ($rule.decision -eq 'modifying' -and (Test-ParamRule $rule $ParamMap)) {
+            $risk = 'unknown'
+            if (Get-Member -InputObject $rule -Name 'risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $risk = $rule.risk }
+            return [PSCustomObject]@{
+                Command = $Command; Decision = 'ask'
+                Reason = "$DisplayName (parameter rule: modifying)"; MatchedPattern = $DisplayName; Risk = $risk
+            }
+        }
+    }
+    # 2. read-only rules
+    foreach ($rule in $Entry.rules) {
+        if ($rule.decision -eq 'read-only' -and (Test-ParamRule $rule $ParamMap)) {
+            return [PSCustomObject]@{
+                Command = $Command; Decision = 'allow'
+                Reason = "$DisplayName (parameter rule: read-only)"; MatchedPattern = $DisplayName; Risk = 'none'
+            }
+        }
+    }
+    # 3. no rule matched
+    $unrecognized = $false
+    foreach ($rule in $Entry.rules) {
+        if ($rule.match -eq 'values') {
+            $names = @($rule.param)
+            if ($names -is [string]) { $names = @($names) }
+            foreach ($nm in $names) {
+                if ($ParamMap.ContainsKey($nm.ToLowerInvariant())) { $unrecognized = $true; break }
+            }
+        }
+        if ($unrecognized) { break }
+    }
+    if ($unrecognized -and $Config.modifying_strictness -ne 'loose') {
+        return [PSCustomObject]@{
+            Command = $Command; Decision = 'ask'
+            Reason = "$DisplayName (unrecognized parameter value)"; MatchedPattern = $DisplayName; Risk = 'unknown'
+        }
+    }
+    # default (absent param, OR unrecognized in loose mode)
+    if ($Entry.default -eq 'modifying') {
+        $dr = 'unknown'
+        if (Get-Member -InputObject $Entry -Name 'default_risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $dr = $Entry.default_risk }
+        return [PSCustomObject]@{
+            Command = $Command; Decision = 'ask'
+            Reason = "$DisplayName (parameter rule: default modifying)"; MatchedPattern = $DisplayName; Risk = $dr
+        }
+    }
+    return [PSCustomObject]@{
+        Command = $Command; Decision = 'allow'
+        Reason = "$DisplayName (parameter rule: default read-only)"; MatchedPattern = $DisplayName; Risk = 'none'
+    }
 }

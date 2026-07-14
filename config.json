@@ -6,6 +6,16 @@
 
   "modifying_strictness": "normal",
 
+  "editable_paths": {
+    "description": "Parent directories where file writes (via > or >>) auto approved when modifying_strictness set to normal and loose",
+    "linux": [
+      "/tmp/"
+    ],
+    "windows": [
+      "C:\\\\temp\\\\",
+      "D:\\\\temp\\\\"
+    ]
+  },
   "system_paths": {
     "description": "Parent directories where file writes (via > or >>) always require approval, even in normal strictness mode. All subdirectories under these paths are also blocked.",
     "linux": [
@@ -38,26 +48,16 @@
   ],
 
   "trusted_pattern": [
-	"^trusted_pattern$",
 	"^trusted_stuff\\s+$"
   ],
   "untrusted_pattern": [
-	  "^untrusted\\.ps1$",
+	  "^untrusted_stuff.*$",
 	  "^untrusted_stuff\\s+$"
   ],
 
   "intercept_tool_name": [
 		"send_to_terminal",
-		"create_file",
-		"create_directory",
-		"replace_string_in_file",
-		"multi_replace_string_in_file",
-		"execution_subagent",
 		"apply_patch",
-		"create_new_workspace",
-		"create_new_jupyter_notebook",
-		"insert_edit_into_file",
-		"edit_notebook_file",
 		"run_notebook_cell",
 		"install_extension",
 		"github_repo",
@@ -76,7 +76,25 @@
 		"PowerShell"
   ],
   "ignore_tool_name": [
-	  "get_vscode_api",
+  
+		"create_file",
+
+		"mcp__mobile__ui",
+		"mcp__mobile__screen",
+		"mcp__mobile__app",
+		"mcp__mobile__input",
+		"mcp__mobile__system",
+		"mcp__mobile__flow",
+
+		"create_directory",
+		"replace_string_in_file",
+		"create_new_workspace",
+		"create_new_jupyter_notebook",
+		"insert_edit_into_file",
+		"edit_notebook_file",
+		"multi_replace_string_in_file",
+		"execution_subagent",
+		"get_vscode_api",
 		"get_project_setup_info",
 		"get_search_view_results",
 		"get_terminal_output",
@@ -291,12 +309,33 @@
         { "name": "Enable-PSRemoting",  "patterns": ["Enable-PSRemoting *"],                       "risk": "high",   "description": "Enable PowerShell remoting" },
         { "name": "Set-ExecutionPolicy","patterns": ["Set-ExecutionPolicy *"],                     "risk": "high",   "description": "Change script execution policy" },
         { "name": "Register-PSSessionConfiguration", "patterns": ["Register-PSSessionConfiguration *"], "risk": "high", "description": "Register session endpoint configuration" }
-      ]
+      ],
+      "parameter_commands": {
+        "Invoke-RestMethod": {
+          "aliases": ["irm"],
+          "rules": [
+            { "param": "Method", "match": "values", "values": ["Get","Head","Options"], "decision": "read-only" },
+            { "param": "Method", "match": "values", "values": ["Post","Put","Patch"], "decision": "modifying", "risk": "medium" },
+            { "param": "Method", "match": "values", "values": ["Delete"], "decision": "modifying", "risk": "high" }
+          ],
+          "default": "read-only"
+        },
+        "Invoke-WebRequest": {
+          "aliases": ["iwr"],
+          "rules": [
+            { "param": "Method", "match": "values", "values": ["Get","Head","Options"], "decision": "read-only" },
+            { "param": "Method", "match": "values", "values": ["Post","Put","Patch"], "decision": "modifying", "risk": "medium" },
+            { "param": "Method", "match": "values", "values": ["Delete"], "decision": "modifying", "risk": "high" }
+          ],
+          "default": "read-only"
+        }
+      }
     },
 
     "Linux": {
       "description": "Linux / Bash / Zsh commands",
       "read_only": [
+		{ "name": "printf",    "patterns": ["printf *"],                                            "risk": "low",    "description": "Print Out" },
         { "name": "ls",       "patterns": ["ls *"],                                               "description": "List directory contents" },
         { "name": "cat",      "patterns": ["cat *"],                                              "description": "Print file contents" },
         { "name": "head",     "patterns": ["head *"],                                             "description": "Output first lines of file" },
@@ -337,7 +376,6 @@
         { "name": "pgrep",    "patterns": ["pgrep *"],                                            "description": "Find processes by name" },
         { "name": "nslookup", "patterns": ["nslookup *"],                                         "description": "DNS lookup" },
         { "name": "dig",      "patterns": ["dig *"],                                              "description": "DNS lookup utility" },
-        { "name": "curl GET", "patterns": ["curl http*", "curl https*", "curl (?!.*-X (POST|PUT|PATCH|DELETE))(?!.*(-d |--data ))-*http*", "curl (?!.*-X (POST|PUT|PATCH|DELETE))(?!.*(-d |--data ))-*https*"], "description": "HTTP GET request (excludes POST/PUT/PATCH/DELETE and --data/-d flags)" },
         { "name": "wget stdout", "patterns": ["wget *-O-*", "wget *-qO-*"],                       "description": "Download to stdout (read-only)" },
         { "name": "echo",     "patterns": ["echo *", "echo"],                                     "description": "Print text to stdout" },
         { "name": "ping",     "patterns": ["ping *"],                                             "description": "Send ICMP echo requests" },
@@ -346,6 +384,7 @@
         { "name": "true",     "patterns": ["true"],                                               "description": "Return success (shell builtin)" }
       ],
       "modifying": [
+		
         { "name": "mkdir",    "patterns": ["mkdir *"],                                            "risk": "low",    "description": "Create directory" },
         { "name": "ln",       "patterns": ["ln *"],                                               "risk": "low",    "description": "Create hard/symbolic links" },
         { "name": "rm",       "patterns": ["rm *"],                                               "risk": "high",   "description": "Remove files/directories" },
@@ -379,12 +418,32 @@
         { "name": "reboot",   "patterns": ["reboot *"],                                           "risk": "high",   "description": "Reboot system" },
         { "name": "modprobe", "patterns": ["modprobe *"],                                         "risk": "high",   "description": "Load/unload kernel modules" },
         { "name": "crontab",  "patterns": ["crontab *", "crontab -e", "crontab -r", "crontab -"], "risk": "medium", "description": "Edit/remove scheduled jobs" },
-        { "name": "curl POST",         "patterns": ["curl .*-X POST*", "curl .*--data*", "curl .*-d *"],    "risk": "medium", "description": "Send data via HTTP POST" },
-        { "name": "curl PUT/PATCH/DELETE", "patterns": ["curl .*-X PUT*", "curl .*-X PATCH*", "curl .*-X DELETE*"], "risk": "medium", "description": "Modify via HTTP PUT/PATCH/DELETE" },
         { "name": "wget",      "patterns": ["wget (?!.*-O-).*", "wget (?!.*-qO-).*"],             "risk": "medium", "description": "Download files from web" },
         { "name": "tee",       "patterns": ["tee *"],                                             "risk": "medium", "description": "Write stdin to file(s)" },
         { "name": "chpasswd",  "patterns": ["chpasswd *", "chpasswd"],                            "risk": "high",   "description": "Change user passwords in batch" }
-      ]
+      ],
+      "parameter_commands": {
+        "curl": {
+          "rules": [
+            { "param": "-X", "match": "values", "values": ["GET","HEAD","OPTIONS"], "decision": "read-only" },
+            { "param": "-X", "match": "values", "values": ["POST","PUT","PATCH"], "decision": "modifying", "risk": "medium" },
+            { "param": "-X", "match": "values", "values": ["DELETE"], "decision": "modifying", "risk": "high" },
+            { "param": ["-d","--data","--data-raw","--data-binary","--data-urlencode"], "match": "present", "decision": "modifying", "risk": "medium" },
+            { "param": ["-F","--form"], "match": "present", "decision": "modifying", "risk": "medium" },
+            { "param": ["-T","--upload-file"], "match": "present", "decision": "modifying", "risk": "medium" }
+          ],
+          "default": "read-only"
+        },
+        "python": {
+          "aliases": ["python3","py"],
+          "rules": [
+            { "param": ["--version","-V"], "match": "present", "decision": "read-only" },
+            { "param": ["--help","-h"], "match": "present", "decision": "read-only" }
+          ],
+          "default": "modifying",
+          "default_risk": "medium"
+        }
+      }
     },
 
     "Git": {
@@ -392,8 +451,10 @@
       "read_only": [
         { "name": "git status",    "patterns": ["git status*", "git status *"],                  "description": "Show working tree status" },
         { "name": "git log",       "patterns": ["git log*", "git log *"],                        "description": "Show commit logs" },
-        { "name": "git ls-remote", "patterns": ["git ls-remote*", "git ls-remote *"],            "description": "Show commit logs" },
+        { "name": "git ls-remote", "patterns": ["git ls-remote*", "git ls-remote *"],            "description": "Show remote" },
+		{ "name": "git ls-files", "patterns": ["git ls-files*", "git ls-files *"],            "description": "Show file logs" },
         { "name": "git diff",      "patterns": ["git diff*", "git diff *"],                      "description": "Show changes" },
+		{ "name": "git check-ignore", "patterns": ["git check-ignore*", "git check-ignore *"],                      "description": "Show whether specific files or directories are ignored" },
         { "name": "git show",      "patterns": ["git show*", "git show *"],                      "description": "Show various objects" },
         { "name": "git branch",    "patterns": ["^git branch$", "git branch -a*", "git branch -l*", "git branch --list*"], "description": "List branches (no write)" },
         { "name": "git tag",       "patterns": ["^git tag$", "git tag -l*", "git tag --list*"],  "description": "List tags (no write)" },
@@ -404,11 +465,11 @@
 		{ "name": "git init",      "patterns": ["git init*", "git init *"],                      "risk": "low",    "description": "Create empty repository" },
         { "name": "git clone",     "patterns": ["git clone*", "git clone *"],                    "risk": "low",    "description": "Clone repository" },
         { "name": "git tag -d",    "patterns": ["git tag -d*", "git tag --delete*"],             "risk": "low",    "description": "Delete tag" },
+        { "name": "git add",       "patterns": ["git add*", "git add *"],                        "risk": "low",    "description": "Stage file changes" },
+        { "name": "git commit",    "patterns": ["git commit*", "git commit *"],                  "risk": "low",    "description": "Record changes to repository" },
         { "name": "git stash",     "patterns": ["git stash*", "git stash *"],                    "risk": "low",    "description": "Stash changes" }
       ],
       "modifying": [
-        { "name": "git add",       "patterns": ["git add*", "git add *"],                        "risk": "low",    "description": "Stage file changes" },
-        { "name": "git commit",    "patterns": ["git commit*", "git commit *"],                  "risk": "low",    "description": "Record changes to repository" },
         { "name": "git push",      "patterns": ["git push*", "git push *"],                      "risk": "medium", "description": "Update remote refs" },
         { "name": "git merge",     "patterns": ["git merge*", "git merge *"],                    "risk": "medium", "description": "Join development histories" },
         { "name": "git rebase",    "patterns": ["git rebase*", "git rebase *"],                  "risk": "medium", "description": "Reapply commits" },

@@ -1034,6 +1034,60 @@ function Split-SubshellCommands {
 # }
 # =============================================================================
 
+function Test-EditableOrCwd {
+    <#
+    Returns a reason string if the target write-path is auto-writable — either
+    under the current working directory (always editable, every strictness mode)
+    or matching an editable_paths pattern — or $null otherwise. Used by
+    Test-RedirectionTarget for '>' and '>>' targets.
+    #>
+    param(
+        [string]$TargetPath,
+        $Config
+    )
+    if (-not $TargetPath -or -not $Config) { return $null }
+    if (-not (Get-Member -InputObject $Config -Name '_cwd' -MemberType NoteProperty -ErrorAction SilentlyContinue)) { return $null }
+
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $resolved = $TargetPath.Trim()
+    $isHome = $resolved.StartsWith('~')
+    # If relative (no drive letter, no root separator, not a ~ home path), anchor to CWD.
+    if (-not $isHome -and $resolved -notmatch '^[A-Za-z]:[\\/]' -and $resolved -notmatch '^[\\/]') {
+        $resolved = "$($Config._cwd)$resolved"
+    }
+    # Canonicalize (collapse ..) and unify separators. Skip GetFullPath for home
+    # paths (~): it would anchor them to the process CWD, falsely marking them
+    # "under current directory". Home is never the project CWD.
+    if ($isHome) {
+        $resolved = ($resolved -replace '[/\\]', $sep)
+    }
+    else {
+        try {
+            $resolved = ([System.IO.Path]::GetFullPath($resolved) -replace '[/\\]', $sep)
+        }
+        catch {
+            $resolved = ($resolved -replace '[/\\]', $sep)
+        }
+    }
+    $resolvedLower = $resolved.ToLowerInvariant()
+
+    # Under CWD? (always editable)
+    if ($Config._cwdNorm -and $resolvedLower.StartsWith($Config._cwdNorm)) {
+        return 'under current directory'
+    }
+    # Matches editable_paths?
+    $editableEnabled = $false
+    if (Get-Member -InputObject $Config -Name '_editablePathsEnabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $editableEnabled = [bool]$Config._editablePathsEnabled
+    }
+    if ($editableEnabled -and (Get-Member -InputObject $Config -Name '_editablePathRegex' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+        if ($resolved -match $Config._editablePathRegex) {
+            return 'editable path'
+        }
+    }
+    return $null
+}
+
 function Test-RedirectionTarget {
     param(
         [string]$Command,
@@ -1095,19 +1149,39 @@ function Test-RedirectionTarget {
             $result.Decision = "allow"
             $result.Reason = "append redirect to $targetPath (temp/discard)"
         }
-        # In normal mode, allow non-system paths
-        elseif ($Config -and $Config.modifying_strictness -eq 'normal' -and
-            $targetPath -and $targetPath -notmatch $Config._systemPathRegex) {
+        # System paths always ask (must win over editable/CWD)
+        elseif ($Config -and $targetPath -and $targetPath -match $Config._systemPathRegex) {
             $result.Target = $targetPath
-            $result.Risk = "low"
-            $result.Decision = "allow"
-            $result.Reason = "append redirect to $targetPath (allowed in normal mode)"
+            $result.Risk = "high"
+            $result.Decision = "ask"
+            $result.Reason = "append redirect to $targetPath (system path)"
         }
         else {
-            $result.Risk = "medium"
-            $result.Decision = "ask"
-            $result.Reason = if ($targetPath) { "append redirect to $targetPath (modifying)" } else { "append redirection (modifying)" }
-            $result.Target = if ($targetPath) { $targetPath } else { "unknown" }
+            $writableReason = Test-EditableOrCwd -TargetPath $targetPath -Config $Config
+            if ($writableReason) {
+                $result.Target = $targetPath
+                $result.Risk = "low"
+                $result.Decision = "allow"
+                $result.Reason = "append redirect to $targetPath ($writableReason)"
+            }
+            elseif ($Config -and $Config.modifying_strictness -eq 'loose') {
+                $result.Target = $targetPath
+                $result.Risk = "low"
+                $result.Decision = "allow"
+                $result.Reason = "append redirect to $targetPath (allowed in loose mode)"
+            }
+            elseif ($Config -and $Config.modifying_strictness -eq 'normal' -and -not $Config._editablePathsEnabled) {
+                $result.Target = $targetPath
+                $result.Risk = "low"
+                $result.Decision = "allow"
+                $result.Reason = "append redirect to $targetPath (allowed in normal mode)"
+            }
+            else {
+                $result.Risk = "medium"
+                $result.Decision = "ask"
+                $result.Reason = if ($targetPath) { "append redirect to $targetPath (modifying)" } else { "append redirection (modifying)" }
+                $result.Target = if ($targetPath) { $targetPath } else { "unknown" }
+            }
         }
         return $result
     }
@@ -1146,9 +1220,20 @@ function Test-RedirectionTarget {
                 $result.Decision = "ask"
                 $result.Reason = "redirect to system path ($targetPath) (high risk)"
             }
-            # -- 4d. Other paths — allow in normal mode, ask in strict mode --
+            # -- 4d. Other paths — editable_paths/CWD, else strictness-governed --
             else {
-                if ($Config -and $Config.modifying_strictness -eq 'normal') {
+                $writableReason = Test-EditableOrCwd -TargetPath $targetPath -Config $Config
+                if ($writableReason) {
+                    $result.Risk = "low"
+                    $result.Decision = "allow"
+                    $result.Reason = "output redirect to $targetPath ($writableReason)"
+                }
+                elseif ($Config -and $Config.modifying_strictness -eq 'loose') {
+                    $result.Risk = "low"
+                    $result.Decision = "allow"
+                    $result.Reason = "output redirect to $targetPath (allowed in loose mode)"
+                }
+                elseif ($Config -and $Config.modifying_strictness -eq 'normal' -and -not $Config._editablePathsEnabled) {
                     $result.Risk = "low"
                     $result.Decision = "allow"
                     $result.Reason = "output redirect to $targetPath (allowed in normal mode)"
