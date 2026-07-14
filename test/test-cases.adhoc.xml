@@ -52,6 +52,10 @@
       <description>Invoke-RestMethod colon-form -Method:Post — modifying</description>
       <copilot-command><![CDATA[Invoke-RestMethod -Method:Post -Uri "https://example.com"]]></copilot-command>
     </test-case>
+    <test-case expected="ask" reason="ask: Invoke-RestMethod -Method Custom (unrecognized value, normal mode)" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod with an unrecognized -Method value — ask in strict/normal (forces explicit config)</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method Custom -Uri "https://example.com"]]></copilot-command>
+    </test-case>
 
     <!-- Invoke-WebRequest + aliases -->
     <test-case expected="allow" reason="read-only: Invoke-WebRequest -Method Get" category="Parameter-PS-RestMethod">
@@ -132,6 +136,10 @@
     <test-case expected="ask" reason="modifying: curl -XDELETE (attached)" category="Parameter-Linux-Curl">
       <description>curl DELETE attached (-XDELETE, no space) — modifying (currently mis-classified as allow; this is the bug being fixed)</description>
       <copilot-command><![CDATA[curl -XDELETE https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="ask: curl -X FROG (unrecognized verb, normal mode)" category="Parameter-Linux-Curl">
+      <description>curl with an unrecognized -X verb — ask in strict/normal (currently mis-allowed; another position/value bug being fixed)</description>
+      <copilot-command><![CDATA[curl -X FROG https://example.com]]></copilot-command>
     </test-case>
 
     <!-- modifying: upload flags -->

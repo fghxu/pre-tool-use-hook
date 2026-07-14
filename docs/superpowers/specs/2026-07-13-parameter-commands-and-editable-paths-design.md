@@ -70,7 +70,13 @@ A new optional **`parameter_commands`** object inside each domain (`commands.Pow
 
 **Match order inside a command (fail-safe):** modifying rules first → read-only rules → `default`. If *any* modifying rule matches, the command asks (e.g. `curl -X GET -d '{…}'` → ask). This preserves the project's least-privilege invariant.
 
-> **Open safety trade-off (decision needed at review):** `default` fires whenever no rule matches — including when the parameter is **present with an unrecognized value** (e.g. `Invoke-RestMethod -Method Custom`). With `default: "read-only"` that would be allowed. Stricter alternative: treat "param present but no value rule matches" as `ask`, and only honor `default` when the param is **absent**. The spec currently uses the simpler "default = catch-all". This is the one behavior choice that changes the safety posture and should be confirmed.
+**Switch / boolean parameters** are handled by `match: "present"` — the detector checks for the flag's *existence* and ignores any value. This covers `-d`, `--force`, `--dry-run`, `-Verbose`, and DOS `/q`. The shell tokenizer splits combined short-switch clusters (e.g. `-sv` → `-s` + `-v`) so individual declared switches are recognized even when smashed together; if a char in a cluster is a declared value-taking flag, the remainder of the cluster is its value (getopt-style, e.g. `-XPOST`).
+
+**No-match resolution (strictness-governed):** When no rule matches, the outcome depends on *why* it didn't match and on `modifying_strictness`:
+- Declared parameter **absent** (e.g. `Invoke-RestMethod -Uri X` with no `-Method`) → the command's natural behavior via `default`, in **all** modes. This preserves existing expectations (no `-Method` ⇒ GET ⇒ allow; no `--version` ⇒ python runs a script ⇒ ask) regardless of strictness.
+- Declared parameter **present with an unrecognized value** (e.g. `-Method Custom`, `-X FROG`) → **strict/normal: `ask`** (conservative — forces explicit config, so rules are added deliberately over time); **loose: use `default`**.
+
+This makes `modifying_strictness` the single knob for "how lenient with unrecognized input," consistent with its role for `editable_paths` (§4). `default` is always honored for the *absent* case so no-mode surprises the `Invoke-RestMethod -Uri X ⇒ allow` requirement.
 
 ### 3.2 Sample config (will be added to `config.json` during implementation)
 
