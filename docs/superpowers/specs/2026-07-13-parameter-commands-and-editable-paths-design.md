@@ -187,18 +187,20 @@ The current `commands.Linux` has brittle `curl` regex entries in both `read_only
 
 ### 4.1 Config schema
 
+Mirrors `system_paths`, split as `{linux, windows}` — but with one upgrade: **both sides are raw
+regex** (unlike `system_paths`, the `linux` list is not escaped to a literal, so regex works on
+Linux paths too).
+
 ```jsonc
 "editable_paths": {
   "description": "Regex path patterns whose writes are auto-allowed. CWD is always editable. system_paths always asks.",
-  "patterns": [
-    "c:\\\\temp\\\\.*",
-    "C:\\\\Users\\\\fghxu\\\\AppData\\\\Local\\\\Temp\\\\.*"
-  ]
+  "linux":   ["/tmp/", "/home/[^/]+/workspace/.*"],
+  "windows": ["c:\\\\temp\\\\.*", "D:\\\\temp\\\\"]
 }
 ```
 
-- `patterns` is an array of **regex** strings (consistent with `system_paths.windows`). Path separators are normalized before matching, so `/` and `\` both work. Matching is **case-insensitive**.
-- Optional; defaults to empty (no extra editable locations beyond CWD/temp).
+- `linux` and `windows` are each arrays of **regex** strings, compiled into one alternation (`^(lx1|lx2|wx1|…)`) and matched case-insensitively against the resolved target path. Path separators are normalized before matching, so `/` and `\` both work.
+- Optional; defaults to `{linux:[], windows:[]}` (no extra editable locations beyond CWD/temp).
 
 ### 4.2 `modifying_strictness` gains a third value: `loose`
 
@@ -233,7 +235,7 @@ else:
 
 ### 4.5 `ConfigLoader` compilation
 
-- Compile `editable_paths.patterns` into `$Config._editablePathRegex = '^(pat1|pat2|…)'` with `IgnoreCase | Compiled`. Validate each compiles.
+- Compile `editable_paths` (`linux` + `windows`, both raw regex) into `$Config._editablePathRegex = '^(pat1|pat2|…)'`. Set `_editablePathsEnabled` when non-empty. Validate the combined regex compiles.
 - Capture `$Config._cwd`.
 - Allow `loose` in strictness validation.
 - Keep existing `_systemPathRegex` unchanged.

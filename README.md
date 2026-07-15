@@ -144,24 +144,16 @@ Default is `normal`. Use `strict` to lock writes down to a whitelist, `loose` to
 #### `editable_paths` — writable whitelist (optional)
 
 Paths matching these patterns are auto-approved for writes (via `>` / `>>`), alongside CWD.
-Patterns are **regex**, matched case-insensitively against the resolved target path; a pattern
-matches the path **and everything beneath it** (use a trailing separator + `.*`, e.g. `c:\\temp\\.*`).
-
-> **⚠️ Structure note (needs alignment):** the current `ConfigLoader` reads
-> `editable_paths.patterns` (a flat regex array). The repo's `config.json` currently declares
-> `editable_paths` as `{ "linux": […], "windows": […] }` (mirroring `system_paths`), which the
-> loader does **not** yet read — so that block is inactive until the loader is updated to the
-> `{linux, windows}` shape (or the config is switched to `{ "patterns": […] }`). See the open
-> item at the end of this README.
-
-Active shape (what the code reads today):
+The structure mirrors `system_paths` (`{ "linux": […], "windows": […] }`), but with one
+difference: **both sides are raw regex** — unlike `system_paths`, the `linux` list is **not**
+escaped to a literal, so you can use regex on Linux paths too. Patterns are matched
+case-insensitively against the resolved target path; end a pattern with a separator (or `.*`)
+to match a directory and everything beneath it.
 
 ```jsonc
 "editable_paths": {
-  "patterns": [
-    "c:\\\\temp\\\\.*",
-    "/workspace/.*"
-  ]
+  "linux":   ["/tmp/", "/home/[^/]+/workspace/.*"],
+  "windows": ["c:\\\\temp\\\\.*", "D:\\\\temp\\\\"]
 }
 ```
 
@@ -415,17 +407,20 @@ classify the inner command. AWS CLI also classifies by operation prefix (`descri
 ## Performance
 
 - **Target:** < 500 ms per classification. **Hard cap:** 3000 ms (exceeding forces `ask`).
-- **Typical:** single-digit milliseconds average across the full suite.
+- **Typical:** ~10 ms average across the full suite.
 - **Logging:** append-only JSONL + text files, crash-safe.
 
-## Open items
+## Known test debt
 
-- **`editable_paths` structure alignment** — `config.json` declares `editable_paths` as
-  `{ "linux": […], "windows": […] }` but `ConfigLoader` reads `editable_paths.patterns`. Align the
-  loader to the `{linux, windows}` shape (mirroring `system_paths`) so the block takes effect. Note:
-  activating `editable_paths` tightens `normal`-mode redirects to a whitelist, so
-  `test/test-cases.redirect-normal.xml` cases that expect non-system paths to be allowed will then
-  need updating.
+Activating `editable_paths` (whitelist semantics) intentionally changed some redirect outcomes, so a
+few cases that encoded the pre-`editable_paths` behavior now expect updating:
+- `test-cases.redirect-normal.xml` `[1-4, 20]` — non-system paths (`/home/...`, `~/...`) now ask in
+  `normal` mode instead of being allowed.
+- `test-cases.redirect-strict.xml` `[22]` — `C:\temp\...` is now editable (it is listed in
+  `editable_paths`), so it is allowed in `strict` mode instead of asked.
+
+These reflect intentional policy, not regressions. (Separately: the `git add` read-only policy and
+the `comfyui` `trusted_pattern` are config/test policy items to reconcile later.)
 
 ## License
 

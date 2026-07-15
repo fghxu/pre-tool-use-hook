@@ -131,13 +131,19 @@ function Test-ConfigSchema {
 
     # Default editable_paths if missing, compile into _editablePathRegex (string;
     # used with PowerShell's case-insensitive -match, like _systemPathRegex).
-    # _editablePathsEnabled is true only when patterns are declared (opt-in).
+    # Structure mirrors system_paths {linux, windows}, BUT both sides are treated
+    # as raw regex (unlike system_paths, linux is NOT escaped to a literal) so
+    # users can use regex on linux paths too. _editablePathsEnabled is true only
+    # when at least one pattern is declared (opt-in).
     if (-not (Get-Member -InputObject $Config -Name 'editable_paths' -MemberType NoteProperty)) {
-        $Config | Add-Member -MemberType NoteProperty -Name 'editable_paths' -Value ([PSCustomObject]@{patterns=@()}) -Force
+        $Config | Add-Member -MemberType NoteProperty -Name 'editable_paths' -Value ([PSCustomObject]@{linux=@();windows=@()}) -Force
     }
     $editablePatterns = @()
-    if ($Config.editable_paths.patterns) {
-        foreach ($p in $Config.editable_paths.patterns) { $editablePatterns += $p.ToString() }
+    if ($Config.editable_paths.linux) {
+        foreach ($p in $Config.editable_paths.linux) { $editablePatterns += $p.ToString() }
+    }
+    if ($Config.editable_paths.windows) {
+        foreach ($p in $Config.editable_paths.windows) { $editablePatterns += $p.ToString() }
     }
     $editableRegex = if ($editablePatterns.Count -gt 0) { '^(' + ($editablePatterns -join '|') + ')' } else { '^\b$' }
     $Config | Add-Member -MemberType NoteProperty -Name '_editablePathRegex' -Value $editableRegex -Force

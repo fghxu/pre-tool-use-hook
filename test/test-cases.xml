@@ -2737,7 +2737,7 @@ done]]></copilot-command>
       <description>git -C C:\repo push origin main (modifying, -C flag stripped)</description>
       <copilot-command><![CDATA[git -C C:\repo push origin main]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="git add" category="DOS-Git-Modifying">
+    <test-case expected="allow" reason="git add" category="DOS-Git-Modifying">
       <description>git -C C:\repo add . (modifying, -C flag stripped)</description>
       <copilot-command><![CDATA[git -C C:\repo add .]]></copilot-command>
     </test-case>
