@@ -1516,15 +1516,20 @@ function Get-AstCommands {
         # paths like "C:\Program Files" are excluded.
         $isCommandLike = $false
         if ($strValue -and $strValue.Trim()) {
-            # Must have at least one space-separated word pair AND contain a
-            # shell metacharacter (;, |, &, newline) OR start with a known
-            # binary prefix — otherwise it's probably prose / a path.
-            if ($strValue.Trim() -match '[;&|]' -or $strValue.Trim() -match "`n") {
-                if ($strValue.Trim() -match '\S\s+\S') {
-                    $isCommandLike = $true
-                }
+            $trimmedStr = $strValue.Trim()
+            # Only treat a string constant as a command-like literal if it is a
+            # top-level statement (its CommandExpressionAst parent is a direct
+            # child of the pipeline or named block) AND has a separator/newline
+            # AND a word pair; or if it starts with a known command prefix.
+            # Strings that are cmdlet/operator arguments (e.g., -Pattern 'a|b',
+            # -replace 'x|y') must NOT be extracted as standalone commands.
+            $parentType = if ($str.Parent) { $str.Parent.GetType().Name } else { '' }
+            $grandParentType = if ($str.Parent -and $str.Parent.Parent) { $str.Parent.Parent.GetType().Name } else { '' }
+            $isTopLevel = ($parentType -eq 'CommandExpressionAst' -and $grandParentType -in @('PipelineAst', 'NamedBlockAst'))
+            if ($isTopLevel -and ($trimmedStr -match '[;&|]' -or $trimmedStr -match "`n") -and ($trimmedStr -match '\S\s+\S')) {
+                $isCommandLike = $true
             }
-            elseif ($strValue.Trim() -match '^(aws|docker|kubectl|helm|terraform|git|npm|yarn|python|node|pwsh|powershell|bash|sh|cmd|ssh|scp|make|go|cargo|dotnet|java|perl|ruby|php)\s') {
+            elseif ($trimmedStr -match '^(aws|docker|kubectl|helm|terraform|git|npm|yarn|python|node|pwsh|powershell|bash|sh|cmd|ssh|scp|make|go|cargo|dotnet|java|perl|ruby|php)\s') {
                 $isCommandLike = $true
             }
         }
