@@ -1825,3 +1825,179 @@ function Get-AstWrapperInnerCommands {
     # No wrapper matched
     return $results.ToArray()
 }
+
+# =============================================================================
+# Test-SafeAst
+#
+# Shared safe-expression certifier. Used by:
+#   - Get-PowerShellSafeExpressions (primary path, zero-command lines)
+#   - Invoke-PowerShellArbitration   (arbiter gate in Classifier.ps1)
+#
+# A node is SAFE when it provably has no side effects:
+#   - no command invocations except those already resolved ALLOW
+#     (their text is in $AllowedCommands)
+#   - no .NET method calls outside the config allowlist
+#     ($Config._dotnetMethodAllowlist)
+#   - no property SETs (assignment LHS must be a variable / index / array)
+#   - no redirections anywhere in the subtree
+# Anything unrecognized is unsafe (fail closed).
+# =============================================================================
+
+function Test-SafeAst {
+    param(
+        $Ast,
+        [System.Collections.Generic.HashSet[string]]$AllowedCommands,
+        [PSCustomObject]$Config
+    )
+
+    if ($null -eq $Ast) { return $true }
+
+    # Redirections anywhere in the subtree are never safe (they write files).
+    if ($Ast -is [System.Management.Automation.Language.RedirectionAst]) { return $false }
+
+    $typeName = $Ast.GetType().Name
+
+    switch ($typeName) {
+        'AssignmentStatementAst' {
+            $lhs = $Ast.Left
+            $lhsOk = ($lhs -is [System.Management.Automation.Language.VariableExpressionAst]) -or
+                     ($lhs -is [System.Management.Automation.Language.IndexExpressionAst]) -or
+                     ($lhs -is [System.Management.Automation.Language.ArrayLiteralAst])
+            if (-not $lhsOk) { return $false }
+            return (Test-SafeAst -Ast $Ast.Left -AllowedCommands $AllowedCommands -Config $Config) -and
+                   (Test-SafeAst -Ast $Ast.Right -AllowedCommands $AllowedCommands -Config $Config)
+        }
+        'PipelineAst' {
+            foreach ($elem in $Ast.PipelineElements) {
+                if (-not (Test-SafeAst -Ast $elem -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            return $true
+        }
+        'StatementBlockAst' {
+            foreach ($stmt in $Ast.Statements) {
+                if (-not (Test-SafeAst -Ast $stmt -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            return $true
+        }
+        'HashtableAst' {
+            foreach ($kvp in $Ast.KeyValuePairs) {
+                if (-not (Test-SafeAst -Ast $kvp.Item1 -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+                if (-not (Test-SafeAst -Ast $kvp.Item2 -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            return $true
+        }
+        'ArrayLiteralAst' {
+            foreach ($elem in $Ast.Elements) {
+                if (-not (Test-SafeAst -Ast $elem -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            return $true
+        }
+        'ParenExpressionAst'   { return Test-SafeAst -Ast $Ast.Pipeline -AllowedCommands $AllowedCommands -Config $Config }
+        'ArrayExpressionAst'   { return Test-SafeAst -Ast $Ast.SubExpression -AllowedCommands $AllowedCommands -Config $Config }
+        'SubExpressionAst'     { return Test-SafeAst -Ast $Ast.SubExpression -AllowedCommands $AllowedCommands -Config $Config }
+        'StringConstantExpressionAst' { return $true }
+        'ExpandableStringExpressionAst' {
+            foreach ($nest in $Ast.NestedExpressions) {
+                if (-not (Test-SafeAst -Ast $nest -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            return $true
+        }
+        'VariableExpressionAst' { return $true }
+        'ConstantExpressionAst' { return $true }
+        'TypeExpressionAst'     { return $true }
+        'MemberExpressionAst' {
+            return Test-SafeAst -Ast $Ast.Expression -AllowedCommands $AllowedCommands -Config $Config
+        }
+        'InvokeMemberExpressionAst' {
+            $methodName = $null
+            if ($Ast.Member -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                $methodName = $Ast.Member.Value
+            }
+            if (-not $methodName) { return $false }
+            $allowSet = $null
+            if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetMethodAllowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+                $allowSet = $Config._dotnetMethodAllowlist
+            }
+            if (-not $allowSet -or -not $allowSet.Contains($methodName)) { return $false }
+            if (-not (Test-SafeAst -Ast $Ast.Expression -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            foreach ($arg in $Ast.Arguments) {
+                if (-not (Test-SafeAst -Ast $arg -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            return $true
+        }
+        'IndexExpressionAst' {
+            return (Test-SafeAst -Ast $Ast.Target -AllowedCommands $AllowedCommands -Config $Config) -and
+                   (Test-SafeAst -Ast $Ast.Index -AllowedCommands $AllowedCommands -Config $Config)
+        }
+        'BinaryExpressionAst' {
+            return (Test-SafeAst -Ast $Ast.Left -AllowedCommands $AllowedCommands -Config $Config) -and
+                   (Test-SafeAst -Ast $Ast.Right -AllowedCommands $AllowedCommands -Config $Config)
+        }
+        'UnaryExpressionAst' {
+            return Test-SafeAst -Ast $Ast.Child -AllowedCommands $AllowedCommands -Config $Config
+        }
+        'CommandAst' {
+            return ($null -ne $AllowedCommands) -and $AllowedCommands.Contains($Ast.Extent.Text.Trim())
+        }
+        'ScriptBlockAst' {
+            $blocks = @($Ast.BeginBlock, $Ast.ProcessBlock, $Ast.EndBlock) | Where-Object { $_ }
+            foreach ($b in $blocks) {
+                if (-not (Test-SafeAst -Ast $b -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            return $true
+        }
+        'ScriptBlockExpressionAst' {
+            return Test-SafeAst -Ast $Ast.ScriptBlock -AllowedCommands $AllowedCommands -Config $Config
+        }
+        default {
+            return $false
+        }
+    }
+}
+
+# =============================================================================
+# Get-PowerShellSafeExpressions
+#
+# When a powershell-domain command string contains no cmdlet invocations but
+# only safe expressions, return one synthetic '(safe expression)' command per
+# input so the classifier can allow it instead of falling back to regex
+# splitting. Returns @() if ANY top-level statement is unsafe.
+# =============================================================================
+
+function Get-PowerShellSafeExpressions {
+    param(
+        [string]$Command,
+        [PSCustomObject]$Config = $null
+    )
+
+    $results = @()
+    $astType = 'System.Management.Automation.Language.Parser' -as [type]
+    if (-not $astType) { return $results }
+
+    $tokens = $null
+    $errors = $null
+    try {
+        $ast = $astType::ParseInput($Command, [ref]$tokens, [ref]$errors)
+    }
+    catch { return $results }
+    if ($errors -and $errors.Count -gt 0) { return $results }
+    if (-not $ast -or -not $ast.EndBlock) { return $results }
+
+    $statements = $ast.EndBlock.Statements
+    if ($statements.Count -eq 0) { return $results }
+
+    $emptySet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($stmt in $statements) {
+        if (-not (Test-SafeAst -Ast $stmt -AllowedCommands $emptySet -Config $Config)) {
+            return @()   # any unsafe statement -> no fallback, regex path stays
+        }
+    }
+
+    $results += [PSCustomObject]@{
+        CommandText   = '(safe expression)'
+        Domain        = 'powershell'
+        IsPipeline    = $false
+        ParentCommand = $null
+    }
+    return $results
+}

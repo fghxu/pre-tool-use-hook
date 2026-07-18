@@ -78,6 +78,13 @@ function Resolve-Command {
     }
 
     # -------------------------------------------------
+    # Safe-expression synthetic marker from Parser.ps1
+    # -------------------------------------------------
+    if ($Command -eq '(safe expression)') {
+        return New-ResolutionResult -Decision "allow" -Reason "safe expression" -MatchedPattern $null -Risk "none"
+    }
+
+    # -------------------------------------------------
     # Step 0: Normalize domain name to lowercase, then case-insensitive lookup
     # -------------------------------------------------
     $domainLower = $Domain.ToLowerInvariant()

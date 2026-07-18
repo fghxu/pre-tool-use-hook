@@ -311,8 +311,15 @@ function Invoke-Classify {
     # and flow-control scaffolding.  If AST parsing fails, fall back to the
     # regex-based Split-Commands results (already in $subCommands).
     $astCommands = @()
+    $safeExpressions = @()
     if ($domain -eq 'powershell') {
         $astCommands = @(Get-PowerShellCommands -Command $command)
+        # Zero cmdlet invocations but a successful parse: the line may be pure
+        # safe expressions (assignments, hashtables, .NET reads). Certify it so
+        # we don't fall back to regex splitting.
+        if ($astCommands.Count -eq 0) {
+            $safeExpressions = @(Get-PowerShellSafeExpressions -Command $command -Config $Config)
+        }
     }
 
     # -- 4c: Find nested commands (pwsh -Command, ssh, docker exec, kubectl exec) --
@@ -328,6 +335,9 @@ function Invoke-Classify {
     # Prefer AST-extracted commands for PowerShell; fall back to regex split.
     if ($astCommands.Count -gt 0) {
         $allCommands = $astCommands
+    }
+    elseif ($safeExpressions.Count -gt 0) {
+        $allCommands = $safeExpressions
     }
     elseif ($nestedCommands.Count -gt 0) {
         $parentTexts = [System.Collections.Generic.HashSet[string]]::new()
