@@ -1,7 +1,7 @@
 # AST-as-Arbiter: Safe PowerShell Expression Handling — Design Spec
 
 **Date:** 2026-07-18 (revised after implementation review)
-**Status:** Draft — pending user review
+**Status:** Approved — implemented (branch `ast-arbiter`, all suites byte-identical to baseline + new-samples 14/14)
 **Depends on:** `2026-05-15-architecture-design.md`, `2026-07-13-parameter-commands-and-editable-paths-design.md`
 **Implementation base:** `fix-var-assignment-detection` branch (NOT `ClaudeCode-v1` — see §1.3)
 
