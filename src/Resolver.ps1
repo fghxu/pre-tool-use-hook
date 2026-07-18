@@ -204,7 +204,10 @@ function Resolve-Command {
             }
         }
         $awsNormalized = ($awsFiltered -join ' ').Trim()
-        if ($awsNormalized -ne $Command.Trim()) {
+        # Guard: stripping must leave at least a service + operation (2+ tokens).
+        # If it would leave bare "aws" (e.g., "aws --version"), keep the original
+        # command so explicit read_only entries like "aws --version" can match.
+        if ($awsNormalized -ne $Command.Trim() -and ($awsNormalized -split '\s+').Count -ge 2) {
             return Resolve-Command -Command $awsNormalized -Domain $Domain -Config $Config
         }
     }
