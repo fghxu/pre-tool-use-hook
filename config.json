@@ -48,12 +48,7 @@
   ],
 
   "trusted_pattern": [
-	"^.*$",
-	"src/Parser.ps1",
-	"src/TestRunner.ps1",
-	"src/Classifier.ps1",
-	"src/Resolver.ps1"
-	
+	"^trusted_stuff\\s+$"
   ],
   "untrusted_pattern": [
 	  "^untrusted_stuff.*$",
