@@ -202,4 +202,139 @@
 
   </category-group>
 
+  <category-group name="New-Samples-Regex-Confusion">
+
+    <test-case expected="ask" reason="git tag" category="DOS-Git-Modifying">
+      <description>git tag with multi-line message + git log + git tag list pipeline</description>
+      <copilot-command><![CDATA[git tag -a v3.2.0-observability -m "V3 and graceful shutdown
+
+Added
+see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select-Object -First 3]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PowerShell-ReadOnly">
+      <description>Select-String path+pattern with pipes and brackets in regex, piped to ForEach/Where</description>
+      <copilot-command><![CDATA[Select-String -Path "$env:temp\build.log" -Pattern "server.*not ready|server is healthy" | ForEach-Object { $_.Line } | Where-Object { $_ -match "step|18:" -or $_ -notmatch "^\[" }]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PowerShell-ReadOnly">
+      <description>Select-String simple regex with anchors and pipes</description>
+      <copilot-command><![CDATA[Select-String -Pattern '^## | ^### ']]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PowerShell-ReadOnly">
+      <description>Variable assignment using -replace with regex string containing pipes/parens and scriptblock</description>
+      <copilot-command><![CDATA[$line = $line -replace 'deploy BC|Deploy BC|Summary \(BC\)', { $_.Value -replace 'BC', 'PC' -replace 'bc', 'pc' }]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PowerShell-ReadOnly">
+      <description>Call operator &amp; with scriptblock containing Get-Content and ConvertFrom-Json</description>
+      <copilot-command><![CDATA[& { $json = Get-Content -Path 'jenkins\build.json' -Raw; $buildinfo = $json | ConvertFrom-Json; }]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
+      <description>AWS configure get is a read-only lookup</description>
+      <copilot-command><![CDATA[aws configure get sso_role_name]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PowerShell-ReadOnly">
+      <description>.NET file read + substring with Math::Max expression</description>
+      <copilot-command><![CDATA[$raw = [System.IO.File]::ReadAllText("c:\a.txt"); $tail = $raw.Substring([Math]::Max(0, $raw.Length));]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="PS-Safe-Expressions">
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>Hashtable assignment with variable value</description>
+      <copilot-command><![CDATA[$headers = @{'provate-token' = $gittoken}]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>String split piped to Select-Object</description>
+      <copilot-command><![CDATA[$log -split "`n" | Select-Object -First 40]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>Invoke-RestMethod GET followed by regex filter pipeline with pipes in pattern</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method Get -Headers $hdr -Uri 'https://server/text'; ($b801log -split "`n" | Select-String -Pattern 'Error:|Exception out|failure|pass:' | Select-Object -First 20)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>SSH with key variable and read-only remote commands</description>
+      <copilot-command><![CDATA[$key='c:\temp\a path\a.pem'; ssh -i $key -o StrictHostKeyChecking=accept-new -o BatchMode=yes user@server 'whoami;hostname']]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>AWS version and Get-Content in same line</description>
+      <copilot-command><![CDATA[aws --version; Get-Content $file]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>Bare hashtable expression</description>
+      <copilot-command><![CDATA[@{ authorization  = "Basice $encodeed" }]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>JSON string assignment (inner JSON is string data)</description>
+      <copilot-command><![CDATA[$body = '{"id": "1", "name": "2" "context":{"id": "1"} }']]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="AST-Arbiter-Guard">
+
+    <test-case expected="ask" reason="git" category="AST-Arbiter-Guard">
+      <description>Unknown git subcommand stays ask (arbiter inconclusive)</description>
+      <copilot-command><![CDATA[git --online -3]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>Unknown cmdlet stays ask</description>
+      <copilot-command><![CDATA[Some-UnknownCmdlet -Foo]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>One unknown element poisons a pipeline</description>
+      <copilot-command><![CDATA[weirdcmd -x | Get-Process]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="Invoke-Expression" category="AST-Arbiter-Guard">
+      <description>Command inside an assignment is never a safe expression</description>
+      <copilot-command><![CDATA[$x = Invoke-Expression 'evil']]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>Bash for-loop with unknown command: PS parse error, arbiter aborts</description>
+      <copilot-command><![CDATA[for f in /etc/*; do weirdcmd $f; done]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>.NET Delete is not in the method allowlist</description>
+      <copilot-command><![CDATA[$x = [System.IO.File]::Delete('c:\temp\x.txt')]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>Instance method Kill is not in the method allowlist</description>
+      <copilot-command><![CDATA[$proc.Kill()]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>Property SET on a type is a side effect</description>
+      <copilot-command><![CDATA[[Console]::Title = 'x']]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="redirection-target" category="AST-Arbiter-Guard">
+      <description>Redirect outside CWD/editable blocks; redirect blockers bypass the arbiter</description>
+      <copilot-command><![CDATA[echo hi > ..\outside\file.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="rm" category="AST-Arbiter-Guard">
+      <description>Known-modifying inner command: arbiter never runs</description>
+      <copilot-command><![CDATA[ssh user@host 'rm -rf /tmp/x']]></copilot-command>
+    </test-case>
+
+  </category-group>
+
 </commands>
