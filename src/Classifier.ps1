@@ -406,6 +406,29 @@ function Invoke-Classify {
     # =========================================================================
 
     if ($blockingCommands.Count -gt 0) {
+        # -------------------------------------------------
+        # AST-as-arbiter gate: only when EVERY blocker is the unknown-command
+        # fallback. Known modifying matches and redirection blocks (both have
+        # a MatchedPattern) bypass arbitration entirely.
+        # -------------------------------------------------
+        $knownBlockers = @($blockingCommands | Where-Object { $_.MatchedPattern })
+        if ($knownBlockers.Count -eq 0) {
+            $arbiterResult = Invoke-PowerShellArbitration -Command $command -Config $Config
+            if ($arbiterResult.Conclusive) {
+                return (Repair-ResultProperties ([PSCustomObject]@{
+                    Decision    = "allow"
+                    Reason      = "read-only (PowerShell AST arbitration)"
+                    ExitCode    = 0
+                    IDE         = $IDE
+                    ToolName    = $toolName
+                    Command     = $command
+                    SubResults  = $subResults.ToArray()
+                    IsSkipped   = $false
+                    IsUnknown   = $false
+                }))
+            }
+        }
+
         # Build reason string listing ALL blocking commands
         $blockingReasons = [System.Collections.Generic.List[string]]::new()
         foreach ($bc in $blockingCommands) {
@@ -472,4 +495,122 @@ function Invoke-Classify {
         IsSkipped   = $false
         IsUnknown   = $false
     }))
+}
+
+# =============================================================================
+# Invoke-PowerShellArbitration  (AST-as-arbiter)
+#
+# Activated ONLY when the primary pipeline's final decision is ask AND every
+# blocking sub-result is the unknown-command fallback (MatchedPattern = null).
+# Re-parses the whole original line with the PowerShell AST and returns
+# CONCLUSIVE-ALLOW only when every top-level statement is fully accounted for:
+#   - every CommandAst resolves to a KNOWN allow (directly, or as a wrapper
+#     whose extracted inner commands all allow), and
+#   - every remaining node passes Test-SafeAst with those allowed commands.
+# Any gap => NOT conclusive => caller keeps the original ask unchanged.
+# =============================================================================
+
+function Invoke-PowerShellArbitration {
+    param(
+        [string]$Command,
+        [PSCustomObject]$Config
+    )
+
+    $result = [PSCustomObject]@{ Conclusive = $false }
+
+    $astType = 'System.Management.Automation.Language.Parser' -as [type]
+    if (-not $astType) { return $result }
+
+    $tokens = $null
+    $errors = $null
+    try {
+        $ast = $astType::ParseInput($Command, [ref]$tokens, [ref]$errors)
+    }
+    catch { return $result }
+    if ($errors -and $errors.Count -gt 0) { return $result }
+    if (-not $ast -or -not $ast.EndBlock) { return $result }
+    if ($ast.BeginBlock -and $ast.BeginBlock.Statements.Count -gt 0) { return $result }
+    if ($ast.ProcessBlock -and $ast.ProcessBlock.Statements.Count -gt 0) { return $result }
+
+    $statements = $ast.EndBlock.Statements
+    if ($statements.Count -eq 0) { return $result }
+
+    $allowed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
+    # Pass 1: every embedded command must resolve ALLOW.
+    foreach ($stmt in $statements) {
+        $cmdAsts = $stmt.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true)
+        foreach ($c in $cmdAsts) {
+            $verdict = Resolve-AsArbiter -CommandAst $c -Config $Config -Depth 0
+            if ($verdict -ne 'ALLOW') { return $result }
+            [void]$allowed.Add($c.Extent.Text.Trim())
+        }
+    }
+
+    # Pass 2: every statement must certify as a safe expression (commands in
+    # $allowed are treated as pre-approved leaves).
+    foreach ($stmt in $statements) {
+        if (-not (Test-SafeAst -Ast $stmt -AllowedCommands $allowed -Config $Config)) { return $result }
+    }
+
+    $result.Conclusive = $true
+    return $result
+}
+
+function Resolve-AsArbiter {
+    param(
+        $CommandAst,
+        [PSCustomObject]$Config,
+        [int]$Depth
+    )
+
+    if ($Depth -gt 5) { return 'NO' }
+
+    # Call-operator scriptblock: recurse into the scriptblock body.
+    if (($CommandAst.InvocationOperator -eq 'Ampersand' -or $CommandAst.InvocationOperator -eq 'Dot') -and
+        $CommandAst.CommandElements.Count -eq 1 -and
+        $CommandAst.CommandElements[0] -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) {
+        $sb = $CommandAst.CommandElements[0].ScriptBlock
+        if (-not $sb -or -not $sb.EndBlock) { return 'NO' }
+        $innerAllowed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($istmt in $sb.EndBlock.Statements) {
+            $icmds = $istmt.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true)
+            foreach ($ic in $icmds) {
+                if ((Resolve-AsArbiter -CommandAst $ic -Config $Config -Depth ($Depth + 1)) -ne 'ALLOW') { return 'NO' }
+                [void]$innerAllowed.Add($ic.Extent.Text.Trim())
+            }
+        }
+        foreach ($istmt in $sb.EndBlock.Statements) {
+            if (-not (Test-SafeAst -Ast $istmt -AllowedCommands $innerAllowed -Config $Config)) { return 'NO' }
+        }
+        return 'ALLOW'
+    }
+
+    $text = $CommandAst.Extent.Text.Trim()
+    if (-not $text) { return 'NO' }
+    $dom = Get-CommandDomain -Command $text
+    $r = Resolve-Command -Command $text -Domain $dom -Config $Config
+    if ($r.Decision -eq 'allow') { return 'ALLOW' }
+
+    # Wrapper / nested extraction: a wrapper is explained by its inner commands.
+    # NOTE: use the regex-based Find-NestedCommands only — it has the full
+    # value-taking-flag table (e.g., ssh -W/-i/-o consume the next token).
+    # The AST wrapper helper skips flags but not their values, which would
+    # misread "ssh -W internal:80 user@bastion" as having a remote command.
+    $nested = @(Find-NestedCommands -Command $text -ParentDomain $dom)
+    if ($nested.Count -eq 0) { return 'NO' }
+
+    foreach ($n in $nested) {
+        $nr = Resolve-Command -Command $n.CommandText -Domain $n.Domain -Config $Config
+        if ($nr.Decision -eq 'allow') { continue }
+        # Try finer decomposition of the nested text.
+        $leaves = @(Split-Commands -Command $n.CommandText -Domain $n.Domain)
+        $leafOk = $true
+        foreach ($leaf in $leaves) {
+            $lr = Resolve-Command -Command $leaf.CommandText -Domain $leaf.Domain -Config $Config
+            if ($lr.Decision -ne 'allow') { $leafOk = $false; break }
+        }
+        if (-not $leafOk) { return 'NO' }
+    }
+    return 'ALLOW'
 }

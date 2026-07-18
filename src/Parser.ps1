@@ -1907,7 +1907,8 @@ function Test-SafeAst {
             }
             return $true
         }
-        'StatementBlockAst' {
+        {$_ -eq 'StatementBlockAst' -or $_ -eq 'NamedBlockAst'} {
+            # A block of statements (body of a scriptblock / @(...) / named block).
             foreach ($stmt in $Ast.Statements) {
                 if (-not (Test-SafeAst -Ast $stmt -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
             }
@@ -1972,6 +1973,14 @@ function Test-SafeAst {
         }
         'CommandAst' {
             return ($null -ne $AllowedCommands) -and $AllowedCommands.Contains($Ast.Extent.Text.Trim())
+        }
+        'CommandExpressionAst' {
+            # A bare expression in command position (e.g., 'x' as an assignment
+            # RHS, or a hashtable/string as a pipeline element). Safe only when
+            # it is not INVOKED (& or .) and carries no redirections.
+            if ($Ast.InvocationOperator -eq 'Ampersand' -or $Ast.InvocationOperator -eq 'Dot') { return $false }
+            if ($Ast.Redirections -and $Ast.Redirections.Count -gt 0) { return $false }
+            return Test-SafeAst -Ast $Ast.Expression -AllowedCommands $AllowedCommands -Config $Config
         }
         'ScriptBlockAst' {
             $blocks = @($Ast.BeginBlock, $Ast.ProcessBlock, $Ast.EndBlock) | Where-Object { $_ }
