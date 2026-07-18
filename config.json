@@ -36,6 +36,17 @@
       "%ProgramFiles(x86)%\\\\"
     ]
   },
+  "safe_expressions": {
+    "description": "Allowlist for the safe-expression certifier (AST arbiter + zero-command fallback). Method names matched case-insensitively.",
+    "dotnet_method_allowlist": [
+      "ReadAllText", "ReadAllLines", "ReadLines", "OpenRead",
+      "Substring", "Split", "Replace", "ToString", "ToUpper", "ToLower",
+      "Trim", "TrimStart", "TrimEnd", "Contains", "StartsWith", "EndsWith",
+      "IndexOf", "LastIndexOf", "PadLeft", "PadRight",
+      "Max", "Min", "Abs", "Round", "Floor", "Ceiling", "Sqrt", "Pow",
+      "Compare", "Equals", "GetHashCode", "GetType"
+    ]
+  },
 
   "known_command_prefixes": [
     "docker", "kubectl", "aws", "npm", "git", "terraform", "helm", "gh", "az", "gcloud",
@@ -634,6 +645,8 @@
       },
       "read_only": [
         { "name": "aws s3 ls",                     "patterns": ["aws s3 ls*"],                      "description": "List S3 buckets/objects" },
+        { "name": "aws configure get",            "patterns": ["^aws\\s+configure\\s+get\\b"],            "description": "Read an AWS configure value" },
+        { "name": "aws configure list",           "patterns": ["^aws\\s+configure\\s+list\\b"],           "description": "List AWS configure values" },
         { "name": "aws --version",                 "patterns": ["aws --version *","aws --version"], "description": "List version" },
         { "name": "aws s3api head-object",         "patterns": ["aws s3api head-object*"],          "description": "Get S3 object metadata" },
         { "name": "aws s3api list-objects",        "patterns": ["aws s3api list-objects*"],         "description": "List S3 objects via API" },

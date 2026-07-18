@@ -178,6 +178,27 @@ function Test-ConfigSchema {
     $Config | Add-Member -MemberType NoteProperty -Name '_systemPathRegex' -Value $sysRegex -Force
     try { $null = [regex]::new($sysRegex) } catch { throw "Invalid system_paths regex: $sysRegex" }
 
+    # safe_expressions: .NET method allowlist for the safe-expression certifier.
+    # Optional; defaults to a built-in conservative list when absent.
+    $defaultDotNetMethods = @(
+        'readalltext','readalllines','readlines','openread',
+        'substring','split','replace','tostring','toupper','tolower',
+        'trim','trimstart','trimend','contains','startswith','endswith',
+        'indexof','lastindexof','padleft','padright',
+        'max','min','abs','round','floor','ceiling','sqrt','pow',
+        'compare','equals','gethashcode','gettype'
+    )
+    $methodNames = $defaultDotNetMethods
+    $hasSafeExprs = Get-Member -InputObject $Config -Name 'safe_expressions' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasSafeExprs -and $Config.safe_expressions -and
+        (Get-Member -InputObject $Config.safe_expressions -Name 'dotnet_method_allowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $Config.safe_expressions.dotnet_method_allowlist) {
+        $methodNames = @($Config.safe_expressions.dotnet_method_allowlist | ForEach-Object { "$_".ToLowerInvariant() })
+    }
+    $methodSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($m in $methodNames) { [void]$methodSet.Add($m) }
+    $Config | Add-Member -MemberType NoteProperty -Name '_dotnetMethodAllowlist' -Value $methodSet -Force
+
     # Validate regex patterns in trusted_pattern compile successfully
     foreach ($pattern in $Config.trusted_pattern) {
         try {
