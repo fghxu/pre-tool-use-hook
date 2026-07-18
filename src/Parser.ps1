@@ -1433,6 +1433,17 @@ function Get-AstCommands {
         }
 
         # --------------------------------------------
+        # Call operator: & { <scriptblock> } or . { <scriptblock> }
+        # The invocation itself is not a command to classify; the inner
+        # commands are already found by the ScriptBlockAst recursion below.
+        # --------------------------------------------
+        if (($cmd.InvocationOperator -eq 'Ampersand' -or $cmd.InvocationOperator -eq 'Dot') -and
+            $commandElements.Count -eq 1 -and
+            $commandElements[0] -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) {
+            continue
+        }
+
+        # --------------------------------------------
         # Wrapper detection — if this is a known wrapper, extract inner commands
         # --------------------------------------------
         if ($commandName -and $commandElements.Count -ge 2) {
@@ -1592,6 +1603,24 @@ function Get-AstWrapperInnerCommands {
     $results = New-Object System.Collections.ArrayList
     $commandElements = $CommandAst.CommandElements
     if ($commandElements.Count -lt 2) {
+        return $results.ToArray()
+    }
+
+    # Safety net: any CommandAst whose first element is a scriptblock literal
+    # (e.g., "& { ... } arg1") is an invocation of that scriptblock — surface
+    # the body as an inner PowerShell command.
+    if ($commandElements[0] -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) {
+        $sbExpr = $commandElements[0]
+        if ($sbExpr.ScriptBlock -and $sbExpr.ScriptBlock.EndBlock) {
+            $innerCommand = $sbExpr.ScriptBlock.EndBlock.Extent.Text
+            if ($innerCommand) {
+                $null = $results.Add([PSCustomObject]@{
+                    CommandText = $innerCommand
+                    Domain      = 'powershell'
+                    IsPipeline  = $false
+                })
+            }
+        }
         return $results.ToArray()
     }
 
