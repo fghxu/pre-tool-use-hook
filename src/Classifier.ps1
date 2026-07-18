@@ -589,28 +589,36 @@ function Resolve-AsArbiter {
     $text = $CommandAst.Extent.Text.Trim()
     if (-not $text) { return 'NO' }
     $dom = Get-CommandDomain -Command $text
-    $r = Resolve-Command -Command $text -Domain $dom -Config $Config
-    if ($r.Decision -eq 'allow') { return 'ALLOW' }
 
-    # Wrapper / nested extraction: a wrapper is explained by its inner commands.
+    # Wrapper / nested extraction FIRST: if this command wraps inner commands
+    # (pwsh -Command, ssh, bash -c, docker exec, ...), the inner commands are
+    # what matters — the wrapper is explained by its children (mirrors the
+    # existing parent-filter semantics). The wrapper's own resolution is NOT
+    # sufficient: "pwsh" is read_only precisely because "inner commands are
+    # classified separately" — so we must classify them here.
     # NOTE: use the regex-based Find-NestedCommands only — it has the full
     # value-taking-flag table (e.g., ssh -W/-i/-o consume the next token).
     # The AST wrapper helper skips flags but not their values, which would
     # misread "ssh -W internal:80 user@bastion" as having a remote command.
     $nested = @(Find-NestedCommands -Command $text -ParentDomain $dom)
-    if ($nested.Count -eq 0) { return 'NO' }
-
-    foreach ($n in $nested) {
-        $nr = Resolve-Command -Command $n.CommandText -Domain $n.Domain -Config $Config
-        if ($nr.Decision -eq 'allow') { continue }
-        # Try finer decomposition of the nested text.
-        $leaves = @(Split-Commands -Command $n.CommandText -Domain $n.Domain)
-        $leafOk = $true
-        foreach ($leaf in $leaves) {
-            $lr = Resolve-Command -Command $leaf.CommandText -Domain $leaf.Domain -Config $Config
-            if ($lr.Decision -ne 'allow') { $leafOk = $false; break }
+    if ($nested.Count -gt 0) {
+        foreach ($n in $nested) {
+            $nr = Resolve-Command -Command $n.CommandText -Domain $n.Domain -Config $Config
+            if ($nr.Decision -eq 'allow') { continue }
+            # Try finer decomposition of the nested text.
+            $leaves = @(Split-Commands -Command $n.CommandText -Domain $n.Domain)
+            $leafOk = $true
+            foreach ($leaf in $leaves) {
+                $lr = Resolve-Command -Command $leaf.CommandText -Domain $leaf.Domain -Config $Config
+                if ($lr.Decision -ne 'allow') { $leafOk = $false; break }
+            }
+            if (-not $leafOk) { return 'NO' }
         }
-        if (-not $leafOk) { return 'NO' }
+        return 'ALLOW'
     }
-    return 'ALLOW'
+
+    # Not a wrapper: plain resolution must be allow.
+    $r = Resolve-Command -Command $text -Domain $dom -Config $Config
+    if ($r.Decision -eq 'allow') { return 'ALLOW' }
+    return 'NO'
 }

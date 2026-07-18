@@ -580,8 +580,13 @@ function Resolve-Command {
             return New-ResolutionResult -Decision "allow" -Reason "$firstWord $($innerResult.Reason) (after var assignment)" -MatchedPattern $firstWord -Risk "none"
         }
 
-        # 2.5h: Standalone heredoc delimiters / markers (single bare word, no args)
-        if ($Command.Trim() -notmatch '\s') {
+        # 2.5h: Standalone heredoc delimiters / markers (single bare word, no args).
+        # Keeps allowing whitespace-free tokens ($true, $i++, }, EOF, ...).
+        # Excludes .NET/method invocations — anything with parens or '::' such as
+        # [Type]::Method(...), $var.Method(), $proc.Kill() — which must fall
+        # through to normal classification.
+        $bareToken = $Command.Trim()
+        if ($bareToken -notmatch '\s' -and $bareToken -notmatch '[()]' -and $bareToken -notmatch '::') {
             return New-ResolutionResult -Decision "allow" -Reason "$firstWord (heredoc delimiter or marker)" -MatchedPattern $firstWord -Risk "none"
         }
 

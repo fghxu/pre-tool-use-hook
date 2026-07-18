@@ -1971,6 +1971,52 @@ function Test-SafeAst {
         'UnaryExpressionAst' {
             return Test-SafeAst -Ast $Ast.Child -AllowedCommands $AllowedCommands -Config $Config
         }
+        'IfStatementAst' {
+            foreach ($clause in $Ast.Clauses) {
+                if (-not (Test-SafeAst -Ast $clause.Item1 -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+                if (-not (Test-SafeAst -Ast $clause.Item2 -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            if ($Ast.ElseClause -and -not (Test-SafeAst -Ast $Ast.ElseClause -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            return $true
+        }
+        'ForStatementAst' {
+            foreach ($part in @($Ast.Initializer, $Ast.Condition, $Ast.Iterator, $Ast.Body)) {
+                if ($null -ne $part -and -not (Test-SafeAst -Ast $part -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            return $true
+        }
+        'ForEachStatementAst' {
+            foreach ($part in @($Ast.Variable, $Ast.Condition, $Ast.Body)) {
+                if ($null -ne $part -and -not (Test-SafeAst -Ast $part -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            return $true
+        }
+        {$_ -eq 'WhileStatementAst' -or $_ -eq 'DoWhileStatementAst' -or $_ -eq 'DoUntilStatementAst'} {
+            foreach ($part in @($Ast.Condition, $Ast.Body)) {
+                if ($null -ne $part -and -not (Test-SafeAst -Ast $part -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            return $true
+        }
+        'TryStatementAst' {
+            if (-not (Test-SafeAst -Ast $Ast.Body -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            foreach ($catchClause in $Ast.CatchClauses) {
+                if (-not (Test-SafeAst -Ast $catchClause.Body -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            if ($Ast.Finally -and -not (Test-SafeAst -Ast $Ast.Finally.Body -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            return $true
+        }
+        'SwitchStatementAst' {
+            if (-not (Test-SafeAst -Ast $Ast.Condition -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            foreach ($clause in $Ast.Clauses) {
+                if (-not (Test-SafeAst -Ast $clause.Item1 -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+                if (-not (Test-SafeAst -Ast $clause.Item2 -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            }
+            if ($Ast.Default -and -not (Test-SafeAst -Ast $Ast.Default -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
+            return $true
+        }
+        'TrapStatementAst' {
+            return Test-SafeAst -Ast $Ast.Body -AllowedCommands $AllowedCommands -Config $Config
+        }
         'CommandAst' {
             return ($null -ne $AllowedCommands) -and $AllowedCommands.Contains($Ast.Extent.Text.Trim())
         }
