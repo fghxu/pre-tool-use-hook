@@ -55,7 +55,8 @@
     "curl", "wget",
     "cd", "dir", "ls", "cat", "ping", "ps", "type", "tree", "findstr",
     "ipconfig", "netstat", "tasklist", "whoami", "sc", "net", "ver", "hostname",
-    "get-childitem", "get-content", "get-process", "get-service", "get-item"
+    "get-childitem", "get-content", "get-process", "get-service", "get-item",
+    "adb", "unzip", "javap", "gradlew"
   ],
 
   "trusted_pattern": [
@@ -219,6 +220,9 @@
         { "name": "whoami",   "patterns": ["whoami", "whoami /all", "whoami /groups"],              "description": "Display current user identity" },
         { "name": "tasklist", "patterns": ["tasklist", "tasklist /v", "tasklist /m *"],             "description": "List running processes" },
         { "name": "sc query", "patterns": ["sc query *"],                                            "description": "Query service status" },
+        { "name": "sc qc",    "patterns": ["sc qc *"],                                                 "description": "Query service configuration" },
+        { "name": "reg query","patterns": ["reg query *"],                                             "description": "Query registry keys/values" },
+        { "name": "net share","patterns": ["^net share$", "net share (?!.*=|.*\\/delete).*"],          "description": "List shares / view one share (no create/delete)" },
         { "name": "set",      "patterns": ["set *", "set"],                                          "description": "Display environment variables" },
         { "name": "cd",       "patterns": ["cd *", "cd /d *", "chdir *"],                           "description": "Change directory (read-only for filesystem)" },
         { "name": "path",     "patterns": ["path"],                                                  "description": "Display current PATH" },
@@ -257,6 +261,10 @@
         { "name": "sc config", "patterns": ["sc config *"],                                         "risk": "medium", "description": "Modify service configuration" },
         { "name": "sc delete", "patterns": ["sc delete *"],                                         "risk": "high",   "description": "Delete a service" },
         { "name": "sc stop",   "patterns": ["sc stop *"],                                            "risk": "medium", "description": "Stop a service" },
+        { "name": "sc start",  "patterns": ["sc start *"],                                             "risk": "medium", "description": "Start a service" },
+        { "name": "sc create", "patterns": ["sc create *"],                                            "risk": "high",   "description": "Create a service" },
+        { "name": "net share create", "patterns": ["net share *=*"],                                   "risk": "high",   "description": "Create a network share" },
+        { "name": "net share delete", "patterns": ["net share */delete*"],                             "risk": "high",   "description": "Delete a network share" },
         { "name": "netsh advfirewall", "patterns": ["netsh advfirewall *"],                         "risk": "high",   "description": "Modify firewall rules" },
         { "name": "format",    "patterns": ["format *"],                                             "risk": "high",   "description": "Format a disk volume" },
         { "name": "diskpart",  "patterns": ["diskpart *"],                                           "risk": "high",   "description": "Disk partition management" },
@@ -393,7 +401,18 @@
         { "name": "ping",     "patterns": ["ping *"],                          "description": "Send ICMP echo requests" },
         { "name": "bash",     "patterns": ["bash", "sh *"],                    "description": "Shell interpreter receiving piped/redirected input" },
         { "name": "sleep",    "patterns": ["sleep *"],                         "description": "Delay/suspend execution" },
-        { "name": "true",     "patterns": ["true"],                            "description": "Return success (shell builtin)" }
+        { "name": "true",     "patterns": ["true"],                            "description": "Return success (shell builtin)" },
+        { "name": "javap",    "patterns": ["javap *"],                          "description": "Disassemble/inspect Java class files" },
+        { "name": "adb devices",     "patterns": ["adb devices*"],              "description": "List attached Android devices" },
+        { "name": "adb logcat read", "patterns": ["adb logcat (?!.*-c).*"], "description": "Dump device log (excludes -c clear)" },
+        { "name": "adb shell getprop", "patterns": ["adb shell getprop *"],     "description": "Read device properties" },
+        { "name": "adb shell pm list", "patterns": ["adb shell pm list *"],     "description": "List installed packages" },
+        { "name": "gh pr list",      "patterns": ["gh pr list*"],        "description": "List pull requests" },
+        { "name": "gh pr view",      "patterns": ["gh pr view*"],        "description": "View a pull request" },
+        { "name": "gh pr status",    "patterns": ["gh pr status*"],      "description": "Show PR status" },
+        { "name": "gh repo view",    "patterns": ["gh repo view*"],      "description": "View repository" },
+        { "name": "gh release list", "patterns": ["gh release list*"],   "description": "List releases" },
+        { "name": "gh release view", "patterns": ["gh release view*"],   "description": "View a release" }
       ],
       "modifying": [
 		
@@ -432,7 +451,20 @@
         { "name": "crontab",  "patterns": ["crontab *", "crontab -e", "crontab -r", "crontab -"], "risk": "medium", "description": "Edit/remove scheduled jobs" },
         { "name": "wget",      "patterns": ["wget (?!.*-O-).*", "wget (?!.*-qO-).*"],             "risk": "medium", "description": "Download files from web" },
         { "name": "tee",       "patterns": ["tee *"],                          "risk": "medium", "description": "Write stdin to file(s)" },
-        { "name": "chpasswd",  "patterns": ["chpasswd *", "chpasswd"],         "risk": "high",   "description": "Change user passwords in batch" }
+        { "name": "chpasswd",  "patterns": ["chpasswd *", "chpasswd"],         "risk": "high",   "description": "Change user passwords in batch" },
+        { "name": "unzip",    "patterns": ["unzip *", "unzip"],                 "risk": "low", "description": "Extract archive (writes files)" },
+        { "name": "gradlew",  "patterns": ["[.][/\\\\]gradlew", "gradlew *", "gradlew"], "risk": "low", "description": "Gradle build wrapper (writes build outputs)" },
+        { "name": "adb install", "patterns": ["adb install *"],                 "risk": "low", "description": "Install APK on device" },
+        { "name": "adb push", "patterns": ["adb push *"],                       "risk": "low", "description": "Push file to device" },
+        { "name": "adb pull", "patterns": ["adb pull *"],                       "risk": "low", "description": "Pull file from device" },
+        { "name": "adb shell am start", "patterns": ["adb shell am start *"],   "risk": "low", "description": "Launch activity on device" },
+        { "name": "adb logcat -c", "patterns": ["adb logcat *-c*"],             "risk": "low", "description": "Clear device log buffer" },
+        { "name": "gh pr create",      "patterns": ["gh pr create*"],      "risk": "medium", "description": "Create pull request" },
+        { "name": "gh pr merge",       "patterns": ["gh pr merge*"],       "risk": "medium", "description": "Merge pull request" },
+        { "name": "gh pr close",       "patterns": ["gh pr close*"],       "risk": "medium", "description": "Close pull request" },
+        { "name": "gh issue create",   "patterns": ["gh issue create*"],   "risk": "medium", "description": "Create issue" },
+        { "name": "gh release create", "patterns": ["gh release create*"], "risk": "medium", "description": "Create release" },
+        { "name": "gh release delete", "patterns": ["gh release delete*"], "risk": "medium", "description": "Delete release" }
       ],
       "parameter_commands": {
         "curl": {
@@ -479,6 +511,7 @@
         { "name": "git tag -d",    "patterns": ["git tag -d*", "git tag --delete*"],             "risk": "low",    "description": "Delete tag" },
         { "name": "git add",       "patterns": ["git add*", "git add *"],                        "risk": "low",    "description": "Stage file changes" },
         { "name": "git worktree add", "patterns": ["git worktree add*", "git worktree add *"], "risk": "low",    "description": "Stage file changes" },
+        { "name": "git worktree list", "patterns": ["git worktree list*", "git worktree list *"], "description": "List worktrees (no write)" },
         { "name": "git commit",    "patterns": ["git commit*", "git commit *"],                  "risk": "low",    "description": "Record changes to repository" },
         { "name": "git rev-parse",   "patterns": ["git rev-parse*", "git rev-parse *"],                "risk": "medium", "description": "rev-parse working tree files" },
         { "name": "git stash",     "patterns": ["git stash*", "git stash *"],                    "risk": "low",    "description": "Stash changes" }
@@ -492,7 +525,13 @@
         { "name": "git checkout",  "patterns": ["git checkout*", "git checkout *"],              "risk": "medium", "description": "Switch branches or restore files" },
         { "name": "git restore",   "patterns": ["git restore*", "git restore *"],                "risk": "medium", "description": "Restore working tree files" },
         { "name": "git branch -D", "patterns": ["git branch -D*", "git branch --delete*", "git branch -d*", "git branch -m*", "git branch --move*"], "risk": "medium", "description": "Delete or rename branch" },
-        { "name": "git remote modify", "patterns": ["git remote add*", "git remote remove*", "git remote set-url*", "git remote rename*"], "risk": "low", "description": "Modify remote configuration" }
+        { "name": "git remote modify", "patterns": ["git remote add*", "git remote remove*", "git remote set-url*", "git remote rename*"], "risk": "low", "description": "Modify remote configuration" },
+        { "name": "git worktree remove", "patterns": ["git worktree remove*", "git worktree remove *"], "risk": "low", "description": "Remove a worktree" },
+        { "name": "git worktree prune",  "patterns": ["git worktree prune*"],                        "risk": "low", "description": "Prune stale worktree metadata" },
+        { "name": "git worktree move",   "patterns": ["git worktree move*"],                         "risk": "low", "description": "Move a worktree" },
+        { "name": "git worktree lock",   "patterns": ["git worktree lock*"],                         "risk": "low", "description": "Lock a worktree" },
+        { "name": "git worktree unlock", "patterns": ["git worktree unlock*"],                       "risk": "low", "description": "Unlock a worktree" },
+        { "name": "git tag create",      "patterns": ["git tag -a*", "git tag -s *", "git tag -m *"], "risk": "low", "description": "Create annotated/signed tag" }
       ]
     },
 

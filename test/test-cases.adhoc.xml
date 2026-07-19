@@ -337,4 +337,148 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
 
   </category-group>
 
+  <!-- =================================================================== -->
+  <!-- Log-Gap-Fill: commands seen as "unknown command" in prehook logs     -->
+  <!-- (spec 2026-07-19-agent-command-guidelines-design.md).                -->
+  <!-- =================================================================== -->
+
+  <category-group name="LogGap-Git">
+    <test-case expected="allow" reason="read-only: git worktree list" category="LogGap-Git">
+      <description>git worktree list — read-only</description>
+      <copilot-command><![CDATA[git worktree list]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: git worktree remove" category="LogGap-Git">
+      <description>git worktree remove — modifying (low)</description>
+      <copilot-command><![CDATA[git worktree remove mywt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: git worktree prune" category="LogGap-Git">
+      <description>git worktree prune — modifying (low)</description>
+      <copilot-command><![CDATA[git worktree prune]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: git tag -a" category="LogGap-Git">
+      <description>git tag -a with -m — annotated tag creation, modifying (low)</description>
+      <copilot-command><![CDATA[git tag -a v1.2 -m "release 1.2"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: git tag -l (regression guard)" category="LogGap-Git">
+      <description>git tag -l stays read-only after adding tag creation patterns</description>
+      <copilot-command><![CDATA[git tag -l "v1.*"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="LogGap-DOS">
+    <test-case expected="allow" reason="read-only: reg query" category="LogGap-DOS">
+      <description>reg query — read-only</description>
+      <copilot-command><![CDATA[reg query "HKLM\SOFTWARE\Microsoft\Windows" /s]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: sc qc" category="LogGap-DOS">
+      <description>sc qc — query service config, read-only</description>
+      <copilot-command><![CDATA[sc qc wuauserv]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: sc start" category="LogGap-DOS">
+      <description>sc start — modifying (medium)</description>
+      <copilot-command><![CDATA[sc start wuauserv]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: net share (bare)" category="LogGap-DOS">
+      <description>net share bare — list shares, read-only</description>
+      <copilot-command><![CDATA[net share]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: net share name (view)" category="LogGap-DOS">
+      <description>net share docs — view one share, read-only</description>
+      <copilot-command><![CDATA[net share docs]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: net share name=path" category="LogGap-DOS">
+      <description>net share docs=C:\docs — create share, modifying (high)</description>
+      <copilot-command><![CDATA[net share docs=C:\docs]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: net share /delete" category="LogGap-DOS">
+      <description>net share docs /delete — delete share, modifying (high)</description>
+      <copilot-command><![CDATA[net share docs /delete]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="LogGap-DevTools">
+    <test-case expected="allow" reason="read-only: adb devices" category="LogGap-DevTools">
+      <description>adb devices — read-only</description>
+      <copilot-command><![CDATA[adb devices]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: adb logcat (no -c)" category="LogGap-DevTools">
+      <description>adb logcat -d — dump log, read-only</description>
+      <copilot-command><![CDATA[adb logcat -d]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: adb logcat -c" category="LogGap-DevTools">
+      <description>adb logcat -c — clears log buffer, modifying (low); contrast pair with -d</description>
+      <copilot-command><![CDATA[adb logcat -c]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: adb shell getprop" category="LogGap-DevTools">
+      <description>adb shell getprop — read-only</description>
+      <copilot-command><![CDATA[adb shell getprop ro.product.model]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: adb shell pm list" category="LogGap-DevTools">
+      <description>adb shell pm list packages — read-only</description>
+      <copilot-command><![CDATA[adb shell pm list packages]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: adb install" category="LogGap-DevTools">
+      <description>adb install -r — modifying (low)</description>
+      <copilot-command><![CDATA[adb install -r app.apk]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: adb push" category="LogGap-DevTools">
+      <description>adb push — modifying (low)</description>
+      <copilot-command><![CDATA[adb push file.txt /sdcard/]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: adb shell am start" category="LogGap-DevTools">
+      <description>adb shell am start — launches activity, modifying (low)</description>
+      <copilot-command><![CDATA[adb shell am start -n com.app/.MainActivity]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: unzip" category="LogGap-DevTools">
+      <description>unzip writes files — modifying (low)</description>
+      <copilot-command><![CDATA[unzip -o archive.zip -d out]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="LogGap-JavaGradle">
+    <test-case expected="allow" reason="read-only: javap" category="LogGap-JavaGradle">
+      <description>javap disassembly — read-only</description>
+      <copilot-command><![CDATA[javap -p com.example.Foo]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: ./gradlew" category="LogGap-JavaGradle">
+      <description>./gradlew assembleDebug — build writes outputs, modifying (low)</description>
+      <copilot-command><![CDATA[./gradlew assembleDebug]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: gradlew" category="LogGap-JavaGradle">
+      <description>gradlew clean — modifying (low)</description>
+      <copilot-command><![CDATA[gradlew clean]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: .\gradlew" category="LogGap-JavaGradle">
+      <description>.\gradlew test (Windows form) — modifying (low)</description>
+      <copilot-command><![CDATA[.\gradlew test]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="LogGap-GH">
+    <test-case expected="allow" reason="read-only: gh pr list" category="LogGap-GH">
+      <description>gh pr list — read-only</description>
+      <copilot-command><![CDATA[gh pr list]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: gh pr view" category="LogGap-GH">
+      <description>gh pr view — read-only</description>
+      <copilot-command><![CDATA[gh pr view 123]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: gh repo view" category="LogGap-GH">
+      <description>gh repo view — read-only</description>
+      <copilot-command><![CDATA[gh repo view]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: gh release list" category="LogGap-GH">
+      <description>gh release list — read-only</description>
+      <copilot-command><![CDATA[gh release list]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: gh pr create" category="LogGap-GH">
+      <description>gh pr create — modifying (medium)</description>
+      <copilot-command><![CDATA[gh pr create --title "x" --body "y"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: gh release delete" category="LogGap-GH">
+      <description>gh release delete — modifying (medium)</description>
+      <copilot-command><![CDATA[gh release delete v1.0]]></copilot-command>
+    </test-case>
+  </category-group>
+
 </commands>
