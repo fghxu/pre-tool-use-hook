@@ -1,5 +1,22 @@
 ## Goal
-Implement the AST-as-arbiter design (spec 2026-07-18-ast-aware-safe-expressions-design.md, plan 2026-07-18-ast-arbiter-implementation-plan.md) so 14 canonical misclassified read-only commands are auto-allowed, with zero behavior change on existing suites.
+Design (brainstorm → spec → plan) an LLM-facing guidance artifact (prompt file vs skill) that teaches agents to emit shell/PowerShell commands in forms the PreToolUse hook can classify, reducing "unknown command" fallbacks without restricting what agents may do.
+
+## Log scan findings (2026-07-19, C:\temp\logs\prehook\)
+- ~330 "unknown command" occurrences across 20 log files (claude/copilot/codex).
+- Two root causes seen:
+  1. Commands missing from the classification DB: `git tag -a`, `git worktree`, `git branch --show-current`, `./gradlew`, `unzip`, `javap`, `net share`, `reg query`, `sc qc`, `cmd //c`, `powershell.exe -File`.
+  2. Format the parser can't decompose: `powershell.exe -NoProfile -Command "<long pipeline>"`, heredocs, nested/escaped quoting (`\$`, `\"`), multi-line inline scripts, trailing `2>/dev/null`.
+
+## Completed Steps
+- Log scan: 895 unknowns → 507 heredoc/message shrapnel (57%), 388 real commands (43%). Offender table built.
+- Design decisions locked: prevention-only guidance (no retry loop possible); both Option A (guidance.md) + B (skill) + install README; config.json gap-fill for real DB gaps; multi-line commits → repeated -m.
+- Spec written + self-reviewed + committed: docs/superpowers/specs/2026-07-19-agent-command-guidelines-design.md (ed07383).
+
+## Current Step
+Awaiting user review of the spec before invoking writing-plans.
+
+## Next Steps
+- User approves spec → invoke writing-plans skill → implement 4 deliverables: guidance.md, hook-friendly-commands/SKILL.md, README.md (all under docs/agent-command-guidelines/), config.json additions + adhoc test cases + full differential suite run.
 
 ## Baseline (pre-change), captured 2026-07-18 in ast-arbiter worktree @ 202be06 (corrected trusted_pattern)
 
