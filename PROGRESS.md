@@ -33,10 +33,12 @@ Differential acceptance: pre-existing suites must be byte-identical after implem
 - test-cases.xml 487/487 ✓ · adhoc 63/63 ✓ (+24) · var-assignment 63/64 ✓ (same pre-existing test-14 fail) · fullpath 20/20 ✓ · redirect-normal 20/25 ✓ · redirect-strict 24/25 ✓ · trustedpattern 1/6 ✓ · new-samples 14/14 ✓ · fullpipe 19/19 ✓
 
 ## Current Step
-P10: finalize docs, final review, merge back to fix-var-assignment-detection.
+DONE — ast-arbiter merged into master (merge commit d97c272). All suites verified green on master after merge.
 
 ## Next Steps
-- Mark spec approved; merge ast-arbiter branch; clean up worktrees (ast-safe-expressions, probe-f84bf50).
+- Optional: push master to origin (not done — awaiting user decision).
+- Optional: fast-forward fix-var-assignment-detection to master (it is exactly one merge behind; `git checkout fix-var-assignment-detection; git merge master`).
+- Optional: delete the merged ast-arbiter branch.
 
 ## Blockers / Notes
 - Pre-existing issues found (not caused by this work, flagged to user): test-cases.var-assignment #14 ($x = git add . — config lists git add read_only but test expects ask); redirect/trustedpattern suites have environment-dependent reds.
