@@ -78,6 +78,13 @@ function Resolve-Command {
     }
 
     # -------------------------------------------------
+    # Safe-expression synthetic marker from Parser.ps1
+    # -------------------------------------------------
+    if ($Command -eq '(safe expression)') {
+        return New-ResolutionResult -Decision "allow" -Reason "safe expression" -MatchedPattern $null -Risk "none"
+    }
+
+    # -------------------------------------------------
     # Step 0: Normalize domain name to lowercase, then case-insensitive lookup
     # -------------------------------------------------
     $domainLower = $Domain.ToLowerInvariant()
@@ -197,7 +204,10 @@ function Resolve-Command {
             }
         }
         $awsNormalized = ($awsFiltered -join ' ').Trim()
-        if ($awsNormalized -ne $Command.Trim()) {
+        # Guard: stripping must leave at least a service + operation (2+ tokens).
+        # If it would leave bare "aws" (e.g., "aws --version"), keep the original
+        # command so explicit read_only entries like "aws --version" can match.
+        if ($awsNormalized -ne $Command.Trim() -and ($awsNormalized -split '\s+').Count -ge 2) {
             return Resolve-Command -Command $awsNormalized -Domain $Domain -Config $Config
         }
     }
@@ -570,8 +580,13 @@ function Resolve-Command {
             return New-ResolutionResult -Decision "allow" -Reason "$firstWord $($innerResult.Reason) (after var assignment)" -MatchedPattern $firstWord -Risk "none"
         }
 
-        # 2.5h: Standalone heredoc delimiters / markers (single bare word, no args)
-        if ($Command.Trim() -notmatch '\s') {
+        # 2.5h: Standalone heredoc delimiters / markers (single bare word, no args).
+        # Keeps allowing whitespace-free tokens ($true, $i++, }, EOF, ...).
+        # Excludes .NET/method invocations — anything with parens or '::' such as
+        # [Type]::Method(...), $var.Method(), $proc.Kill() — which must fall
+        # through to normal classification.
+        $bareToken = $Command.Trim()
+        if ($bareToken -notmatch '\s' -and $bareToken -notmatch '[()]' -and $bareToken -notmatch '::') {
             return New-ResolutionResult -Decision "allow" -Reason "$firstWord (heredoc delimiter or marker)" -MatchedPattern $firstWord -Risk "none"
         }
 

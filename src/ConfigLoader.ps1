@@ -131,13 +131,19 @@ function Test-ConfigSchema {
 
     # Default editable_paths if missing, compile into _editablePathRegex (string;
     # used with PowerShell's case-insensitive -match, like _systemPathRegex).
-    # _editablePathsEnabled is true only when patterns are declared (opt-in).
+    # Structure mirrors system_paths {linux, windows}, BUT both sides are treated
+    # as raw regex (unlike system_paths, linux is NOT escaped to a literal) so
+    # users can use regex on linux paths too. _editablePathsEnabled is true only
+    # when at least one pattern is declared (opt-in).
     if (-not (Get-Member -InputObject $Config -Name 'editable_paths' -MemberType NoteProperty)) {
-        $Config | Add-Member -MemberType NoteProperty -Name 'editable_paths' -Value ([PSCustomObject]@{patterns=@()}) -Force
+        $Config | Add-Member -MemberType NoteProperty -Name 'editable_paths' -Value ([PSCustomObject]@{linux=@();windows=@()}) -Force
     }
     $editablePatterns = @()
-    if ($Config.editable_paths.patterns) {
-        foreach ($p in $Config.editable_paths.patterns) { $editablePatterns += $p.ToString() }
+    if ($Config.editable_paths.linux) {
+        foreach ($p in $Config.editable_paths.linux) { $editablePatterns += $p.ToString() }
+    }
+    if ($Config.editable_paths.windows) {
+        foreach ($p in $Config.editable_paths.windows) { $editablePatterns += $p.ToString() }
     }
     $editableRegex = if ($editablePatterns.Count -gt 0) { '^(' + ($editablePatterns -join '|') + ')' } else { '^\b$' }
     $Config | Add-Member -MemberType NoteProperty -Name '_editablePathRegex' -Value $editableRegex -Force
@@ -171,6 +177,27 @@ function Test-ConfigSchema {
     $sysRegex = if ($allPatterns.Count -gt 0) { '^(' + ($allPatterns -join '|') + ')' } else { '^\b$' }
     $Config | Add-Member -MemberType NoteProperty -Name '_systemPathRegex' -Value $sysRegex -Force
     try { $null = [regex]::new($sysRegex) } catch { throw "Invalid system_paths regex: $sysRegex" }
+
+    # safe_expressions: .NET method allowlist for the safe-expression certifier.
+    # Optional; defaults to a built-in conservative list when absent.
+    $defaultDotNetMethods = @(
+        'readalltext','readalllines','readlines','openread',
+        'substring','split','replace','tostring','toupper','tolower',
+        'trim','trimstart','trimend','contains','startswith','endswith',
+        'indexof','lastindexof','padleft','padright',
+        'max','min','abs','round','floor','ceiling','sqrt','pow',
+        'compare','equals','gethashcode','gettype'
+    )
+    $methodNames = $defaultDotNetMethods
+    $hasSafeExprs = Get-Member -InputObject $Config -Name 'safe_expressions' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasSafeExprs -and $Config.safe_expressions -and
+        (Get-Member -InputObject $Config.safe_expressions -Name 'dotnet_method_allowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $Config.safe_expressions.dotnet_method_allowlist) {
+        $methodNames = @($Config.safe_expressions.dotnet_method_allowlist | ForEach-Object { "$_".ToLowerInvariant() })
+    }
+    $methodSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($m in $methodNames) { [void]$methodSet.Add($m) }
+    $Config | Add-Member -MemberType NoteProperty -Name '_dotnetMethodAllowlist' -Value $methodSet -Force
 
     # Validate regex patterns in trusted_pattern compile successfully
     foreach ($pattern in $Config.trusted_pattern) {
