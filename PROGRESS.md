@@ -13,6 +13,7 @@ Design and ship an LLM-facing guidance artifact (shared file + skill) that teach
   - Differential: test-cases 487/487, var-assignment 63/64, fullpath 20/20, redirect-normal 20/25, redirect-strict 24/25, trustedpattern 1/6, new-samples 14/14, fullpipe 19/19 — all byte-identical to baseline.
   - Bugs found & fixed: `.\gradlew` regex-invalid (hook fail-closed blocked all tools; user repaired manually); gh entries initially in unreachable GitHub_CLI domain → moved into Linux fallback domain; bare `adb logcat` pattern shadowed the -c lookahead (dropped).
   - Commits: faafc9b (config+tests), fe2ed1a (guidance.md, hook-friendly-commands/SKILL.md, README.md).
+- File-tool write gating (3061538): Write/Edit/MultiEdit/NotebookEdit + Copilot file tools intercepted, mapped to path fields. trusted = writable roots (temp, C:\git) with exe-extension guard; untrusted = catch-all outside roots + linux system dirs. KEY DISCOVERY: zero-command fallback auto-allows bare paths not in untrusted — the catch-all is what makes outside-root writes ask. All 9 suites byte-identical; live hook smoke matrix verified (8 cases).
 
 ## Current Step
 DONE — implementation complete on branch agent-command-guidelines. Awaiting merge decision.
