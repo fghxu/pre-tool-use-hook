@@ -58,15 +58,22 @@
     "get-childitem", "get-content", "get-process", "get-service", "get-item",
     "adb", "unzip", "javap", "gradlew"
   ],
-
-  "trusted_pattern": [
-	"^trusted_stuff\\s+$"
-  ],
+  
+  
   "untrusted_pattern": [
 	  "^untrusted_stuff.*$",
-	  "^untrusted_stuff\\s+$"
+	  "^untrusted_stuff\\s+$",
+	  "^(?![A-Za-z]:\\\\temp\\\\|[Cc]:\\\\git\\\\)[A-Za-z]:\\\\(?!.*\\.(exe|bat|cmd|com|msi|scr)\\b).*$",
+	  "^/(etc|var|boot|sys|proc|opt)/",
+	  "^/usr/(?!bin/|sbin/)"
   ],
-
+  "trusted_pattern": [
+	"^trusted_stuff\\s+$",
+	"^[A-Za-z]:\\\\temp\\\\(?!.*\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar)\\b).*$",
+	"^/tmp/(?!.*\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar)\\b).*$",
+	"^[Cc]:\\\\git\\\\(?!.*\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar)\\b).*$"
+  ],
+  
   "intercept_tool_name": [
 		"send_to_terminal",
 		"apply_patch",
@@ -82,14 +89,25 @@
 		"vscode_get_confirmation",
 		"vscode_get_confirmation_with_options",
 		"vscode_get_terminal_confirmation",
+		"create_file",
+		"create_directory",
+		"create_new_workspace",
+		"create_new_jupyter_notebook",
+		"edit_notebook_file",
+		"replace_string_in_file",
+		"multi_replace_string_in_file",
+		"insert_edit_into_file",
 			
 		
 		"Bash",
-		"PowerShell"
+		"PowerShell",
+		"Write",
+		"NotebookEdit",
+		"Edit",
+		"MultiEdit"
   ],
   "ignore_tool_name": [
   
-		"create_file",
 
 		"mcp__mobile__ui",
 		"mcp__mobile__screen",
@@ -98,13 +116,6 @@
 		"mcp__mobile__system",
 		"mcp__mobile__flow",
 
-		"create_directory",
-		"replace_string_in_file",
-		"create_new_workspace",
-		"create_new_jupyter_notebook",
-		"insert_edit_into_file",
-		"edit_notebook_file",
-		"multi_replace_string_in_file",
 		"execution_subagent",
 		"get_vscode_api",
 		"get_project_setup_info",
@@ -140,7 +151,7 @@
 		"mcp__brave-search__brave_web_search",
 
 	  
-		"Edit",
+		
 		"Explore",
 		"AskUserQuestion",
 		"CronCreate",
@@ -162,9 +173,9 @@
 		"ToolSearch",
 		"WebFetch",
 		"WebSearch",
-		"Write",
+		
 		"ExitPlanMode",
-		"NotebookEdit",
+		
 		"TaskStop",
 		"Agent",
 		"ScheduleWakeup"
@@ -174,7 +185,20 @@
   "tool_name_mapping": {
     "run_in_terminal": "tool_input.command",
     "send_to_terminal": "tool_input.command",
-    "Bash": "tool_input.command"
+    "Bash": "tool_input.command",
+	"Write": "tool_input.file_path",
+	"PowerShell": "tool_input.command",
+	"Edit": "tool_input.file_path",
+	"MultiEdit": "tool_input.file_path",
+	"NotebookEdit": "tool_input.notebook_path",
+	"create_file": "tool_input.filePath",
+	"replace_string_in_file": "tool_input.filePath",
+	"multi_replace_string_in_file": "tool_input.filePath",
+	"insert_edit_into_file": "tool_input.filePath",
+	"edit_notebook_file": "tool_input.filePath",
+	"create_new_jupyter_notebook": "tool_input.filePath",
+	"create_directory": "tool_input.dirPath",
+	"create_new_workspace": "tool_input.workspacePath"
   },
 
   "dry_run_flags": {
