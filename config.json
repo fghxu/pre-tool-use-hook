@@ -63,15 +63,18 @@
   "untrusted_pattern": [
 	  "^untrusted_stuff.*$",
 	  "^untrusted_stuff\\s+$",
-	  "^(?![A-Za-z]:\\\\temp\\\\|[Cc]:\\\\git\\\\)[A-Za-z]:\\\\(?!.*\\.(exe|bat|cmd|com|msi|scr)\\b).*$",
+	  "^[A-Za-z]:[/\\\\].*\\.\\.[/\\\\]",
+	  "^/.*\\.\\.[/\\\\]",
+	  "^(?![A-Za-z]:[/\\\\][Tt][Ee][Mm][Pp][/\\\\]|[Cc]:[/\\\\][Gg][Ii][Tt][/\\\\])[A-Za-z]:[/\\\\](?!.*(?i:\\.(exe|bat|cmd|com|msi|scr))\\b).*$",
+	  "^[A-Za-z]:[/\\\\](?!.*(?i:System32|Program Files)).*(?i:\\.(exe|bat|cmd|com|msi|scr))\\b.*$",
 	  "^/(etc|var|boot|sys|proc|opt)/",
 	  "^/usr/(?!bin/|sbin/)"
   ],
   "trusted_pattern": [
 	"^trusted_stuff\\s+$",
-	"^[A-Za-z]:\\\\temp\\\\(?!.*\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar)\\b).*$",
-	"^/tmp/(?!.*\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar)\\b).*$",
-	"^[Cc]:\\\\git\\\\(?!.*\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar)\\b).*$"
+	"^[A-Za-z]:[/\\\\][Tt][Ee][Mm][Pp][/\\\\](?!.*(?i:\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar))\\b).*$",
+	"^/[Tt][Mm][Pp]/(?!.*(?i:\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar))\\b).*$",
+	"^[Cc]:[/\\\\][Gg][Ii][Tt][/\\\\](?!.*(?i:\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar))\\b).*$"
   ],
   
   "intercept_tool_name": [

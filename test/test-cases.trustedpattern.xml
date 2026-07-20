@@ -51,7 +51,331 @@ done]]></copilot-command>
     </test-case>
 
   </category-group>
-  
-  
+
+  <!-- =================================================================== -->
+  <!-- File-Tool Write Gating (2026-07-20)                                  -->
+  <!-- Coverage for config-only file-tool interception: trusted_pattern     -->
+  <!-- writable roots (temp, C:\git) with executable-extension guard;       -->
+  <!-- untrusted_pattern catch-all outside roots + traversal guard.         -->
+  <!-- Cases marked [RESIDUAL] pin known config-only limits deliberately.   -->
+  <!-- =================================================================== -->
+
+  <category-group name="TP-Write-Windows">
+    <test-case expected="allow" reason="trusted: temp root" category="TP-Write-Windows">
+      <description>Write C:\temp\notes.txt — trusted temp root</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\temp\\notes.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="trusted: temp root any drive" category="TP-Write-Windows">
+      <description>Write D:\temp\log.md — trusted temp root on D:</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"D:\\temp\\log.md"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="trusted: temp root case-tolerant" category="TP-Write-Windows">
+      <description>Write C:\Temp\mixed.txt — root name case-tolerant</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Temp\\mixed.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="trusted: C:\git root" category="TP-Write-Windows">
+      <description>Write C:\git\repo\file.md — trusted project root</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\git\\repo\\file.md"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="trusted: C:\git lowercase drive" category="TP-Write-Windows">
+      <description>Write c:\git\repo\file2.md — lowercase drive letter</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"c:\\git\\repo\\file2.md"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="exe-guard then zero-command: ps1 inside root allows" category="TP-Write-Windows">
+      <description>Write C:\git\repo\script.ps1 — exe-guard blocks trusted shortcut; zero-command fallback allows (pinned behavior inside writable root)</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\git\\repo\\script.ps1"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="untrusted catch-all: system dir" category="TP-Write-Windows">
+      <description>Write C:\Windows\evil.dll — untrusted catch-all asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\evil.dll"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="untrusted catch-all: Program Files" category="TP-Write-Windows">
+      <description>Write C:\Program Files\app\cfg.ini — untrusted catch-all asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Program Files\\app\\cfg.ini"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="untrusted catch-all: user profile outside roots" category="TP-Write-Windows">
+      <description>Write C:\Users\fghxu\doc.txt — outside writable roots asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Users\\fghxu\\doc.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="untrusted catch-all: non-trusted drive" category="TP-Write-Windows">
+      <description>Write D:\work\notes.txt — non-trusted drive asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"D:\\work\\notes.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="exe write inside temp root asks" category="TP-Write-Windows">
+      <description>Write C:\temp\evil.exe — exe-guard blocks trusted; full-path strip sees unknown exe; asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\temp\\evil.exe"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="trusted: forward-slash separators" category="TP-Write-Windows">
+      <description>Write C:/temp/fwdslash.txt — forward-slash tolerant trusted root</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:/temp/fwdslash.txt"}</tool-input-json>
+    </test-case>
+  </category-group>
+
+  <category-group name="TP-Write-Linux">
+    <test-case expected="allow" reason="trusted: /tmp root" category="TP-Write-Linux">
+      <description>Write /tmp/scratch.txt — trusted /tmp</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"/tmp/scratch.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="untrusted: /etc" category="TP-Write-Linux">
+      <description>Write /etc/cron.d/evil — /etc asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"/etc/cron.d/evil"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="untrusted: /var" category="TP-Write-Linux">
+      <description>Write /var/www/index.html — /var asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"/var/www/index.html"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="untrusted: /usr/share" category="TP-Write-Linux">
+      <description>Write /usr/share/doc/readme.md — /usr minus bin/sbin asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"/usr/share/doc/readme.md"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="[RESIDUAL] /usr/bin excluded for exec classification" category="TP-Write-Linux">
+      <description>Write /usr/bin/evil — allows via zero-command (documented residual: /usr/bin excluded so full-path binary exec classifies read-only)</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"/usr/bin/evil"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="[RESIDUAL] /home not in untrusted list" category="TP-Write-Linux">
+      <description>Write /home/user/notes.txt — allows via zero-command (documented residual: /home not covered)</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"/home/user/notes.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="untrusted: /opt" category="TP-Write-Linux">
+      <description>Write /opt/app/config.yml — /opt asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"/opt/app/config.yml"}</tool-input-json>
+    </test-case>
+  </category-group>
+
+  <category-group name="TP-EditFamily">
+    <test-case expected="ask" reason="Edit: system dir asks" category="TP-EditFamily">
+      <description>Edit C:\Windows\sys.ini — Edit tool gated</description>
+      <tool-name>Edit</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\sys.ini","old_string":"a","new_string":"b"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="Edit: temp root allows" category="TP-EditFamily">
+      <description>Edit C:\temp\ok.txt — Edit tool trusted</description>
+      <tool-name>Edit</tool-name>
+      <tool-input-json>{"file_path":"C:\\temp\\ok.txt","old_string":"a","new_string":"b"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="Edit: git root allows" category="TP-EditFamily">
+      <description>Edit C:\git\repo\code.md — Edit tool trusted</description>
+      <tool-name>Edit</tool-name>
+      <tool-input-json>{"file_path":"C:\\git\\repo\\code.md","old_string":"a","new_string":"b"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="Edit: outside roots asks" category="TP-EditFamily">
+      <description>Edit D:\work\x.txt — Edit tool outside roots asks</description>
+      <tool-name>Edit</tool-name>
+      <tool-input-json>{"file_path":"D:\\work\\x.txt","old_string":"a","new_string":"b"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="MultiEdit: system dir asks" category="TP-EditFamily">
+      <description>MultiEdit C:\Windows\sys.ini — MultiEdit gated</description>
+      <tool-name>MultiEdit</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\sys.ini","edits":[]}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="MultiEdit: temp root allows" category="TP-EditFamily">
+      <description>MultiEdit C:\temp\ok.txt — MultiEdit trusted</description>
+      <tool-name>MultiEdit</tool-name>
+      <tool-input-json>{"file_path":"C:\\temp\\ok.txt","edits":[]}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="MultiEdit: git root allows" category="TP-EditFamily">
+      <description>MultiEdit C:\git\repo\code.md — MultiEdit trusted</description>
+      <tool-name>MultiEdit</tool-name>
+      <tool-input-json>{"file_path":"C:\\git\\repo\\code.md","edits":[]}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="NotebookEdit: git root allows" category="TP-EditFamily">
+      <description>NotebookEdit C:\git\repo\nb.ipynb — notebook_path mapping</description>
+      <tool-name>NotebookEdit</tool-name>
+      <tool-input-json>{"notebook_path":"C:\\git\\repo\\nb.ipynb","cell_id":"1","new_source":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="NotebookEdit: system dir asks" category="TP-EditFamily">
+      <description>NotebookEdit C:\Windows\nb.ipynb — NotebookEdit gated</description>
+      <tool-name>NotebookEdit</tool-name>
+      <tool-input-json>{"notebook_path":"C:\\Windows\\nb.ipynb","cell_id":"1","new_source":"x"}</tool-input-json>
+    </test-case>
+  </category-group>
+
+  <category-group name="TP-CopilotTools">
+    <test-case expected="ask" reason="create_file: system dir asks" category="TP-CopilotTools">
+      <description>create_file C:\Windows\new.dll — Copilot file tool gated (filePath mapping)</description>
+      <tool-name>create_file</tool-name>
+      <tool-input-json>{"filePath":"C:\\Windows\\new.dll","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="create_file: temp root allows" category="TP-CopilotTools">
+      <description>create_file C:\temp\ok.txt — Copilot file tool trusted</description>
+      <tool-name>create_file</tool-name>
+      <tool-input-json>{"filePath":"C:\\temp\\ok.txt","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="create_file: git root allows" category="TP-CopilotTools">
+      <description>create_file C:\git\repo\new.md — Copilot file tool trusted</description>
+      <tool-name>create_file</tool-name>
+      <tool-input-json>{"filePath":"C:\\git\\repo\\new.md","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="replace_string_in_file: system dir asks" category="TP-CopilotTools">
+      <description>replace_string_in_file C:\Windows\x.ini — gated</description>
+      <tool-name>replace_string_in_file</tool-name>
+      <tool-input-json>{"filePath":"C:\\Windows\\x.ini","oldString":"a","newString":"b"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="replace_string_in_file: git root allows" category="TP-CopilotTools">
+      <description>replace_string_in_file C:\git\repo\x.md — trusted</description>
+      <tool-name>replace_string_in_file</tool-name>
+      <tool-input-json>{"filePath":"C:\\git\\repo\\x.md","oldString":"a","newString":"b"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="multi_replace_string_in_file: temp root allows" category="TP-CopilotTools">
+      <description>multi_replace_string_in_file C:\temp\x.txt — trusted</description>
+      <tool-name>multi_replace_string_in_file</tool-name>
+      <tool-input-json>{"filePath":"C:\\temp\\x.txt","replacements":[]}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="insert_edit_into_file: outside roots asks" category="TP-CopilotTools">
+      <description>insert_edit_into_file D:\work\x.txt — gated</description>
+      <tool-name>insert_edit_into_file</tool-name>
+      <tool-input-json>{"filePath":"D:\\work\\x.txt","edits":[]}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="edit_notebook_file: git root allows" category="TP-CopilotTools">
+      <description>edit_notebook_file C:\git\repo\nb.ipynb — trusted</description>
+      <tool-name>edit_notebook_file</tool-name>
+      <tool-input-json>{"filePath":"C:\\git\\repo\\nb.ipynb","edits":[]}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="create_new_jupyter_notebook: system dir asks" category="TP-CopilotTools">
+      <description>create_new_jupyter_notebook C:\Windows\nb.ipynb — gated</description>
+      <tool-name>create_new_jupyter_notebook</tool-name>
+      <tool-input-json>{"filePath":"C:\\Windows\\nb.ipynb"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="create_directory: temp root allows" category="TP-CopilotTools">
+      <description>create_directory C:\temp\newdir — dirPath mapping</description>
+      <tool-name>create_directory</tool-name>
+      <tool-input-json>{"dirPath":"C:\\temp\\newdir"}</tool-input-json>
+    </test-case>
+  </category-group>
+
+  <category-group name="TP-CmdPaths">
+    <test-case expected="ask" reason="exe-guard: Bash exe in temp not auto-allowed" category="TP-CmdPaths">
+      <description>Bash C:\temp\tool.exe — exe-guard blocks trusted shortcut, full-path exe unknown; asks</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[C:\temp\tool.exe]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="[RESIDUAL] Bash ps1 in temp allows via zero-command" category="TP-CmdPaths">
+      <description>Bash C:\temp\tool.ps1 — exe-guard blocks trusted; .ps1 path not command-stripped; zero-command allows (documented residual)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[C:\temp\tool.ps1]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="exe-guard: Bash bat in git root asks" category="TP-CmdPaths">
+      <description>Bash C:\git\repo\run.bat — exe-guard blocks trusted; asks</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[C:\git\repo\run.bat]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="[RESIDUAL] Bash sh in temp allows via zero-command" category="TP-CmdPaths">
+      <description>Bash D:\temp\run.sh — exe-guard blocks trusted; zero-command allows (documented residual)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[D:\temp\run.sh]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="fullpath strip: system binary read-only" category="TP-CmdPaths">
+      <description>Bash C:\Windows\System32\tasklist.exe — fullpath strip classifies tasklist read-only</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[C:\Windows\System32\tasklist.exe]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="fullpath strip: findstr with args read-only" category="TP-CmdPaths">
+      <description>Bash C:\Windows\System32\findstr.exe with args — fullpath strip read-only</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[C:\Windows\System32\findstr.exe /s foo C:\temp\*.log]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="fullpath strip: linux binary read-only" category="TP-CmdPaths">
+      <description>Bash /usr/bin/grep — /usr/bin excluded from untrusted so exec classifies read-only</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[/usr/bin/grep foo /var/log/syslog]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="untrusted: init script by path asks" category="TP-CmdPaths">
+      <description>Bash /etc/init.d/nginx start — starts with /etc; untrusted asks</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[/etc/init.d/nginx start]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="[RESIDUAL] PowerShell ps1 path allows via zero-command" category="TP-CmdPaths">
+      <description>PowerShell C:\temp\script.ps1 — exe-guard blocks trusted; zero-command allows (documented residual)</description>
+      <tool-name>PowerShell</tool-name>
+      <copilot-command><![CDATA[C:\temp\script.ps1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="normal cmdlet unaffected by path patterns" category="TP-CmdPaths">
+      <description>PowerShell Get-ChildItem C:\Windows — command starts with cmdlet; anchors don't fire</description>
+      <tool-name>PowerShell</tool-name>
+      <copilot-command><![CDATA[Get-ChildItem C:\Windows]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="path mid-command unaffected" category="TP-CmdPaths">
+      <description>Bash ls C:\temp — path not at start; anchored patterns don't fire</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[ls C:\temp]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="redirect to system path asks (pre-existing rule intact)" category="TP-CmdPaths">
+      <description>Bash echo hi > C:\Windows\x.txt — redirect system_paths rule still works alongside new patterns</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[echo hi > C:\Windows\x.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="redirect to editable path allows (pre-existing rule intact)" category="TP-CmdPaths">
+      <description>Bash echo hi > C:\temp\x.txt — redirect editable_paths rule unaffected</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[echo hi > C:\temp\x.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Set-Content to system path asks via verb classification" category="TP-CmdPaths">
+      <description>PowerShell Set-Content C:\Windows\x.txt — cmdlet write classified by verb, not new patterns</description>
+      <tool-name>PowerShell</tool-name>
+      <copilot-command><![CDATA[Set-Content -Path C:\Windows\x.txt -Value "x"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="TP-Edge">
+    <test-case expected="ask" reason="traversal guard: git root escaping to Windows" category="TP-Edge">
+      <description>Write C:\git\..\Windows\evil.txt — traversal segment asks despite git prefix</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\git\\..\\Windows\\evil.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="traversal guard: Windows escaping to temp" category="TP-Edge">
+      <description>Write C:\Windows\..\temp\ok.txt — traversal segment asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\..\\temp\\ok.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="case-tolerant: uppercase TEMP root" category="TP-Edge">
+      <description>Write C:\TEMP\upper.txt — root name case-tolerant trusted</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\TEMP\\upper.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="spaces in path under trusted root" category="TP-Edge">
+      <description>Write C:\git\my repo\space file.txt — spaces under trusted root</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\git\\my repo\\space file.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="[RESIDUAL] relative path allows via zero-command" category="TP-Edge">
+      <description>Write notes.txt (relative) — anchored patterns don't fire; zero-command allows (documented residual; tools send absolute paths in practice)</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"notes.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="[RESIDUAL] extended path prefix bypasses anchors" category="TP-Edge">
+      <description>Write \\?\C:\Windows\x — extended-length prefix doesn't match anchors; zero-command allows (documented residual)</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"\\\\?\\C:\\Windows\\x"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="case-insensitive exe-guard: FILE.EXE in temp asks" category="TP-Edge">
+      <description>Bash C:\temp\FILE.EXE — (?i:) exe-guard catches uppercase extension; asks</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[C:\temp\FILE.EXE]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="untrusted exe pattern: Write .exe into system dir asks" category="TP-Edge">
+      <description>Write C:\Windows\notepad.exe — untrusted exe pattern asks (exe paths outside System32/Program Files)</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\notepad.exe"}</tool-input-json>
+    </test-case>
+  </category-group>
 
 </commands>
