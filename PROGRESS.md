@@ -23,6 +23,8 @@ DONE — implementation complete on branch agent-command-guidelines. Awaiting me
 - Merge agent-command-guidelines → master (per finishing-a-development-branch options).
 - Optional: install guidance — add `@C:\git\cc\pretoolhook\docs\agent-command-guidelines\guidance.md` to ~/.claude/CLAUDE.md; paste guidance.md into ~/.copilot/AGENTS.md and ~/.codex/AGENTS.md.
 - Optional: push to origin.
+- Reference docs written: docs/config-json-guide.md (block-by-block config reference + editing checklist), docs/trusted-untrusted-patterns.md (gate semantics, entry-by-entry rationale, add-entry samples, residual holes).
+- Next-spec candidate: classifier path-branch for file tools (canonicalize path, check system_paths/editable_paths directly, default non-listed to ask) — kills the [RESIDUAL] holes and the regex duplication.
 
 ## Blockers / Notes
 - Meta-validation: a broken config.json makes the hook fail-closed on ALL tool calls (total agent deadlock). Fail-safe by design, but worth a future "config lint" guard before writes.
