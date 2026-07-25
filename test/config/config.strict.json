@@ -243,6 +243,7 @@
   "commands": {
 
     "DOS_CMD": {
+      "modifying_strictness": "normal",
       "description": "DOS / Windows CMD commands",
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
@@ -321,6 +322,7 @@
     },
 
     "PowerShell": {
+      "modifying_strictness": "normal",
       "description": "PowerShell cmdlets — classified primarily by approved verb",
       "_comment_tiers": "Explicit read_only/modifying pattern entries (if present) decide first; otherwise the cmdlet verb decides: read_only_verbs => allow, modifying_verbs => ask by risk tier (low/medium/high). strictness_gated covers explicit command patterns only, not verb tiers. Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Compare-*", "Group-*", "Format-*", "ForEach-*", "Out-GridView", "Write-Host", "Write-Output", "Write-Information", "Write-Verbose", "Write-Debug", "Write-Warning", "Read-Host", "Show-*", "Trace-*", "Wait-*", "Connect-*", "Disconnect-*", "Receive-*", "Start-Sleep"],
@@ -397,6 +399,7 @@
     },
 
     "Linux": {
+      "modifying_strictness": "normal",
       "description": "Linux / Bash / Zsh commands",
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
@@ -539,6 +542,7 @@
     },
 
     "Git": {
+      "modifying_strictness": "normal",
       "description": "Git version control commands",
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "_comment_gated": "strictness_gated below: git add, pull, commit, switch, init, clone, tag -d, worktree add, rev-parse, stash — allow in normal/loose, ask in strict.",
@@ -588,6 +592,7 @@
     },
 
     "Terraform": {
+      "modifying_strictness": "normal",
       "description": "HashiCorp Terraform IaC commands",
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
@@ -627,6 +632,7 @@
     },
 
     "Docker": {
+      "modifying_strictness": "normal",
       "description": "Docker and Docker Compose commands",
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
@@ -680,6 +686,7 @@
     },
 
     "Kubernetes": {
+      "modifying_strictness": "normal",
       "description": "Kubernetes kubectl and Helm commands",
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
@@ -731,6 +738,7 @@
     },
 
     "AWS_CLI": {
+      "modifying_strictness": "normal",
       "description": "AWS CLI commands — classified by service and operation verb",
       "_comment_tiers": "The operation verb is matched against read_only_prefixes => allow, modifying_prefixes => ask by risk tier; unmatched operations ask. In normal strictness, --flags are stripped before classification so only service + operation decide (disabled in strict mode). Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-"],

@@ -166,10 +166,10 @@ parameter_commands unrecognized-value handling (asks unless effectively loose).
 Path policy (`system_paths` / `editable_paths` / CWD) is cross-domain and always
 uses the **global** value.
 
-Shipped config sets no per-domain strictness (everything inherits normal), so
-default behavior only changes when you opt a domain in. To force one domain,
-add e.g. `"modifying_strictness": "strict"` inside `commands.Git` — see the fixture
-`test/config/config.git-strict.json` for a working example.
+Every shipped domain carries an explicit `"modifying_strictness": "normal"` (same
+effect as inheriting normal) so the knob is visible exactly where you would change
+it. To force one domain, flip that line to `"strict"` — e.g. inside `commands.Git`;
+see the fixture `test/config/config.git-strict.json` for a working example.
 
 ## 11. Editing checklist (any config change)
 
