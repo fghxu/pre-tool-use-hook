@@ -71,6 +71,10 @@
 	  "^/usr/(?!bin/|sbin/)"
   ],
   "trusted_pattern": [
+	  "src.Parser.ps1",
+	  "src.TestRunner.ps1",
+	  "src.ConfigLoader.ps1",
+	  "C..git.cc.pretoolhook",
 	"^trusted_stuff\\s+$",
 	"^[A-Za-z]:[/\\\\][Tt][Ee][Mm][Pp][/\\\\](?!.*(?i:\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar))\\b).*$",
 	"^/[Tt][Mm][Pp]/(?!.*(?i:\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar))\\b).*$",

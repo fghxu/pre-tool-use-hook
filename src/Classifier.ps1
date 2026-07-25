@@ -261,6 +261,44 @@ function Invoke-Classify {
     }
 
     # =========================================================================
+    # STEP 1.5: File-tool path-branch — write targets decided by path policy
+    # (system_paths / editable_paths / CWD / strictness), not the command DB.
+    # =========================================================================
+    $pathMapping = $null
+    if (Get-Member -InputObject $Config -Name 'path_tool_mapping' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $pathMapping = $Config.path_tool_mapping
+    }
+    if ($pathMapping -and ($pathMapping.PSObject.Properties.Name -contains $toolName)) {
+        $fieldPath = $pathMapping.$toolName
+        $writePath = Get-InputFieldValue -RawInput $RawInput -FieldPath $fieldPath
+        if (-not $writePath) {
+            return (Repair-ResultProperties ([PSCustomObject]@{
+                Decision    = "ask"
+                Reason      = "file-tool path not extractable ($toolName)"
+                ExitCode    = 2
+                IDE         = $IDE
+                ToolName    = $toolName
+                Command     = ""
+                SubResults  = @()
+                IsSkipped   = $false
+                IsUnknown   = $false
+            }))
+        }
+        $policy = Resolve-PathPolicy -Path $writePath -Config $Config -Verb 'file write to'
+        return (Repair-ResultProperties ([PSCustomObject]@{
+            Decision    = $policy.Decision
+            Reason      = $policy.Reason
+            ExitCode    = if ($policy.Decision -eq "allow") { 0 } else { 2 }
+            IDE         = $IDE
+            ToolName    = $toolName
+            Command     = $writePath
+            SubResults  = @()
+            IsSkipped   = $false
+            IsUnknown   = $false
+        }))
+    }
+
+    # =========================================================================
     # STEP 1: Extract command from input
     # =========================================================================
     $command = Get-CommandFromInput -RawInput $RawInput -Config $Config

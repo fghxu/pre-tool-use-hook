@@ -11,6 +11,8 @@ Design and implement the path-branch: file-tool writes (Write/Edit/Copilot file 
 - File-tool gating (config-only bridge): trusted/untrusted path patterns, 60 trustedpattern cases (suite 61/66), TestRunner tool-name/tool-input-json support.
 - Reference docs: docs/config-json-guide.md, docs/trusted-untrusted-patterns.md.
 - Log scan (2026-07-19): 895 unknowns — 507 (57%) heredoc/message shrapnel, 388 (43%) real commands.
+- Path-branch T3/T4: ConfigLoader path_tool_mapping (3acae30), Resolve-PathPolicy + redirect refactor (a3053e1).
+- Fix (778643f): ConvertTo-CanonicalWritePath handles \\?\UNC\ prefix (fail-open to network share closed) and whitespace-only path guard. Suites verified at baseline.
 
 ## Current Step
 Path-branch spec written and self-reviewed (docs/superpowers/specs/2026-07-25-path-branch-design.md). Awaiting user review before writing-plans.

@@ -1152,11 +1152,17 @@ function Resolve-PathPolicy {
 
     # -- temp paths (low risk) — checked on RAW to preserve /tmp, %TEMP%, $env:TEMP forms --
     if ($raw -match '^/tmp/|^/var/tmp/|^%TEMP%|^%TMP%|^\$env:TEMP|^\$env:TMP') {
-        return [PSCustomObject]@{ Decision = 'allow'; Risk = 'low'; Reason = "redirect to temp path ($raw) (low risk)"; Target = $resolved }
+        # Redirect byte-identity: keep the legacy verb-independent reason for redirects
+        $isRedirect = $Verb -in @('append redirect to','output redirect to')
+        $reason = if ($isRedirect) { "redirect to temp path ($raw) (low risk)" } else { "$Verb $resolved (temp path) (low risk)" }
+        return [PSCustomObject]@{ Decision = 'allow'; Risk = 'low'; Reason = $reason; Target = $resolved }
     }
     # -- system paths (high risk) — checked on CANONICAL (catches \\?\ and ..) --
     if ($Config -and $resolved -match $Config._systemPathRegex) {
-        return [PSCustomObject]@{ Decision = 'ask'; Risk = 'high'; Reason = "redirect to system path ($resolved) (high risk)"; Target = $resolved }
+        # Redirect byte-identity: keep the legacy verb-independent reason for redirects
+        $isRedirect = $Verb -in @('append redirect to','output redirect to')
+        $reason = if ($isRedirect) { "redirect to system path ($resolved) (high risk)" } else { "$Verb $resolved (system path) (high risk)" }
+        return [PSCustomObject]@{ Decision = 'ask'; Risk = 'high'; Reason = $reason; Target = $resolved }
     }
     # -- CWD / editable_paths --
     $writableReason = Test-EditableOrCwd -TargetPath $resolved -Config $Config

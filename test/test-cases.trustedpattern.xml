@@ -53,11 +53,14 @@ done]]></copilot-command>
   </category-group>
 
   <!-- =================================================================== -->
-  <!-- File-Tool Write Gating (2026-07-20)                                  -->
-  <!-- Coverage for config-only file-tool interception: trusted_pattern     -->
-  <!-- writable roots (temp, C:\git) with executable-extension guard;       -->
-  <!-- untrusted_pattern catch-all outside roots + traversal guard.         -->
-  <!-- Cases marked [RESIDUAL] pin known config-only limits deliberately.   -->
+  <!-- Path-Branch Policy (2026-07-25)                                      -->
+  <!-- File-tool writes decided by system_paths / editable_paths / CWD /    -->
+  <!-- strictness via Resolve-PathPolicy (spec 2026-07-25-path-branch-      -->
+  <!-- design.md).                                                          -->
+  <!--                                                                      -->
+  <!-- CWD-dependent cases assume:  -Cwd C:\git\repo                        -->
+  <!-- Run:  src/TestRunner.ps1 -XmlPath test/test-cases.trustedpattern.xml -->
+  <!--       -Cwd C:\git\repo                                               -->
   <!-- =================================================================== -->
 
   <category-group name="TP-Write-Windows">
@@ -76,17 +79,17 @@ done]]></copilot-command>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"C:\\Temp\\mixed.txt"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="trusted: C:\git root" category="TP-Write-Windows">
+    <test-case expected="allow" reason="CWD rule: under current directory" category="TP-Write-Windows">
       <description>Write C:\git\repo\file.md — trusted project root</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"C:\\git\\repo\\file.md"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="trusted: C:\git lowercase drive" category="TP-Write-Windows">
+    <test-case expected="allow" reason="CWD rule: under current directory" category="TP-Write-Windows">
       <description>Write c:\git\repo\file2.md — lowercase drive letter</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"c:\\git\\repo\\file2.md"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="exe-guard then zero-command: ps1 inside root allows" category="TP-Write-Windows">
+    <test-case expected="allow" reason="CWD rule: under current directory" category="TP-Write-Windows">
       <description>Write C:\git\repo\script.ps1 — exe-guard blocks trusted shortcut; zero-command fallback allows (pinned behavior inside writable root)</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"C:\\git\\repo\\script.ps1"}</tool-input-json>
@@ -111,8 +114,8 @@ done]]></copilot-command>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"D:\\work\\notes.txt"}</tool-input-json>
     </test-case>
-    <test-case expected="ask" reason="exe write inside temp root asks" category="TP-Write-Windows">
-      <description>Write C:\temp\evil.exe — exe-guard blocks trusted; full-path strip sees unknown exe; asks</description>
+    <test-case expected="allow" reason="location-only: editable root, no exe guard on writes" category="TP-Write-Windows">
+      <description>Write C:\temp\evil.exe — D4: editable root allows; execution guarded command-side</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"C:\\temp\\evil.exe"}</tool-input-json>
     </test-case>
@@ -144,13 +147,13 @@ done]]></copilot-command>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"/usr/share/doc/readme.md"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="[RESIDUAL] /usr/bin excluded for exec classification" category="TP-Write-Linux">
-      <description>Write /usr/bin/evil — allows via zero-command (documented residual: /usr/bin excluded so full-path binary exec classifies read-only)</description>
+    <test-case expected="ask" reason="fixed: system_paths /usr asks" category="TP-Write-Linux">
+      <description>Write /usr/bin/evil — system_paths /usr now asks (residual fixed)</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"/usr/bin/evil"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="[RESIDUAL] /home not in untrusted list" category="TP-Write-Linux">
-      <description>Write /home/user/notes.txt — allows via zero-command (documented residual: /home not covered)</description>
+    <test-case expected="ask" reason="fixed: default-ask for unlisted paths" category="TP-Write-Linux">
+      <description>Write /home/user/notes.txt — default-ask (residual fixed)</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"/home/user/notes.txt"}</tool-input-json>
     </test-case>
@@ -172,7 +175,7 @@ done]]></copilot-command>
       <tool-name>Edit</tool-name>
       <tool-input-json>{"file_path":"C:\\temp\\ok.txt","old_string":"a","new_string":"b"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="Edit: git root allows" category="TP-EditFamily">
+    <test-case expected="allow" reason="CWD rule: under current directory" category="TP-EditFamily">
       <description>Edit C:\git\repo\code.md — Edit tool trusted</description>
       <tool-name>Edit</tool-name>
       <tool-input-json>{"file_path":"C:\\git\\repo\\code.md","old_string":"a","new_string":"b"}</tool-input-json>
@@ -192,12 +195,12 @@ done]]></copilot-command>
       <tool-name>MultiEdit</tool-name>
       <tool-input-json>{"file_path":"C:\\temp\\ok.txt","edits":[]}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="MultiEdit: git root allows" category="TP-EditFamily">
+    <test-case expected="allow" reason="CWD rule: under current directory" category="TP-EditFamily">
       <description>MultiEdit C:\git\repo\code.md — MultiEdit trusted</description>
       <tool-name>MultiEdit</tool-name>
       <tool-input-json>{"file_path":"C:\\git\\repo\\code.md","edits":[]}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="NotebookEdit: git root allows" category="TP-EditFamily">
+    <test-case expected="allow" reason="CWD rule: under current directory" category="TP-EditFamily">
       <description>NotebookEdit C:\git\repo\nb.ipynb — notebook_path mapping</description>
       <tool-name>NotebookEdit</tool-name>
       <tool-input-json>{"notebook_path":"C:\\git\\repo\\nb.ipynb","cell_id":"1","new_source":"x"}</tool-input-json>
@@ -220,7 +223,7 @@ done]]></copilot-command>
       <tool-name>create_file</tool-name>
       <tool-input-json>{"filePath":"C:\\temp\\ok.txt","content":"x"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="create_file: git root allows" category="TP-CopilotTools">
+    <test-case expected="allow" reason="CWD rule: under current directory" category="TP-CopilotTools">
       <description>create_file C:\git\repo\new.md — Copilot file tool trusted</description>
       <tool-name>create_file</tool-name>
       <tool-input-json>{"filePath":"C:\\git\\repo\\new.md","content":"x"}</tool-input-json>
@@ -230,7 +233,7 @@ done]]></copilot-command>
       <tool-name>replace_string_in_file</tool-name>
       <tool-input-json>{"filePath":"C:\\Windows\\x.ini","oldString":"a","newString":"b"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="replace_string_in_file: git root allows" category="TP-CopilotTools">
+    <test-case expected="allow" reason="CWD rule: under current directory" category="TP-CopilotTools">
       <description>replace_string_in_file C:\git\repo\x.md — trusted</description>
       <tool-name>replace_string_in_file</tool-name>
       <tool-input-json>{"filePath":"C:\\git\\repo\\x.md","oldString":"a","newString":"b"}</tool-input-json>
@@ -245,7 +248,7 @@ done]]></copilot-command>
       <tool-name>insert_edit_into_file</tool-name>
       <tool-input-json>{"filePath":"D:\\work\\x.txt","edits":[]}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="edit_notebook_file: git root allows" category="TP-CopilotTools">
+    <test-case expected="allow" reason="CWD rule: under current directory" category="TP-CopilotTools">
       <description>edit_notebook_file C:\git\repo\nb.ipynb — trusted</description>
       <tool-name>edit_notebook_file</tool-name>
       <tool-input-json>{"filePath":"C:\\git\\repo\\nb.ipynb","edits":[]}</tool-input-json>
@@ -341,8 +344,8 @@ done]]></copilot-command>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"C:\\git\\..\\Windows\\evil.txt"}</tool-input-json>
     </test-case>
-    <test-case expected="ask" reason="traversal guard: Windows escaping to temp" category="TP-Edge">
-      <description>Write C:\Windows\..\temp\ok.txt — traversal segment asks</description>
+    <test-case expected="allow" reason="canonicalized: resolves to C:\temp (editable)" category="TP-Edge">
+      <description>Write C:\Windows\..\temp\ok.txt — canonicalizes to C:\temp\ok.txt (editable) allows</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"C:\\Windows\\..\\temp\\ok.txt"}</tool-input-json>
     </test-case>
@@ -351,18 +354,18 @@ done]]></copilot-command>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"C:\\TEMP\\upper.txt"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="spaces in path under trusted root" category="TP-Edge">
-      <description>Write C:\git\my repo\space file.txt — spaces under trusted root</description>
+    <test-case expected="allow" reason="spaces in path under CWD" category="TP-Edge">
+      <description>Write C:\git\repo\space file.txt — spaces under CWD allow</description>
       <tool-name>Write</tool-name>
-      <tool-input-json>{"file_path":"C:\\git\\my repo\\space file.txt"}</tool-input-json>
+      <tool-input-json>{"file_path":"C:\\git\\repo\\space file.txt"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="[RESIDUAL] relative path allows via zero-command" category="TP-Edge">
-      <description>Write notes.txt (relative) — anchored patterns don't fire; zero-command allows (documented residual; tools send absolute paths in practice)</description>
+    <test-case expected="allow" reason="fixed: relative resolved against CWD" category="TP-Edge">
+      <description>Write notes.txt (relative) — anchored to CWD; under-CWD allows</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"notes.txt"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="[RESIDUAL] extended path prefix bypasses anchors" category="TP-Edge">
-      <description>Write \\?\C:\Windows\x — extended-length prefix doesn't match anchors; zero-command allows (documented residual)</description>
+    <test-case expected="ask" reason="fixed: extended prefix canonicalized then system_paths" category="TP-Edge">
+      <description>Write \\?\C:\Windows\x — prefix stripped, C:\Windows system path asks (residual fixed)</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"\\\\?\\C:\\Windows\\x"}</tool-input-json>
     </test-case>
@@ -371,10 +374,53 @@ done]]></copilot-command>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[C:\temp\FILE.EXE]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="untrusted exe pattern: Write .exe into system dir asks" category="TP-Edge">
-      <description>Write C:\Windows\notepad.exe — untrusted exe pattern asks (exe paths outside System32/Program Files)</description>
+    <test-case expected="ask" reason="system_paths: exe write into system dir asks" category="TP-Edge">
+      <description>Write C:\Windows\notepad.exe — system_paths asks (path-branch, not exe pattern)</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"C:\\Windows\\notepad.exe"}</tool-input-json>
+    </test-case>
+  </category-group>
+
+  <category-group name="TP-PathBranch">
+    <test-case expected="ask" reason="D5: other project outside CWD asks" category="TP-PathBranch">
+      <description>Write C:\git\other-project\x.md — not under CWD, not editable; default-ask</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\git\\other-project\\x.md"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="D5: other project via Edit asks" category="TP-PathBranch">
+      <description>Edit C:\git\other-project\x.md — other project asks</description>
+      <tool-name>Edit</tool-name>
+      <tool-input-json>{"file_path":"C:\\git\\other-project\\x.md","old_string":"a","new_string":"b"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="canonicalize: forward slashes under CWD" category="TP-PathBranch">
+      <description>Write C:/git/repo/fwd.txt — slash-unified, under CWD allows</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:/git/repo/fwd.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="canonicalize: .. escapes CWD to other project" category="TP-PathBranch">
+      <description>Write C:\git\repo\..\other-project\x.md — canonicalizes outside CWD; asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\git\\repo\\..\\other-project\\x.md"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="home path never under CWD; default-ask" category="TP-PathBranch">
+      <description>Write ~/notes.txt — ~ never resolves under project CWD; default-ask</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"~/notes.txt"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="create_new_workspace under CWD" category="TP-PathBranch">
+      <description>create_new_workspace C:\git\repo\ws — workspacePath mapping, under CWD</description>
+      <tool-name>create_new_workspace</tool-name>
+      <tool-input-json>{"workspacePath":"C:\\git\\repo\\ws"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="redirect under CWD allows (shared function)" category="TP-PathBranch">
+      <description>Bash echo hi > C:\git\repo\out.txt — redirect uses same Resolve-PathPolicy ladder</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[echo hi > C:\git\repo\out.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="fail-safe: file-tool path not extractable" category="TP-PathBranch">
+      <description>Write with empty tool_input — path not extractable; asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{}</tool-input-json>
     </test-case>
   </category-group>
 
