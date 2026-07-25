@@ -25,11 +25,12 @@ Design and implement the strictness_gated config section + per-domain strictness
 - Fixtures: test/config/config.git-strict.json (Git=strict) + config.strict.json. New suites: test-cases.strictness-gated.{normal,strict,git-strict}.xml.
 
 ## Current Step
-Task 8: docs done (config-json-guide.md §10 strictness_gated + per-domain guard; §9 git-add example corrected). Running full regression battery, then hand back for merge decision.
+ALL 8 plan tasks COMPLETE on branch strictness-gated (070586a..70d292e, 9 commits). Final whole-implementation review: READY TO MERGE. Awaiting explicit user approval to merge to master.
 
 ## Next Steps
 - Merge strictness-gated → master ONLY with explicit user approval.
-- After merge: fixtures must be regenerated from config.json whenever it changes (noted in fixture _comment_fixture).
+- Optional follow-ups (non-blocking, from final review): config.aws-strict.json fixture for AWS-reach differentiating test; make Evaluate-ParameterRules -Domain mandatory.
+- After merge: regenerate fixtures from config.json whenever it changes (noted in fixture _comment_fixture).
 
 ## Blockers / Notes
 - 6 pre-existing test-cases.xml fails are documented (editable_paths populated disables normal-mode fallback for the redirect-non-system cases; git add is read_only).
