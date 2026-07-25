@@ -3,7 +3,7 @@
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
 
   "_readme": "HOW CLASSIFICATION WORKS: every intercepted tool call is decided 'allow' (run without prompting) or 'ask' (prompt the user). Command-running tools (Bash, PowerShell, run_in_terminal, ...) are classified by matching the command string against the per-domain tiers in 'commands' below. File-writing tools (Write, Edit, create_file, ...) are decided by path policy: system_paths always ask; editable_paths and the current working directory subtree auto-approve. Keys starting with '_' are documentation only and are ignored by the loader.",
-  "_readme_tiers": "Per-domain tiers: read_only => allow in every strictness mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => always ask (the 'risk' level is shown in the prompt).",
+  "_readme_tiers": "Per-domain tiers: read_only => allow in every strictness mode | strictness_gated => allow in normal/loose, ask in strict | modifying => always ask (the 'risk' level is shown in the prompt).",
   "_readme_strictness_guard": "modifying_strictness = strict | normal | loose. A global 'strict' or 'loose' FORCES every domain. A per-domain commands.<domain>.modifying_strictness is consulted only when the global value is 'normal'; domains without one inherit 'normal'.",
 
   "log_file_path": "c:\\temp\\logs\\prehook\\",
@@ -11,7 +11,7 @@
 
   "_comment_fixture": "TEST FIXTURE - copy of config.json with global strictness forced to strict. Drives test-cases.redirect-strict.xml without -Strictness. Regenerate from config.json whenever it changes.",
   "modifying_strictness": "strict",
-  "_comment_modifying_strictness": "strict: more prompts (planned strictness_gated entries ask; AWS flag-stripping disabled). loose: fewer prompts (unrecognized parameter_commands values auto-allow). normal: default; also the only global value that lets per-domain modifying_strictness take effect (see _readme_strictness_guard).",
+  "_comment_modifying_strictness": "strict: more prompts (strictness_gated entries ask; AWS flag-stripping disabled). loose: fewer prompts (unrecognized parameter_commands values auto-allow). normal: default; also the only global value that lets per-domain modifying_strictness take effect (see _readme_strictness_guard).",
 
   "editable_paths": {
     "description": "Parent directories where file writes (shell redirects > / >> and file tools like Write/Edit/create_file) are auto-approved when modifying_strictness is normal or loose. The current working directory and its subdirectories are always editable, in every mode.",
@@ -244,7 +244,7 @@
 
     "DOS_CMD": {
       "description": "DOS / Windows CMD commands",
-      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
 
         { "name": "nvidia-smi",      "patterns": ["nvidia-smi /s *"],                        "description": "show Nvidia gpu usage" },
@@ -322,7 +322,7 @@
 
     "PowerShell": {
       "description": "PowerShell cmdlets — classified primarily by approved verb",
-      "_comment_tiers": "Explicit read_only/modifying pattern entries (if present) decide first; otherwise the cmdlet verb decides: read_only_verbs => allow, modifying_verbs => ask by risk tier (low/medium/high). strictness_gated (planned) covers explicit command patterns only, not verb tiers. Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
+      "_comment_tiers": "Explicit read_only/modifying pattern entries (if present) decide first; otherwise the cmdlet verb decides: read_only_verbs => allow, modifying_verbs => ask by risk tier (low/medium/high). strictness_gated covers explicit command patterns only, not verb tiers. Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Compare-*", "Group-*", "Format-*", "ForEach-*", "Out-GridView", "Write-Host", "Write-Output", "Write-Information", "Write-Verbose", "Write-Debug", "Write-Warning", "Read-Host", "Show-*", "Trace-*", "Wait-*", "Connect-*", "Disconnect-*", "Receive-*", "Start-Sleep"],
       "modifying_verbs": {
         "high":   ["Remove-*", "Stop-*", "Restart-*", "Disable-*", "Clear-*", "Unregister-*", "Uninstall-*", "Undo-*", "Block-*", "Revoke-*", "Dismount-*", "Disconnect-*", "Suspend-*", "Reset-*"],
@@ -398,9 +398,8 @@
 
     "Linux": {
       "description": "Linux / Bash / Zsh commands",
-      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
-        { "name": "printf",   "patterns": ["printf *"],      "risk": "low",    "description": "Print Out" },
         { "name": "ls",       "patterns": ["ls *"],                            "description": "List directory contents" },
         { "name": "sar",      "patterns": ["sar *"],                           "description": "System Activity Reporter" },
         { "name": "cat",      "patterns": ["cat *"],                           "description": "Print file contents" },
@@ -459,6 +458,9 @@
         { "name": "gh repo view",    "patterns": ["gh repo view*"],      "description": "View repository" },
         { "name": "gh release list", "patterns": ["gh release list*"],   "description": "List releases" },
         { "name": "gh release view", "patterns": ["gh release view*"],   "description": "View a release" }
+      ],
+      "strictness_gated": [
+        { "name": "printf",   "patterns": ["printf *"],      "risk": "low",    "description": "Print Out" }
       ],
       "modifying": [
 
@@ -538,8 +540,8 @@
 
     "Git": {
       "description": "Git version control commands",
-      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
-      "_comment_planned": "With the strictness_gated feature these read_only entries move to strictness_gated: git add, pull, commit, switch, init, clone, tag -d, worktree add, rev-parse, stash (allow normally, ask in strict).",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "_comment_gated": "strictness_gated below: git add, pull, commit, switch, init, clone, tag -d, worktree add, rev-parse, stash — allow in normal/loose, ask in strict.",
       "read_only": [
         { "name": "git status",    "patterns": ["git status*", "git status *"],                  "description": "Show working tree status" },
         { "name": "git log",       "patterns": ["git log*", "git log *"],                        "description": "Show commit logs" },
@@ -552,14 +554,16 @@
         { "name": "git tag",       "patterns": ["^git tag$", "git tag -l*", "git tag --list*"],  "description": "List tags (no write)" },
         { "name": "git remote",    "patterns": ["^git remote$", "git remote -v*", "git remote --verbose*"], "description": "List remotes (no write)" },
         { "name": "git fetch",     "patterns": ["git fetch*", "git fetch *"],                    "description": "Download objects and refs" },
+        { "name": "git worktree list", "patterns": ["git worktree list*", "git worktree list *"], "description": "List worktrees (no write)" }
+      ],
+      "strictness_gated": [
         { "name": "git pull",      "patterns": ["git pull*", "git pull *"],                      "risk": "low", "description": "Fetch and integrate (may modify working tree)" },
-        { "name": "git switch",    "patterns": ["git switch$", "git switch *"],                  "description": "Switch to a branch (modifies working tree)" },
-		{ "name": "git init",      "patterns": ["git init*", "git init *"],                      "risk": "low",    "description": "Create empty repository" },
+        { "name": "git switch",    "patterns": ["git switch$", "git switch *"],                  "risk": "low", "description": "Switch to a branch (modifies working tree)" },
+        { "name": "git init",      "patterns": ["git init*", "git init *"],                      "risk": "low",    "description": "Create empty repository" },
         { "name": "git clone",     "patterns": ["git clone*", "git clone *"],                    "risk": "low",    "description": "Clone repository" },
         { "name": "git tag -d",    "patterns": ["git tag -d*", "git tag --delete*"],             "risk": "low",    "description": "Delete tag" },
         { "name": "git add",       "patterns": ["git add*", "git add *"],                        "risk": "low",    "description": "Stage file changes" },
-        { "name": "git worktree add", "patterns": ["git worktree add*", "git worktree add *"], "risk": "low",    "description": "Stage file changes" },
-        { "name": "git worktree list", "patterns": ["git worktree list*", "git worktree list *"], "description": "List worktrees (no write)" },
+        { "name": "git worktree add", "patterns": ["git worktree add*", "git worktree add *"], "risk": "low",    "description": "Add a linked worktree" },
         { "name": "git commit",    "patterns": ["git commit*", "git commit *"],                  "risk": "low",    "description": "Record changes to repository" },
         { "name": "git rev-parse",   "patterns": ["git rev-parse*", "git rev-parse *"],                "risk": "medium", "description": "rev-parse working tree files" },
         { "name": "git stash",     "patterns": ["git stash*", "git stash *"],                    "risk": "low",    "description": "Stash changes" }
@@ -585,7 +589,7 @@
 
     "Terraform": {
       "description": "HashiCorp Terraform IaC commands",
-      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
         { "name": "terraform fmt -check",   "patterns": ["terraform *fmt*-check*"],               "description": "Check config formatting (dry-run, read-only)" },
         { "name": "terraform plan",         "patterns": ["terraform plan*"],                       "description": "Show execution plan" },
@@ -624,7 +628,7 @@
 
     "Docker": {
       "description": "Docker and Docker Compose commands",
-      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
 	    { "name": "docker cp",               "patterns": ["docker cp*"],                           "description": "copy files between host and containers" },
         { "name": "docker ps",               "patterns": ["docker ps*"],                           "description": "List running containers" },
@@ -677,7 +681,7 @@
 
     "Kubernetes": {
       "description": "Kubernetes kubectl and Helm commands",
-      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
         { "name": "helm list",                "patterns": ["helm list*", "helm ls*"],              "description": "List Helm releases" },
         { "name": "helm status",              "patterns": ["helm status*"],                        "description": "Show release status" },
