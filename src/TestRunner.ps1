@@ -3,7 +3,8 @@ param(
     [string]$Filter = "",
     [string]$Strictness = "",
     [string]$Cwd = "",
-    [string]$EditablePaths = ""
+    [string]$EditablePaths = "",
+    [string]$ConfigPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,7 +23,8 @@ if (Test-Path "$PSScriptRoot\Classifier.ps1") {
 }
 
 # Load config, optionally override strictness for testing
-$config = Load-Config -Path "$PSScriptRoot\..\config.json"
+$configFile = if ($ConfigPath) { $ConfigPath } else { "$PSScriptRoot\..\config.json" }
+$config = Load-Config -Path $configFile
 if ($Strictness) {
     $config.modifying_strictness = $Strictness
 }
@@ -180,7 +182,7 @@ Write-Host "Total:    $total"
 Write-Host "Passed:   $passed ($pctPassed%)"
 Write-Host "Failed:   $failed"
 Write-Host "Duration: $([math]::Round($totalTime.TotalSeconds, 1))s"
-Write-Host "Config:   config.json"
+Write-Host "Config:   $configFile"
 Write-Host ""
 
 if ($failures.Count -gt 0) {
