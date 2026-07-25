@@ -21,11 +21,11 @@ Design and implement the strictness_gated config section + per-domain strictness
 - Fixtures: test/config/config.git-strict.json (Git=strict) + config.strict.json. New suites: test-cases.strictness-gated.{normal,strict,git-strict}.xml.
 
 ## Current Step
-Spec awaiting user review. Then writing-plans.
+Implementation plan written + committed (docs/superpowers/plans/2026-07-25-strictness-gated.md). Awaiting execution-approach choice (subagent-driven vs inline).
 
 ## Next Steps
-- User approves spec → writing-plans → implement on feature branch from master (TestRunner -ConfigPath, fixtures, suites, ConfigLoader + Resolver changes, config move).
-- redirect-strict becomes fixture-driven (config.strict.json) once -ConfigPath lands.
+- Execute plan Tasks 1-8: branch strictness-gated → TestRunner -ConfigPath → ConfigLoader → Resolver → fixtures+suites (RED) → config migration (GREEN) → redirect-strict fixture-driven → docs + full regression.
+- Merge to master only with explicit user approval.
 
 ## Blockers / Notes
 - 6 pre-existing test-cases.xml fails are documented (editable_paths populated disables normal-mode fallback for the redirect-non-system cases; git add is read_only).
