@@ -9,6 +9,8 @@ Design and implement the strictness_gated config section + per-domain strictness
 - path-branch: merged to master; all suites green (byte-identical + trustedpattern 69/74).
 - Test consolidation: test-cases.xml now 690 cases (merged adhoc, fullpath, var-assignment, redirect-normal); 4 source files + redirect-normal.xml deleted (content merged). 684/690, 6 pre-existing fails (1 git-add + 5 redirect-non-system). Remaining separate files (by necessity): redirect-strict (strict-mode), trustedpattern (cwd-keyed), fullpipe (different runner).
 - strictness_gated spec written + self-reviewed + committed (5b27112).
+- Plan Tasks 1-4 (branch strictness-gated, all dormant): TestRunner -ConfigPath (d23c2b6) → ConfigLoader compiles/validates strictness_gated + per-domain modifying_strictness (1b652c5) → Resolver Get-EffectiveStrictness + step 1a.5 + effective-strictness reach for AWS flag-strip/param_commands (5c4b780).
+- Plan Task 5 (5e8b277): fixtures test/config/config.{git-strict,strict}.json + 3 suites test/test-cases.strictness-gated.{normal,strict,git-strict}.xml. RED baseline confirmed: normal 24/24 GREEN; strict 6/24 (6 controls pass, 18 gated fail — still read_only); git-strict 6/12 (isolation+AWS-reach pass, 6 Git-gated fail). Both fixtures load via Load-Config. Live config.json untouched.
 
 ## Locked decisions (L1-L5)
 - L1 name: strictness_gated. L2 scope: third section + per-domain strictness. L3 guard: global strict/loose forces all domains; global normal defers to per-domain. L4 reach: strictness_gated + AWS flag-strip + parameter_commands use effective strictness; path policy stays global. L5 testing: separate test config fixtures via new -ConfigPath param; live config.json untouched by feature tests.
@@ -21,11 +23,12 @@ Design and implement the strictness_gated config section + per-domain strictness
 - Fixtures: test/config/config.git-strict.json (Git=strict) + config.strict.json. New suites: test-cases.strictness-gated.{normal,strict,git-strict}.xml.
 
 ## Current Step
-Implementation plan written + committed (docs/superpowers/plans/2026-07-25-strictness-gated.md). Awaiting execution-approach choice (subagent-driven vs inline).
+Task 5 complete — strictness_gated suites + fixtures landed at the correct RED baseline (commit 5e8b277). Awaiting Task 6 (config migration: move 10 Git + 1 Linux printf read_only entries into strictness_gated; flips strict 6/24→24/24 and git-strict 6/12→12/12 GREEN while normal stays 24/24 byte-identical).
 
 ## Next Steps
-- Execute plan Tasks 1-8: branch strictness-gated → TestRunner -ConfigPath → ConfigLoader → Resolver → fixtures+suites (RED) → config migration (GREEN) → redirect-strict fixture-driven → docs + full regression.
-- Merge to master only with explicit user approval.
+- Task 6: migrate read_only → strictness_gated in live config.json (Git×10: pull, switch, init, clone, tag -d, add, worktree add, commit, rev-parse, stash; Linux×1: printf). Re-run all 3 suites → expect all GREEN (normal stays 24/24, strict → 24/24, git-strict → 12/12).
+- Task 7: redirect-strict suite driven by config.strict.json (no -Strictness flag).
+- Task 8: docs + full regression; merge to master only with explicit user approval.
 
 ## Blockers / Notes
 - 6 pre-existing test-cases.xml fails are documented (editable_paths populated disables normal-mode fallback for the redirect-non-system cases; git add is read_only).
