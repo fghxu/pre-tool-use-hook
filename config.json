@@ -2,12 +2,18 @@
   "version": "1.0",
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
 
+  "_readme": "HOW CLASSIFICATION WORKS: every intercepted tool call is decided 'allow' (run without prompting) or 'ask' (prompt the user). Command-running tools (Bash, PowerShell, run_in_terminal, ...) are classified by matching the command string against the per-domain tiers in 'commands' below. File-writing tools (Write, Edit, create_file, ...) are decided by path policy: system_paths always ask; editable_paths and the current working directory subtree auto-approve. Keys starting with '_' are documentation only and are ignored by the loader.",
+  "_readme_tiers": "Per-domain tiers: read_only => allow in every strictness mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => always ask (the 'risk' level is shown in the prompt).",
+  "_readme_strictness_guard": "modifying_strictness = strict | normal | loose. A global 'strict' or 'loose' FORCES every domain. A per-domain commands.<domain>.modifying_strictness is consulted only when the global value is 'normal'; domains without one inherit 'normal'.",
+
   "log_file_path": "c:\\temp\\logs\\prehook\\",
+  "_comment_log_file_path": "Directory where the hook appends decision logs (one record per intercepted call).",
 
   "modifying_strictness": "normal",
+  "_comment_modifying_strictness": "strict: more prompts (planned strictness_gated entries ask; AWS flag-stripping disabled). loose: fewer prompts (unrecognized parameter_commands values auto-allow). normal: default; also the only global value that lets per-domain modifying_strictness take effect (see _readme_strictness_guard).",
 
   "editable_paths": {
-    "description": "Parent directories where file writes (via > or >>) auto approved when modifying_strictness set to normal and loose",
+    "description": "Parent directories where file writes (shell redirects > / >> and file tools like Write/Edit/create_file) are auto-approved when modifying_strictness is normal or loose. The current working directory and its subdirectories are always editable, in every mode.",
     "linux": [
       "/tmp/"
     ],
@@ -17,7 +23,7 @@
     ]
   },
   "system_paths": {
-    "description": "Parent directories where file writes (via > or >>) always require approval, even in normal strictness mode. All subdirectories under these paths are also blocked.",
+    "description": "Parent directories where file writes (redirects and file tools) always require approval, in every strictness mode including loose. All subdirectories under these paths are also blocked.",
     "linux": [
       "/etc/",
       "/var/",
@@ -48,6 +54,7 @@
     ]
   },
 
+  "_comment_known_command_prefixes": "First-token lookup used for domain routing: a command starting with one of these tokens is routed to the matching domain's rules (docker -> Docker, kubectl -> Kubernetes, aws -> AWS_CLI, git -> Git, ...). Shell launchers (pwsh, powershell, cmd, bash, sh) unwrap and re-classify the inner command. Unlisted tokens fall back to shell heuristics (PowerShell markers, then DOS markers, else Linux).",
   "known_command_prefixes": [
     "docker", "kubectl", "aws", "npm", "git", "terraform", "helm", "gh", "az", "gcloud",
     "python", "node", "ruby", "go", "cargo", "dotnet","java",
@@ -60,11 +67,13 @@
   ],
   
   
+  "_comment_untrusted_pattern": "Regexes matched against the WHOLE command string before any other check (even before trusted_pattern). Any match => ask, no matter what would otherwise allow it. Use for shapes that must never auto-approve, e.g. the third entry: exe/bat/cmd/com/msi/scr launched from outside System32 / Program Files. The first two entries are legacy scaffolding kept as examples.",
   "untrusted_pattern": [
 	  "^untrusted_stuff.*$",
 	  "^untrusted_stuff\\s+$",
 	  "^[A-Za-z]:[/\\\\](?!.*(?i:System32|Program Files)).*(?i:\\.(exe|bat|cmd|com|msi|scr))\\b.*$"
   ],
+  "_comment_trusted_pattern": "Regexes matched against the WHOLE command string, checked after untrusted_pattern and before all per-command tiers. Any match => allow immediately, bypassing every command rule below. Keep entries tight: anything matching is never prompted. (The src.* and C..git.cc.pretoolhook entries are local debug escape-hatches, not needed in normal use.)",
   "trusted_pattern": [
 	"src.Parser.ps1",
 	  "src.TestRunner.ps1",
@@ -73,6 +82,7 @@
 	  "^trusted_stuff\\s+$"
   ],
   
+  "_comment_intercept_tool_name": "Tool names the hook inspects. Each intercepted tool is classified via tool_name_mapping (command tools) or path_tool_mapping (file tools) below; an intercepted tool with no mapping asks by default. Tools in neither list also ask by default.",
   "intercept_tool_name": [
 		"send_to_terminal",
 		"apply_patch",
@@ -105,6 +115,7 @@
 		"Edit",
 		"MultiEdit"
   ],
+  "_comment_ignore_tool_name": "Tool names the hook passes through without inspection (read-only or non-executing tools: file reading, search, web fetch, task management, ...).",
   "ignore_tool_name": [
   
 
@@ -181,6 +192,7 @@
 
   ],
 
+  "_comment_tool_name_mapping": "Command-running tools: tool name => JSON dot-path into the hook payload that yields the shell command string to classify (e.g. tool_input.command).",
   "tool_name_mapping": {
     "run_in_terminal": "tool_input.command",
     "send_to_terminal": "tool_input.command",
@@ -188,6 +200,7 @@
 	"PowerShell": "tool_input.command"
   },
 
+  "_comment_path_tool_mapping": "File-writing tools: tool name => JSON dot-path into the hook payload that yields the target file/directory path. These are decided by path policy (system_paths / editable_paths / current working directory subtree), NOT by the command tiers.",
   "path_tool_mapping": {
 	"Write": "tool_input.file_path",
 	"Edit": "tool_input.file_path",
@@ -203,6 +216,7 @@
 	"create_new_workspace": "tool_input.workspacePath"
   },
 
+  "_comment_dry_run_flags": "Base-command + flag combinations that are simulations only; treated as read-only even when the base command is normally modifying.",
   "dry_run_flags": {
     "terraform plan": "read-only",
     "terraform plan -destroy": "read-only",
@@ -230,6 +244,7 @@
 
     "DOS_CMD": {
       "description": "DOS / Windows CMD commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
 	  
 	    { "name": "nvidia-smi",      "patterns": ["nvidia-smi /s *"],                        "description": "show Nvidia gpu usage" },
@@ -307,6 +322,7 @@
 
     "PowerShell": {
       "description": "PowerShell cmdlets — classified primarily by approved verb",
+      "_comment_tiers": "Explicit read_only/modifying pattern entries (if present) decide first; otherwise the cmdlet verb decides: read_only_verbs => allow, modifying_verbs => ask by risk tier (low/medium/high). strictness_gated (planned) covers explicit command patterns only, not verb tiers. Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Compare-*", "Group-*", "Format-*", "ForEach-*", "Out-GridView", "Write-Host", "Write-Output", "Write-Information", "Write-Verbose", "Write-Debug", "Write-Warning", "Read-Host", "Show-*", "Trace-*", "Wait-*", "Connect-*", "Disconnect-*", "Receive-*", "Start-Sleep"],
       "modifying_verbs": {
         "high":   ["Remove-*", "Stop-*", "Restart-*", "Disable-*", "Clear-*", "Unregister-*", "Uninstall-*", "Undo-*", "Block-*", "Revoke-*", "Dismount-*", "Disconnect-*", "Suspend-*", "Reset-*"],
@@ -382,6 +398,7 @@
 
     "Linux": {
       "description": "Linux / Bash / Zsh commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
         { "name": "printf",   "patterns": ["printf *"],      "risk": "low",    "description": "Print Out" },
         { "name": "ls",       "patterns": ["ls *"],                            "description": "List directory contents" },
@@ -521,6 +538,8 @@
 
     "Git": {
       "description": "Git version control commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "_comment_planned": "With the strictness_gated feature these read_only entries move to strictness_gated: git add, pull, commit, switch, init, clone, tag -d, worktree add, rev-parse, stash (allow normally, ask in strict).",
       "read_only": [
         { "name": "git status",    "patterns": ["git status*", "git status *"],                  "description": "Show working tree status" },
         { "name": "git log",       "patterns": ["git log*", "git log *"],                        "description": "Show commit logs" },
@@ -566,6 +585,7 @@
 
     "Terraform": {
       "description": "HashiCorp Terraform IaC commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
         { "name": "terraform fmt -check",   "patterns": ["terraform *fmt*-check*"],               "description": "Check config formatting (dry-run, read-only)" },
         { "name": "terraform plan",         "patterns": ["terraform plan*"],                       "description": "Show execution plan" },
@@ -604,6 +624,7 @@
 
     "Docker": {
       "description": "Docker and Docker Compose commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
 	    { "name": "docker cp",               "patterns": ["docker cp*"],                           "description": "copy files between host and containers" },
         { "name": "docker ps",               "patterns": ["docker ps*"],                           "description": "List running containers" },
@@ -656,6 +677,7 @@
 
     "Kubernetes": {
       "description": "Kubernetes kubectl and Helm commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated (planned) => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
         { "name": "helm list",                "patterns": ["helm list*", "helm ls*"],              "description": "List Helm releases" },
         { "name": "helm status",              "patterns": ["helm status*"],                        "description": "Show release status" },
@@ -706,6 +728,7 @@
 
     "AWS_CLI": {
       "description": "AWS CLI commands — classified by service and operation verb",
+      "_comment_tiers": "The operation verb is matched against read_only_prefixes => allow, modifying_prefixes => ask by risk tier; unmatched operations ask. In normal strictness, --flags are stripped before classification so only service + operation decide (disabled in strict mode). Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-"],
       "modifying_prefixes": {
         "high":   ["delete-", "terminate-", "remove-", "detach-", "deactivate-", "disable-", "revoke-", "deregister-", "execute-"],
