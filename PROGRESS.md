@@ -1,28 +1,29 @@
 ## Goal
-Design and implement the path-branch: file-tool writes (Write/Edit/Copilot file tools) observe system_paths/editable_paths/CWD directly — single source of truth for path policy, canonicalization, default-ask for unlisted paths. Spec: docs/superpowers/specs/2026-07-25-path-branch-design.md
+Design and implement the path-branch: file-tool writes (Write/Edit/Copilot file tools) observe system_paths/editable_paths/CWD directly via a shared Resolve-PathPolicy — single source of truth for path policy, canonicalization, default-ask for unlisted paths. Spec: docs/superpowers/specs/2026-07-25-path-branch-design.md. Plan: docs/superpowers/plans/2026-07-25-path-branch-plan.md.
 
 ## State note (2026-07-25)
-- master now at 180411d — contains ALL agent-command-guidelines work (user carried 3 files as unstaged changes; reconciled via fast-forward merge of agent-command-guidelines).
-- Path-branch implementation branches from master.
+- Branch path-branch (off master @ 180411d) holds the implementation.
+- master 180411d contains all prior agent-command-guidelines work.
 
-## Completed Steps (prior work, merged)
-- Agent guidance artifacts: docs/agent-command-guidelines/ (guidance.md, SKILL.md, README.md).
-- config.json gap-fill: 31 LogGap adhoc cases, adhoc 94/94.
-- File-tool gating (config-only bridge): trusted/untrusted path patterns, 60 trustedpattern cases (suite 61/66), TestRunner tool-name/tool-input-json support.
-- Reference docs: docs/config-json-guide.md, docs/trusted-untrusted-patterns.md.
-- Log scan (2026-07-19): 895 unknowns — 507 (57%) heredoc/message shrapnel, 388 (43%) real commands.
-- Path-branch T3/T4: ConfigLoader path_tool_mapping (3acae30), Resolve-PathPolicy + redirect refactor (a3053e1).
-- Fix (778643f): ConvertTo-CanonicalWritePath handles \\?\UNC\ prefix (fail-open to network share closed) and whitespace-only path guard. Suites verified at baseline.
+## Completed Steps — path-branch (all on branch path-branch)
+- T2 trustedpattern migration (RED): 60 cases re-keyed to path-branch policy + 8 new (TP-PathBranch + ~ home + extraction-failure); -Cwd C:\git\repo pin documented in suite header.
+- T3 ConfigLoader path_tool_mapping (3acae30): default empty object + PSCustomObject validation.
+- T4 Resolve-PathPolicy + redirect refactor (a3053e1, fix 778643f): ConvertTo-CanonicalWritePath (\\?\ and \\?\UNC\ strip, .. collapse, POSIX/~ special-case, whitespace guard) + Resolve-PathPolicy ladder (temp[raw] → system[canonical] → CWD/editable → loose → normal → default ask); Test-RedirectionTarget >/> refactored to call it — byte-identical redirect behavior.
+- T5 Classifier path-branch (880c9c3): Get-InputFieldValue helper (HookAdapter) + STEP 1.5 in Invoke-Classify (path_tool_mapping → Resolve-PathPolicy -Verb 'file write to'; extraction failure → ask).
+- T6 config.json activation (e6ab26f): path_tool_mapping (12 file tools); tool_name_mapping reduced to command tools; trusted/untrusted path patterns retired (kept legacy scaffolding + command-side exe pattern).
+- T7 full differential: byte-identical on all 8 non-TP suites (test-cases 487/487, adhoc 94/94, var-assignment 63/64, fullpath 20/20, redirect-normal 20/25, redirect-strict 24/25, new-samples 14/14, fullpipe 19/19); trustedpattern 61→69/74 (only 5 pre-existing docker-comfyui fails remain).
+- T8 docs (592642f): config-json-guide.md (S5/S7 + new S7.5 path_tool_mapping), trusted-untrusted-patterns.md (path patterns retired, residuals→fixed table).
 
 ## Current Step
-Path-branch spec written and self-reviewed (docs/superpowers/specs/2026-07-25-path-branch-design.md). Awaiting user review before writing-plans.
+DONE — path-branch implementation complete and verified. Awaiting final review + finishing-a-development-branch decision.
 
-## Locked decisions (D1-D6)
-- D1 default-ask for unlisted file-tool writes; D2 redirect analysis shares the canonicalize+check function; D3 path entries retired from trusted/untrusted (except legacy scaffolding + command-side exe pattern); D4 location-only write policy (no exe guard); D5 NO C:\git in editable_paths — writability = editable_paths + CWD subtree (other projects ask); D6 strictness semantics preserved verbatim (CWD editable every mode).
+## Locked decisions (D1-D6) — all implemented
+- D1 default-ask for unlisted file-tool writes ✓; D2 redirect shares Resolve-PathPolicy ✓; D3 path entries retired from trusted/untrusted ✓; D4 location-only write policy ✓; D5 NO C:\git in editable_paths — CWD subtree rule (other projects ask) ✓; D6 strictness preserved verbatim ✓.
 
 ## Next Steps
-- User approves spec → writing-plans → implement on feature branch from master.
+- Final whole-feature code review, then finishing-a-development-branch (merge/PR/keep/discard).
+- Follow-up: edit_files/apply_patch payload-shape capture (currently unmapped, prompt fail-safe); review the debug escape-hatch entries in config.json trusted_pattern (src.Parser.ps1 / C..git.cc.pretoolhook etc.) — inert (dot-vs-slash mismatch) but should be cleaned before merge.
 
 ## Blockers / Notes
-- Key behavior table in spec §3.5: Write C:\git\other-project flips allow→ask (D5); [RESIDUAL] cases flip allow→ask (fixed); Write C:\temp\evil.exe flips ask→allow (D4).
-- Multi-path Copilot payloads (edit_files, apply_patch) need real-payload capture for mapping verification.
+- config.json was concurrently edited by user during the workflow (debug escape-hatch entries in trusted_pattern); committed as-is per user intent — flagged for cleanup.
+- 5 pre-existing docker-comfyui trustedpattern fails unchanged (expect an opt-in `docker exec comfyui` trusted pattern, not shipped).
