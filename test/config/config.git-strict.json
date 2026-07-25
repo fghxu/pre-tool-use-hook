@@ -89,6 +89,7 @@
 		"run_notebook_cell",
 		"install_extension",
 		"github_repo",
+		"run_vscode_command",
 		"run_in_terminal",
 		"create_and_run_task",
 		"run_task",
