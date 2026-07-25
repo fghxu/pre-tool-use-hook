@@ -130,7 +130,7 @@ Domains: `DOS_CMD`, `PowerShell`, `Linux`, `Git`, `Terraform`, `Docker`, `Kubern
 ```
 
 **Semantics that surprise people:**
-- An entry in a domain's `read_only` array is **auto-approved — even if it carries `"risk"`** (proven: `git add` → allow). `risk` on read_only entries is informational. If it must prompt, it belongs in `modifying`.
+- An entry in a domain's `read_only` array is **auto-approved — even if it carries `"risk"`**; `risk` on read_only entries is informational. If it must prompt, it belongs in `modifying` — or in `strictness_gated` (§10) if it should prompt only under strict (that's where `git add` now lives).
 - Patterns are **raw regex**, compiled directly — `*` is a regex quantifier, not a glob (`"git status*"` literally means "statu" + zero-or-more "s"). Style is sloppy but established; follow the existing form and prefer adding `^`-anchored or lookahead-bearing patterns where ambiguity matters (precedents: `wmic (?!.*process.*call.*create).*`, `^git tag$`).
 - **An invalid regex anywhere in `commands` deadlocks the hook fail-closed** (the `.\gradlew` incident — `\g` is not a valid escape). Use character classes for path separators: `[.][/\\]gradlew`.
 - Domain routing is content-based (`Get-CommandDomain` in Parser.ps1): PowerShell markers → hardcoded binary prefixes (docker/kubectl/terraform/aws/git/pwsh/cmd /c) → DOS markers → **fallback `linux`**. A command whose tool isn't in the prefix table lands in `linux` — put entries for such tools in the `Linux` domain (that's where `adb`, `unzip`, `javap`, `gradlew`, `gh` live). A brand-new `commands` domain is *unreachable* without a `Parser.ps1` code change.
@@ -142,7 +142,36 @@ Domains: `DOS_CMD`, `PowerShell`, `Linux`, `Git`, `Terraform`, `Docker`, `Kubern
 2. Add config entries (GREEN).
 3. Run the full 9-suite differential — byte-identical except your new cases.
 
-## 10. Editing checklist (any config change)
+## 10. `strictness_gated` — the strictness-dependent middle tier
+
+Each domain may carry a `strictness_gated` array between `read_only` and `modifying`.
+Entry shape is identical (`name` / `patterns` / `risk` / `description`); `risk` is what
+the prompt shows when the entry asks.
+
+Decision: **allow** when the effective strictness is `normal` or `loose`, **ask** when
+it is `strict`. Use it for commands that are technically modifying but safe enough to
+auto-approve day-to-day (e.g. `git add`) while still prompting under strict.
+
+### Per-domain `modifying_strictness` + the global guard
+
+Any domain may set its own `"modifying_strictness": "strict" | "normal" | "loose"`.
+The effective strictness for a domain is resolved by `Get-EffectiveStrictness`:
+
+1. Global `modifying_strictness` is `strict` or `loose` → that value **forces every domain**.
+2. Global is `normal` → the domain's own value (absent → `normal`).
+
+Effective strictness drives three things: the `strictness_gated` tier, AWS CLI
+flag-stripping (active only when the AWS domain is effectively normal), and
+parameter_commands unrecognized-value handling (asks unless effectively loose).
+Path policy (`system_paths` / `editable_paths` / CWD) is cross-domain and always
+uses the **global** value.
+
+Shipped config sets no per-domain strictness (everything inherits normal), so
+default behavior only changes when you opt a domain in. To force one domain,
+add e.g. `"modifying_strictness": "strict"` inside `commands.Git` — see the fixture
+`test/config/config.git-strict.json` for a working example.
+
+## 11. Editing checklist (any config change)
 
 1. Valid JSON (no trailing commas) and valid regex in every pattern.
 2. Run one suite immediately → catches fail-closed deadlocks while you can still act.
