@@ -1,31 +1,26 @@
 ## Goal
-Design and ship an LLM-facing guidance artifact (shared file + skill) that teaches agents to emit shell/PowerShell commands in forms the PreToolUse hook can classify, plus fill the config.json gaps behind real "unknown command" hits — without restricting what agents may do.
+Design and implement the path-branch: file-tool writes (Write/Edit/Copilot file tools) observe system_paths/editable_paths/CWD directly — single source of truth for path policy, canonicalization, default-ask for unlisted paths. Spec: docs/superpowers/specs/2026-07-25-path-branch-design.md
 
-## Log scan findings (2026-07-19, C:\temp\logs\prehook\)
-- 895 "unknown command" hits: 507 (57%) heredoc/commit-message shrapnel, 388 (43%) real unclassifiable commands.
-- Top real offenders: powershell.exe -Command blobs (~43), cmd //c (30), gradlew (20), adb (14), reg query (11), git worktree/branch/tag/ls-files (32), unzip/javap/gh/net share/sc qc.
+## State note (2026-07-25)
+- master now at 180411d — contains ALL agent-command-guidelines work (user carried 3 files as unstaged changes; reconciled via fast-forward merge of agent-command-guidelines).
+- Path-branch implementation branches from master.
 
-## Completed Steps
-- Spec committed: docs/superpowers/specs/2026-07-19-agent-command-guidelines-design.md (ed07383). Plan committed (d187853).
-- Executed on branch agent-command-guidelines:
-  - Baseline confirmed all 9 suites (fullpipe requires pwsh, not powershell.exe).
-  - 31 LogGap adhoc cases RED → config.json gap-fill → GREEN 94/94.
-  - Differential: test-cases 487/487, var-assignment 63/64, fullpath 20/20, redirect-normal 20/25, redirect-strict 24/25, trustedpattern 1/6, new-samples 14/14, fullpipe 19/19 — all byte-identical to baseline.
-  - Bugs found & fixed: `.\gradlew` regex-invalid (hook fail-closed blocked all tools; user repaired manually); gh entries initially in unreachable GitHub_CLI domain → moved into Linux fallback domain; bare `adb logcat` pattern shadowed the -c lookahead (dropped).
-  - Commits: faafc9b (config+tests), fe2ed1a (guidance.md, hook-friendly-commands/SKILL.md, README.md).
-- File-tool write gating (3061538): Write/Edit/MultiEdit/NotebookEdit + Copilot file tools intercepted, mapped to path fields. trusted = writable roots (temp, C:\git) with exe-extension guard; untrusted = catch-all outside roots + linux system dirs. KEY DISCOVERY: zero-command fallback auto-allows bare paths not in untrusted — the catch-all is what makes outside-root writes ask. All 9 suites byte-identical; live hook smoke matrix verified (8 cases).
-- trustedpattern expansion (e5366fa): TestRunner + <tool-name>/<tool-input-json> support; 60 cases covering Write/Edit/MultiEdit/NotebookEdit, Copilot file tools, Bash/PowerShell path commands, edge cases; suite 1/6 → 61/66 (5 pre-existing docker comfyui fails unchanged). Pattern hardening: slash/case-tolerant roots, (?i:) exe guards, traversal guard, untrusted exe pattern (unknown full-path .exe/.bat/.cmd outside System32/Program Files now asks — closes the zero-command auto-allow hole for binaries; .ps1/.sh/.py remain allow, documented as [RESIDUAL] pins). All other suites byte-identical.
+## Completed Steps (prior work, merged)
+- Agent guidance artifacts: docs/agent-command-guidelines/ (guidance.md, SKILL.md, README.md).
+- config.json gap-fill: 31 LogGap adhoc cases, adhoc 94/94.
+- File-tool gating (config-only bridge): trusted/untrusted path patterns, 60 trustedpattern cases (suite 61/66), TestRunner tool-name/tool-input-json support.
+- Reference docs: docs/config-json-guide.md, docs/trusted-untrusted-patterns.md.
+- Log scan (2026-07-19): 895 unknowns — 507 (57%) heredoc/message shrapnel, 388 (43%) real commands.
 
 ## Current Step
-DONE — implementation complete on branch agent-command-guidelines. Awaiting merge decision.
+Path-branch spec written and self-reviewed (docs/superpowers/specs/2026-07-25-path-branch-design.md). Awaiting user review before writing-plans.
+
+## Locked decisions (D1-D6)
+- D1 default-ask for unlisted file-tool writes; D2 redirect analysis shares the canonicalize+check function; D3 path entries retired from trusted/untrusted (except legacy scaffolding + command-side exe pattern); D4 location-only write policy (no exe guard); D5 NO C:\git in editable_paths — writability = editable_paths + CWD subtree (other projects ask); D6 strictness semantics preserved verbatim (CWD editable every mode).
 
 ## Next Steps
-- Merge agent-command-guidelines → master (per finishing-a-development-branch options).
-- Optional: install guidance — add `@C:\git\cc\pretoolhook\docs\agent-command-guidelines\guidance.md` to ~/.claude/CLAUDE.md; paste guidance.md into ~/.copilot/AGENTS.md and ~/.codex/AGENTS.md.
-- Optional: push to origin.
-- Reference docs written: docs/config-json-guide.md (block-by-block config reference + editing checklist), docs/trusted-untrusted-patterns.md (gate semantics, entry-by-entry rationale, add-entry samples, residual holes).
-- Next-spec candidate: classifier path-branch for file tools (canonicalize path, check system_paths/editable_paths directly, default non-listed to ask) — kills the [RESIDUAL] holes and the regex duplication.
+- User approves spec → writing-plans → implement on feature branch from master.
 
 ## Blockers / Notes
-- Meta-validation: a broken config.json makes the hook fail-closed on ALL tool calls (total agent deadlock). Fail-safe by design, but worth a future "config lint" guard before writes.
-- Pre-existing issues (unchanged): var-assignment #14, redirect/trustedpattern environment-dependent reds.
+- Key behavior table in spec §3.5: Write C:\git\other-project flips allow→ask (D5); [RESIDUAL] cases flip allow→ask (fixed); Write C:\temp\evil.exe flips ask→allow (D4).
+- Multi-path Copilot payloads (edit_files, apply_patch) need real-payload capture for mapping verification.
