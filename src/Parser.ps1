@@ -467,9 +467,9 @@ function Split-OperatorNotInQuotes {
 # the inner command from its quoted argument.
 #
 # Detected wrappers:
-#   - pwsh -Command "<inner>"
-#   - powershell -Command "<inner>"
-#   - pwsh -ScriptBlock { <inner> }
+#   - pwsh/powershell[.exe] [flags...] -Command "<inner>" / -c "<inner>"
+#   - pwsh/powershell[.exe] [flags...] -ScriptBlock { <inner> }
+#   (-File is deliberately NOT unwrapped: script content is opaque -> plain ask)
 #   - bash -c '<inner>'
 #   - sh -c '<inner>'
 #   - cmd /c "<inner>"
@@ -500,11 +500,10 @@ function Find-NestedCommands {
     # Detect wrapper patterns and extract quoted/supplied inner command
     # -------------------------------------------------
 
-    # pwsh -Command "<inner>" or powershell -Command "<inner>"
-    if ($trimmed -match '^(?:\.?\\)?pwsh(?:\.exe)?\s+-Command\s+["''](.+)["'']\s*$' -or
-        $trimmed -match '^(?:\.?\\)?powershell(?:\.exe)?\s+-Command\s+["''](.+)["'']\s*$' -or
-        $trimmed -match '^(?:\.?\\)?pwsh(?:\.exe)?\s+-c\s+["''](.+)["'']\s*$' -or
-        $trimmed -match '^(?:\.?\\)?powershell(?:\.exe)?\s+-c\s+["''](.+)["'']\s*$') {
+    # pwsh/powershell[.exe] [flags...] -Command "<inner>" / -c "<inner>"
+    # Flags between the binary and -Command (e.g. -ExecutionPolicy Bypass,
+    # -NoProfile) are skipped via lazy .*? — Claude Code always emits them.
+    if ($trimmed -match '^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-(?:Command|c)\s+["''](.+)["'']\s*$') {
 
         $innerCommand = $Matches[1]
         $innerDomain = Get-CommandDomain -Command $innerCommand
@@ -533,9 +532,8 @@ function Find-NestedCommands {
         return $nested
     }
 
-    # pwsh -ScriptBlock { <inner> }
-    if ($trimmed -match '(?s)^(?:\.?\\)?pwsh(?:\.exe)?\s+-ScriptBlock\s+\{(.+)\}\s*$' -or
-        $trimmed -match '(?s)^(?:\.?\\)?powershell(?:\.exe)?\s+-ScriptBlock\s+\{(.+)\}\s*$') {
+    # pwsh/powershell[.exe] [flags...] -ScriptBlock { <inner> }
+    if ($trimmed -match '(?s)^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-ScriptBlock\s+\{(.+)\}\s*$') {
 
         $innerCommand = $Matches[1]
         $innerDomain = 'powershell'
@@ -1656,7 +1654,7 @@ function Get-AstWrapperInnerCommands {
     # =========================================================================
     # pwsh / powershell  —  -Command, -c, -ScriptBlock
     # =========================================================================
-    if ($CommandName -match '^(pwsh|powershell)$') {
+    if ($CommandName -match '^(pwsh|powershell)(\.exe)?$') {
         for ($i = 1; $i -lt $elementCount; $i++) {
             $arg = $commandElements[$i]
             $argText = $arg.Extent.Text

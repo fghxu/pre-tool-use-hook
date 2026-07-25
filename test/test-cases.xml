@@ -937,6 +937,31 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
       <copilot-command><![CDATA[pwsh -Command "Get-ChildItem -Path C:\Logs -Recurse -Filter '*.log' | Select-Object Name, Length, LastWriteTime | Sort-Object Length -Descending"]]></copilot-command>
     </test-case>
 
+    <test-case expected="allow" reason="read-only: flags skipped, inner Get-ChildItem" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -ExecutionPolicy Bypass -Command with read-only inner (flags must be skipped)</description>
+      <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -Command "Get-ChildItem C:\Logs"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: multiple flags skipped, inner Get-Date" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -NoProfile -NonInteractive -Command with read-only inner</description>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -NonInteractive -Command "Get-Date"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: pwsh.exe + flag skipped, inner Get-Service" category="PSWrapper-FlagSkipping">
+      <description>pwsh.exe -NoProfile -Command with read-only inner (.exe suffix must not defeat wrapper detection)</description>
+      <copilot-command><![CDATA[pwsh.exe -NoProfile -Command "Get-Service"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: flags skipped, inner Remove-Item" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -ExecutionPolicy Bypass -Command with modifying inner (unwrap must not weaken modifying detection)</description>
+      <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -Command "Remove-Item C:\temp\old.log"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: flags skipped, inner docker run" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -NoProfile -Command wrapping cross-domain modifying (docker run)</description>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -Command "docker run -d redis"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="unknown: script file execution is opaque (pinned accepted behavior)" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -ExecutionPolicy Bypass -File stays ask — script content not inspectable</description>
+      <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -File "src/Run-AllTests.ps1"]]></copilot-command>
+    </test-case>
+
     <test-case expected="ask" reason="modifying: Remove-LocalUser" category="PowerShell-UserManagement">
       <description>Remove-LocalUser deletes a local user account</description>
       <copilot-command><![CDATA[Remove-LocalUser -Name "tempUser"]]></copilot-command>
