@@ -1088,6 +1088,89 @@ function Test-EditableOrCwd {
     return $null
 }
 
+function ConvertTo-CanonicalWritePath {
+    <#
+    Canonicalize a write-target path: strip \\?\ extended-length prefix, anchor
+    relative paths to CWD, collapse .. via GetFullPath (Windows-drive and
+    relative paths only), unify separators. POSIX-absolute paths (starting
+    with /) are separator-unified but NOT passed through GetFullPath (on a
+    Windows host GetFullPath('/tmp/x') would wrongly become C:\tmp\x).
+    ~ home paths: separators unified only (home is never the project CWD).
+    #>
+    param(
+        [string]$TargetPath,
+        $Config
+    )
+    if (-not $TargetPath) { return $null }
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $resolved = $TargetPath.Trim()
+    # Strip \\?\ extended-length prefix (\\?\C:\x -> C:\x)
+    if ($resolved.StartsWith('\\?\')) { $resolved = $resolved.Substring(4) }
+    $isHome = $resolved.StartsWith('~')
+    $isPosix = $resolved.StartsWith('/')
+    if (-not $isHome -and -not $isPosix -and $resolved -notmatch '^[A-Za-z]:[\\/]' -and $resolved -notmatch '^[\\/]') {
+        $resolved = "$($Config._cwd)$resolved"
+    }
+    if ($isHome -or $isPosix) {
+        $resolved = ($resolved -replace '[/\\]', $(if ($isPosix) { '/' } else { $sep }))
+    }
+    else {
+        try {
+            $resolved = ([System.IO.Path]::GetFullPath($resolved) -replace '[/\\]', $sep)
+        }
+        catch {
+            $resolved = ($resolved -replace '[/\\]', $sep)
+        }
+    }
+    return $resolved
+}
+
+function Resolve-PathPolicy {
+    <#
+    Decision ladder for a write-target path (redirect target or file-tool path):
+      temp(raw) -> system(canonical) -> CWD/editable(canonical) -> loose ->
+      normal(editable not enabled) -> default ask.
+    Redirect behavior is byte-identical to the old Test-RedirectionTarget 4b-4d
+    ladder: same decisions, same reason strings (see $Verb note).
+    Returns PSCustomObject @{ Decision; Risk; Reason; Target }
+    #>
+    param(
+        [string]$Path,
+        $Config,
+        [string]$Verb = 'file write to'
+    )
+    if (-not $Path -or -not $Path.Trim()) {
+        return [PSCustomObject]@{ Decision = 'ask'; Risk = 'medium'; Reason = "$Verb (no target) (modifying)"; Target = 'unknown' }
+    }
+    $raw = $Path.Trim()
+    $resolved = ConvertTo-CanonicalWritePath -TargetPath $raw -Config $Config
+    if (-not $resolved) {
+        return [PSCustomObject]@{ Decision = 'ask'; Risk = 'medium'; Reason = "$Verb (no target) (modifying)"; Target = 'unknown' }
+    }
+
+    # -- temp paths (low risk) — checked on RAW to preserve /tmp, %TEMP%, $env:TEMP forms --
+    if ($raw -match '^/tmp/|^/var/tmp/|^%TEMP%|^%TMP%|^\$env:TEMP|^\$env:TMP') {
+        return [PSCustomObject]@{ Decision = 'allow'; Risk = 'low'; Reason = "redirect to temp path ($raw) (low risk)"; Target = $resolved }
+    }
+    # -- system paths (high risk) — checked on CANONICAL (catches \\?\ and ..) --
+    if ($Config -and $resolved -match $Config._systemPathRegex) {
+        return [PSCustomObject]@{ Decision = 'ask'; Risk = 'high'; Reason = "redirect to system path ($resolved) (high risk)"; Target = $resolved }
+    }
+    # -- CWD / editable_paths --
+    $writableReason = Test-EditableOrCwd -TargetPath $resolved -Config $Config
+    if ($writableReason) {
+        return [PSCustomObject]@{ Decision = 'allow'; Risk = 'low'; Reason = "$Verb $resolved ($writableReason)"; Target = $resolved }
+    }
+    # -- strictness fallbacks --
+    if ($Config -and $Config.modifying_strictness -eq 'loose') {
+        return [PSCustomObject]@{ Decision = 'allow'; Risk = 'low'; Reason = "$Verb $resolved (allowed in loose mode)"; Target = $resolved }
+    }
+    if ($Config -and $Config.modifying_strictness -eq 'normal' -and -not $Config._editablePathsEnabled) {
+        return [PSCustomObject]@{ Decision = 'allow'; Risk = 'low'; Reason = "$Verb $resolved (allowed in normal mode)"; Target = $resolved }
+    }
+    return [PSCustomObject]@{ Decision = 'ask'; Risk = 'medium'; Reason = "$Verb $resolved (modifying)"; Target = $resolved }
+}
+
 function Test-RedirectionTarget {
     param(
         [string]$Command,
@@ -1142,47 +1225,11 @@ function Test-RedirectionTarget {
         $targetPath = ""
         if ($trimmed -match '(?<![>])>>\s*([^\s;|&]+)') { $targetPath = $matches[1] }
 
-        # Temp/discard paths always allowed
-        if ($targetPath -and $targetPath -match '^(/dev/null|NUL|/tmp/|/var/tmp/|%TEMP%|%TMP%|^\$env:TEMP|^\$env:TMP)') {
-            $result.Target = $targetPath
-            $result.Risk = "none"
-            $result.Decision = "allow"
-            $result.Reason = "append redirect to $targetPath (temp/discard)"
-        }
-        # System paths always ask (must win over editable/CWD)
-        elseif ($Config -and $targetPath -and $targetPath -match $Config._systemPathRegex) {
-            $result.Target = $targetPath
-            $result.Risk = "high"
-            $result.Decision = "ask"
-            $result.Reason = "append redirect to $targetPath (system path)"
-        }
-        else {
-            $writableReason = Test-EditableOrCwd -TargetPath $targetPath -Config $Config
-            if ($writableReason) {
-                $result.Target = $targetPath
-                $result.Risk = "low"
-                $result.Decision = "allow"
-                $result.Reason = "append redirect to $targetPath ($writableReason)"
-            }
-            elseif ($Config -and $Config.modifying_strictness -eq 'loose') {
-                $result.Target = $targetPath
-                $result.Risk = "low"
-                $result.Decision = "allow"
-                $result.Reason = "append redirect to $targetPath (allowed in loose mode)"
-            }
-            elseif ($Config -and $Config.modifying_strictness -eq 'normal' -and -not $Config._editablePathsEnabled) {
-                $result.Target = $targetPath
-                $result.Risk = "low"
-                $result.Decision = "allow"
-                $result.Reason = "append redirect to $targetPath (allowed in normal mode)"
-            }
-            else {
-                $result.Risk = "medium"
-                $result.Decision = "ask"
-                $result.Reason = if ($targetPath) { "append redirect to $targetPath (modifying)" } else { "append redirection (modifying)" }
-                $result.Target = if ($targetPath) { $targetPath } else { "unknown" }
-            }
-        }
+        $policy = Resolve-PathPolicy -Path $targetPath -Config $Config -Verb 'append redirect to'
+        $result.Target = $policy.Target
+        $result.Risk = $policy.Risk
+        $result.Decision = $policy.Decision
+        $result.Reason = $policy.Reason
         return $result
     }
 
@@ -1208,41 +1255,13 @@ function Test-RedirectionTarget {
                 $result.Decision = "allow"
                 $result.Reason = "redirect to discard ($targetPath) (read-only)"
             }
-            # -- 4b. Temp paths (low risk) --
-            elseif ($targetPath -match '^/tmp/|^/var/tmp/|^%TEMP%|^%TMP%|^\$env:TEMP|^\$env:TMP') {
-                $result.Risk = "low"
-                $result.Decision = "allow"
-                $result.Reason = "redirect to temp path ($targetPath) (low risk)"
-            }
-            # -- 4c. System paths (high risk) — from config.json system_paths --
-            elseif ($Config -and $targetPath -match $Config._systemPathRegex) {
-                $result.Risk = "high"
-                $result.Decision = "ask"
-                $result.Reason = "redirect to system path ($targetPath) (high risk)"
-            }
-            # -- 4d. Other paths — editable_paths/CWD, else strictness-governed --
+            # -- 4b-4d. Temp/system/editable/strictness ladder (shared path policy) --
             else {
-                $writableReason = Test-EditableOrCwd -TargetPath $targetPath -Config $Config
-                if ($writableReason) {
-                    $result.Risk = "low"
-                    $result.Decision = "allow"
-                    $result.Reason = "output redirect to $targetPath ($writableReason)"
-                }
-                elseif ($Config -and $Config.modifying_strictness -eq 'loose') {
-                    $result.Risk = "low"
-                    $result.Decision = "allow"
-                    $result.Reason = "output redirect to $targetPath (allowed in loose mode)"
-                }
-                elseif ($Config -and $Config.modifying_strictness -eq 'normal' -and -not $Config._editablePathsEnabled) {
-                    $result.Risk = "low"
-                    $result.Decision = "allow"
-                    $result.Reason = "output redirect to $targetPath (allowed in normal mode)"
-                }
-                else {
-                    $result.Risk = "medium"
-                    $result.Decision = "ask"
-                    $result.Reason = "output redirect to $targetPath (modifying)"
-                }
+                $policy = Resolve-PathPolicy -Path $targetPath -Config $Config -Verb 'output redirect to'
+                $result.Target = $policy.Target
+                $result.Risk = $policy.Risk
+                $result.Decision = $policy.Decision
+                $result.Reason = $policy.Reason
             }
         }
         else {
