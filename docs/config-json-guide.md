@@ -52,14 +52,16 @@ For anything touching patterns or prefixes, run the full differential (all 9 sui
 
 ## 5. `trusted_pattern` / `untrusted_pattern`
 
-The whole-string, pre-classification gate: untrusted match → **ask**; trusted match → **allow**; both checked **before** the command DB and before command chunking.
+The whole-string, pre-classification gate for **command text**: untrusted match → **ask**; trusted match → **allow**; both checked **before** the command DB and before command chunking.
+
+**Post path-branch (2026-07-25):** these lists gate *command text only*. File-tool writes are decided earlier by the path-branch (`path_tool_mapping` → `Resolve-PathPolicy`, §7.5), which reads `system_paths`/`editable_paths`/CWD directly. The path-related regexes that used to live here (temp/git roots, catch-all, traversal guards) are retired — to add a writable root for file tools, edit `editable_paths` (§2), not these lists.
 
 **Full details, entry-by-entry rationale, and how-to-add guide: see `docs/trusted-untrusted-patterns.md`.**
 
 Cardinal rules (violating these is how you get `rm -rf /` auto-approved):
 - **Never** an unanchored or catch-all `trusted_pattern` (`.*`, `^(?!…).*$`). Trusted short-circuits all classification.
 - Always anchor with `^` (and usually `.*$`).
-- Every trusted root pattern must carry the executable-extension guard.
+- Keep the command-side exe asker in `untrusted_pattern` — without it, bare full-path executables (`C:\temp\tool.exe` via Bash) hit the zero-command allow.
 
 ## 6. `intercept_tool_name` / `ignore_tool_name`
 
@@ -79,16 +81,39 @@ Cardinal rules (violating these is how you get `rm -rf /` auto-approved):
 
 ## 7. `tool_name_mapping`
 
-**What it does:** maps `tool_name` → dot-path of the payload field containing the string to classify (`"Bash": "tool_input.command"`, `"Write": "tool_input.file_path"`). Resolution order:
+**What it does:** maps `tool_name` → dot-path of the payload field containing the **command** to classify. Holds command tools only: `run_in_terminal`, `send_to_terminal`, `Bash`, `PowerShell` → `tool_input.command`. Resolution order:
 
 1. Mapping hit → that field's string.
 2. Mapping miss/failure → **heuristic walk**: first string field containing `|`/`;`/`&&` or starting with a `known_command_prefix`.
 3. Nothing found → `null` → hook treats as no command (skip).
 
 **When adding entries:**
-- If the mapped path doesn't exist in the real payload, you silently fall to the heuristic — for file tools that can extract the file *content* (if it contains `;` or `|`) and feed it to the command classifier, producing garbage "unknown command" prompts. Verify new mappings against a real payload (capture one from `log_file_path` logs or a fullpipe test).
+- File tools (Write/Edit/etc.) do **not** belong here — they go in `path_tool_mapping` (§7.5). A path is not a command.
 - `PowerShell` must stay mapped to `tool_input.command` — without it, operator-less cmdlets slip through unmonitored.
-- Mapping a file tool to its path field means `trusted/untrusted_pattern` (not the command DB) decides — that's the file-tool gating design.
+- If the mapped path doesn't exist in the real payload, you silently fall to the heuristic. Verify new mappings against a real payload (capture one from `log_file_path` logs or a fullpipe test).
+
+## 7.5 `path_tool_mapping`
+
+**What it does:** maps file-tool `tool_name` → dot-path of the payload field holding the **file path** (`"Write": "tool_input.file_path"`, `"NotebookEdit": "tool_input.notebook_path"`, `"create_file": "tool_input.filePath"`, `"create_directory": "tool_input.dirPath"`, etc.). Tools listed here are decided by `Resolve-PathPolicy` (Classifier STEP 1.5), **not** the command DB:
+
+```
+Resolve-PathPolicy(canonicalized path):
+  temp (raw)              → allow (low)
+  system_paths            → ask   (high)
+  under CWD               → allow (low)   [every strictness mode]
+  editable_paths          → allow (low)   [per strictness]
+  loose / normal(no-EP)   → allow (low)
+  default                 → ask   (medium)
+```
+
+The path is canonicalized first (`ConvertTo-CanonicalWritePath`): `\\?\` and `\\?\UNC\` prefixes stripped, `/`↔`\` unified, `..` collapsed via `GetFullPath` (drive/relative/UNC only; POSIX-absolute and `~` paths unified without `GetFullPath`), relative paths anchored to the payload CWD.
+
+**Semantics:**
+- **Location-only** — writing an executable extension inside an editable root *allows* (`C:\temp\evil.exe` → allow). Execution of that file by a command tool is governed separately by the command-side exe pattern + classification.
+- **Extraction failure → ask** (fail-safe; no heuristic fallback on file content).
+- `edit_files` / `apply_patch` carry path *lists* with unverified payload shapes — deliberately **not** mapped yet; they stay intercepted and prompt.
+
+**When adding entries:** verify the dot-path against a real payload from the logs before mapping, or extraction silently fails to ask. Single source of truth for path policy is now `system_paths`/`editable_paths` (§2) — no regex duplication.
 
 ## 8. `dry_run_flags`
 

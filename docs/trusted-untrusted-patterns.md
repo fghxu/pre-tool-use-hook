@@ -1,6 +1,8 @@
 # trusted_pattern / untrusted_pattern — Deep Dive
 
-**Companion to:** `docs/config-json-guide.md`. This document explains the trusted/untrusted gate in full: where it runs, how matching works, what each current entry achieves, how to add entries safely, and the known limits.
+**Companion to:** `docs/config-json-guide.md`. This document explains the trusted/untrusted gate: where it runs, how matching works, what each current entry achieves, and how to add entries safely.
+
+**Important (post path-branch, 2026-07-25):** these two lists now gate **command text only**. File-tool writes (`Write`/`Edit`/Copilot file tools) are decided *earlier* by the path-branch (`path_tool_mapping` → `Resolve-PathPolicy`), which reads `system_paths`/`editable_paths`/CWD directly. The path-related regexes that used to live here (temp/git roots, catch-all, traversal guards) have been **retired** — see §6 for the history and §4 for the new way to add a writable root.
 
 ---
 
@@ -8,126 +10,121 @@
 
 ```
 PreToolUse payload
-  └─ 1. Tool gate        intercept_tool_name / ignore_tool_name   (Classifier.ps1)
-  └─ 2. Extraction       tool_name_mapping, else heuristic walk   (HookAdapter.ps1)
+  └─ 1. Tool gate        intercept_tool_name / ignore_tool_name        (Classifier.ps1)
+  └─ 2. Extraction       tool_name_mapping / path_tool_mapping          (HookAdapter.ps1)
+  └─ 2.5 PATH-BRANCH     if tool in path_tool_mapping → Resolve-PathPolicy  (Classifier.ps1 STEP 1.5)
+                          (system_paths → ask; editable_paths/CWD → allow; default → ask)
+                          RETURNS EARLY for file tools — never reaches step 3
   └─ 3. TRUSTED GATE     untrusted_pattern → ask; trusted_pattern → allow   ◄ THIS DOC
+                          (sees the command text from step 2)
   └─ 4. Full pipeline    chunking, domains, verbs, command DB,
-                         redirects (editable_paths/system_paths),
-                         AST arbiter, zero-command fallback
+                         redirects, AST arbiter, zero-command fallback
 ```
 
-The gate receives **whatever step 2 extracted**:
-- `Bash` / `PowerShell` / terminal tools → the **command text**.
-- `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / Copilot file tools → the **file path** (because `tool_name_mapping` points at `file_path` / `notebook_path` / `filePath`).
+For **command tools** (`Bash`, `PowerShell`, terminal tools), step 2 extracts the command text and the trusted gate (step 3) sees it. For **file tools** (in `path_tool_mapping`), step 2.5 decides on the file path and returns — the trusted gate never runs for them.
 
-One mechanism therefore serves both command gating and file-write gating.
+## 2. Matching semantics (read before touching anything)
 
-## 2. Matching semantics (read this before touching anything)
+- Matching is `$regex.IsMatch(wholeString)` — a **substring search over the ENTIRE command string**, executed **before** the script is chunked into sub-commands. Compilation options: `Compiled | Singleline` (`.` matches newlines), **no** `IgnoreCase`.
+- Without `^`/`$` anchors, a pattern matches *anywhere* in a multi-line command.
+  - **Unanchored trusted = fail-open disaster.** A trusted entry `temp` would match `"cd c:\temp\; remove-item a.txt"` and allow the *whole* command, `remove-item` included.
+  - **Unanchored untrusted = noisy but safe** (over-prompts; cannot under-block).
+- If neither list matches, the command falls through to the full pipeline, where chunking *does* happen: `"cd c:\temp\; remove-item a.txt"` → `cd c:\temp` (read-only) + `remove-item a.txt` (modifying high) → overall **ask**.
+- Check order: **untrusted first, trusted second.** Untrusted wins on overlap.
 
-- Matching is `$regex.IsMatch(wholeString)` — a **substring search over the ENTIRE extracted string**, executed **before** the script is chunked into sub-commands. Compilation options: `Compiled | Singleline` (`.` matches newlines), **no** `IgnoreCase`.
-- Consequence: without `^`/`$` anchors, a pattern matches *anywhere* in a multi-line script.
-  - **Unanchored trusted = fail-open disaster.** A trusted entry `temp` would match `"cd c:\temp\; remove-item a.txt"` and allow the *whole* script, `remove-item` included.
-  - **Unanchored untrusted = noisy but safe.** It over-prompts; it cannot under-block.
-- If no pattern matches either list, the string falls through to the full pipeline, where chunking *does* happen: `"cd c:\temp\; remove-item a.txt"` → `cd c:\temp` (read-only) + `remove-item a.txt` (modifying high) → overall **ask**.
-- Check order: **untrusted first, trusted second.** Untrusted always wins on overlap.
-
-### The zero-command fallback — why the untrusted catch-all is mandatory
-
-The classifier's zero-command/string-constant fallback auto-**allows** a string in which no command is recognized. A **bare file path is such a string**. Therefore, for file-tool writes:
-
-| Path matches… | Decision |
-|---|---|
-| `trusted_pattern` | allow |
-| `untrusted_pattern` | ask |
-| **neither** | **allow** (zero-command fallback — *not* ask!) |
-
-This is the reverse of the usual "unknown → ask" intuition and the single most important fact in this document. The untrusted catch-all is what turns "writes outside your writable roots" into prompts.
-
-## 3. Current entries, entry by entry
+## 3. Current entries (post-retirement)
 
 ### `untrusted_pattern` (any match → ask)
 
-| # | Pattern (JSON-decoded) | Goal | Fires on | Deliberately does NOT fire on |
+| # | Pattern (JSON-decoded) | Goal | Fires on | Does NOT fire on |
 |---|---|---|---|---|
-| 1–2 | `^untrusted_stuff.*$`, `^untrusted_stuff\s+$` | Legacy test scaffolding from the trusted-pattern suite design. | Nothing real. | Everything. |
-| 3 | `^[A-Za-z]:[/\\].*\.\.[/\\]` | **Windows traversal guard** — stop `C:\git\..\Windows\evil.txt` from inheriting the `C:\git` trust. | Any absolute Windows path with a `..` segment. | Relative paths (`cd ..`). |
-| 4 | `^/.*\.\.[/\\]` | **Linux traversal guard** — same for `/` paths. | `/tmp/../etc/x`. | Relative paths. |
-| 5 | `^(?!<drive>:\temp\ or C:\git\)[A-Za-z]:[/\\](?!.*(?i:\.(exe|bat|cmd|com|msi|scr))\b).*$` | **Windows catch-all** — any absolute path outside the writable roots asks. Needed because of the zero-command fallback (§2). The exe-extension exclusion lets real binary invocations pass through to normal classification. | `C:\Windows\evil.dll`, `D:\work\notes.txt`, `C:\Users\…` | Trusted roots; exe paths (handled by #6). |
-| 6 | `^[A-Za-z]:[/\\](?!.*(?i:System32|Program Files)).*(?i:\.(exe|bat|cmd|com|msi|scr))\b.*$` | **Unknown-executable asker** — closes the hole #5 leaves: unknown exe/bat/cmd paths outside the two known binary homes would otherwise hit the zero-command allow. | `C:\temp\tool.exe`, `C:\git\repo\run.bat`, Write `C:\Windows\notepad.exe`. | `C:\Windows\System32\*.exe`, `C:\Program Files\…\git.exe` — these classify normally (e.g. tasklist → read-only). |
-| 7 | `^/(etc|var|boot|sys|proc|opt)/` | **Linux system dirs.** | Writes to `/etc/cron.d/evil`; `/etc/init.d/nginx start`. | `/usr`, `/home` (see residuals). |
-| 8 | `^/usr/(?!bin/|sbin/)` | **/usr minus binary dirs.** | `/usr/share/…` writes. | `/usr/bin/grep` executions (so they classify read-only); leaves the `/usr/bin` write hole. |
+| 1 | `^untrusted_stuff.*$` | Legacy test scaffolding. | Nothing real. | Everything. |
+| 2 | `^untrusted_stuff\s+$` | Legacy test scaffolding. | Nothing real. | Everything. |
+| 3 | `^[A-Za-z]:[/\\](?!.*(?i:System32|Program Files)).*(?i:\.(exe|bat|cmd|com|msi|scr))\b.*$` | **Command-side unknown-executable asker.** A bare full-path executable outside the two known binary homes would otherwise hit the zero-command allow. *(File-tool exe writes are NOT affected — the path-branch decides those, location-only.)* | `Bash C:\temp\tool.exe`, `C:\git\repo\run.bat`. | `C:\Windows\System32\tasklist.exe`, `C:\Program Files\…\git.exe` (classify normally). |
 
 ### `trusted_pattern` (any match → allow)
 
-| # | Pattern | Goal | Fires on | Deliberately does NOT fire on |
-|---|---|---|---|---|
-| 1 | `^trusted_stuff\s+$` | Legacy test scaffolding. | Nothing real. | Everything. |
-| 2 | `^[A-Za-z]:[/\\][Tt][Ee][Mm][Pp][/\\](?!.*(?i:\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar))\b).*$` | **Windows temp root (any drive)** — file-tool writes into scratch space skip the prompt. Case-tolerant (`C:\TEMP`), slash-tolerant (`C:/temp`). | `Write C:\temp\notes.txt`, `D:\Temp\log.md`. | Executable/script-looking paths — the guard blocks the shortcut so they fall to normal classification (and pattern #6 above asks for real exes). |
-| 3 | `^/[Tt][Mm][Pp]/(?!…same guard…).*$` | **Linux `/tmp` root** — same idea. | `Write /tmp/scratch.txt`. | `/tmp/evil.py`. |
-| 4 | `^[Cc]:[/\\][Gg][Ii][Tt][/\\](?!…same guard…).*$` | **Project root `C:\git\`** — writes into any repo skip the prompt. | `Write C:\git\repo\file.md`. | `C:\git\repo\run.bat` (guard → normal path → #6 asks). |
+| # | Pattern | Goal |
+|---|---|---|
+| 1 | `^trusted_stuff\s+$` | Legacy test scaffolding. |
 
-Design shape to notice: trusted = a **small explicit whitelist of writable roots**; untrusted = a **catch-all over the infinite remainder** plus targeted executable/traversal askers. You never enumerate all folders — you enumerate only the roots you trust, and the catch-all defaults everything else to ask.
+That is the entire shipped trusted list. Real command shortcuts (e.g. an opt-in `docker exec comfyui` pattern) are added per-deployment; none ship by default.
 
 ## 4. How to add entries (with samples)
 
-### 4.1 Add a writable root (example: `D:\work`)
+### 4.1 Add a command shortcut (trusted, command text)
 
-Copy the temp-root shape exactly, changing only the drive and folder name — **keep the executable guard verbatim**:
-
-```json
-"^[Dd]:[/\\\\][Ww][Oo][Rr][Kk][/\\\\](?!.*(?i:\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar))\\b).*$"
-```
-
-Also update the untrusted catch-all's exclusion lookahead so the new root isn't asked:
-
-```
-(?![A-Za-z]:[/\\][Tt][Ee][Mm][Pp][/\\]|[Cc]:[/\\][Gg][Ii][Tt][/\\]|[Dd]:[/\\][Ww][Oo][Rr][Kk][/\\])
-```
-
-JSON escaping cheatsheet: regex `\` (one literal backslash) = `\\\\` in JSON; character class `[/\\]` = `"[/\\\\]"`; regex classes like `\b`, `\s` = `\\b`, `\\s`; case-insensitive group = `(?i:…)`.
-
-### 4.2 Add a blocked system dir (example: `C:\Secrets`)
-
-Add to `untrusted_pattern` (no guard needed — it's an ask):
+Example — auto-allow any `docker exec comfyui ...` command:
 
 ```json
-"^[A-Za-z]:[/\\\\][Ss][Ee][Cc][Rr][Ee][Tt][Ss][/\\\\]"
+"trusted_pattern": [
+  "^trusted_stuff\\s+$",
+  "docker\\s+exec\\s+(?:-\\S+\\s+)?comfyui\\b"
+]
 ```
 
-### 4.3 Rules you must not break
+**Rules you must not break:**
+1. Anchor with `^` unless you deliberately want "matches anywhere" (and only ever for untrusted, never trusted).
+2. **Never** a catch-all trusted pattern (`.*`, `^(?!…).*$`). Trusted short-circuits the entire classifier — `rm -rf /` would auto-approve.
+3. Prefer anchoring + specificity; a loose trusted pattern is a security hole.
 
-1. **Anchor everything** with `^` (and usually `.*$`). No bare substrings.
-2. **Never** a catch-all *trusted* pattern (`.*`, `^(?!…).*$` on the trusted side). Trusted short-circuits the entire classifier — `rm -rf /` would auto-approve.
-3. Every new **trusted root** keeps the full executable-extension guard.
-4. Untrusted additions are safe by default (worst case = prompts) but still anchor them, or you'll prompt on harmless commands that merely *contain* the path (`cat /etc/passwd`).
+### 4.2 Add a blocked command pattern (untrusted)
+
+Example — always prompt for `terraform destroy`:
+
+```json
+"untrusted_pattern": [
+  "^untrusted_stuff.*$",
+  "^untrusted_stuff\\s+$",
+  "^terraform\\s+destroy\\b"
+]
+```
+
+Untrusted additions are fail-safe (worst case = a prompt), but still anchor them or you'll prompt on harmless commands that merely *contain* the target text.
+
+### 4.3 Add a writable root for file-tool writes — use `editable_paths`, NOT a trusted pattern
+
+Pre-path-branch this required a regex in `trusted_pattern` plus matching `untrusted_pattern` edits. **Now it is one line** in `editable_paths`, honored by both redirects and file-tool writes:
+
+```json
+"editable_paths": {
+  "windows": ["C:\\\\temp\\\\", "D:\\\\temp\\\\", "D:\\\\work\\\\"],
+  "linux":   ["/tmp/"]
+}
+```
+
+No `trusted_pattern`/`untrusted_pattern` change needed. The path-branch (`Resolve-PathPolicy`) checks `editable_paths` and the project CWD automatically.
+
+JSON escaping: regex `\` (one literal backslash) = `\\\\` in JSON; regex classes `\b`, `\s` = `\\b`, `\\s`.
 
 ### 4.4 Verify a new entry
 
-Add a test case to `test/test-cases.trustedpattern.xml` (the runner supports per-case tool payloads):
-
-```xml
-<test-case expected="allow" reason="trusted: D:\work root" category="TP-Write-Windows">
-  <description>Write D:\work\notes.txt — trusted work root</description>
-  <tool-name>Write</tool-name>
-  <tool-input-json>{"file_path":"D:\\work\\notes.txt"}</tool-input-json>
-</test-case>
-```
-
-Then:
+Add a test case to `test/test-cases.trustedpattern.xml` (the runner supports per-case tool payloads and `-Cwd`), then run:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "src/TestRunner.ps1" -XmlPath "test/test-cases.trustedpattern.xml"
+powershell.exe -ExecutionPolicy Bypass -File "src/TestRunner.ps1" -XmlPath "test/test-cases.trustedpattern.xml" -Cwd "C:\git\repo"
 # plus the full 9-suite differential — all other suites must stay byte-identical
 ```
 
-## 5. Known residual holes (pinned as `[RESIDUAL]` tests in the suite)
+## 5. Why the path patterns were retired (history)
 
-| Hole | Why it exists | Fix |
-|---|---|---|
-| `.ps1`/`.sh`/`.py` paths (write or exec) inside/outside roots auto-allow | Script extensions aren't in the untrusted exe list (they're source files — writes to them inside roots must stay allowed for daily work) | Code change: distinguish Write-tool from exec in a path-branch |
-| `/usr/bin`, `/usr/sbin` writes allow | Those dirs are excluded from untrusted so full-path binary execution classifies read-only | Code change |
-| `/home/…` writes allow | Not in the untrusted linux list | Add `^/home/` to untrusted if unwanted |
-| Relative paths (`notes.txt`) allow | Patterns are anchored to absolute paths; agent tools send absolute in practice | Code change (canonicalization) |
-| `\\?\C:\…` extended prefix bypasses anchors | Prefix doesn't match `[A-Za-z]:` | Code change (canonicalization) |
+Before the path-branch (commits through `14212f2`), file-tool writes had to be gated by `trusted_pattern`/`untrusted_pattern` regexes because the hook had no other path-policy path for them. That config-only bridge worked but had three defects:
 
-**The structural fix** for all residuals: a small path-branch in the classifier for file tools — canonicalize the path, check against `system_paths`/`editable_paths` directly (single source of truth, no regex duplication), default non-listed to ask. That's the planned next spec; the patterns in this document are the config-only bridge.
+1. **Duplication/drift** — path policy lived twice (`system_paths`/`editable_paths` for redirects; trusted/untrusted regexes for file tools). Adding a root in one place left the other stale.
+2. **Asymmetry** — `echo x > /home/f` prompted but `Write /home/f` allowed.
+3. **Residual holes** — `/usr/bin` and `/home` writes allowed; relative paths allowed; `\\?\` prefixed paths allowed; traversal handled by regex not real canonicalization.
+
+The path-branch (`Resolve-PathPolicy`, spec `docs/superpowers/specs/2026-07-25-path-branch-design.md`) fixed all three: file-tool paths are canonicalized and checked against `system_paths`/`editable_paths`/CWD directly, defaulting to ask for anything else. The regexes that duplicated this are gone.
+
+## 6. Former residual holes — now fixed by the path-branch
+
+| Former hole | Now |
+|---|---|
+| `.ps1`/`.sh`/`.py` writes inside/outside roots auto-allowed | Decided by location (editable/CWD → allow, else ask). Execution of such files by a command tool is still governed by the command-side exe pattern + classification. |
+| `/usr/bin`, `/usr/sbin` writes allowed | **ask** — `system_paths` includes `/usr/`. |
+| `/home/…` writes allowed | **ask** — default-ask for unlisted paths. |
+| Relative paths (`notes.txt`) allowed | Resolved against CWD; under-CWD → allow, else ask. |
+| `\\?\C:\…` extended prefix bypassed anchors | Prefix stripped during canonicalization → decided by real path. |
+| `..` traversal (`C:\git\..\Windows\x`) | Collapsed by `GetFullPath` → `C:\Windows\x` → system → ask. |
+
+The path-branch canonicalization (`ConvertTo-CanonicalWritePath`) and ladder (`Resolve-PathPolicy`) live in `src/Parser.ps1`; the branch is wired in `src/Classifier.ps1` STEP 1.5, gated by `path_tool_mapping` in `config.json`.
