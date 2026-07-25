@@ -1104,8 +1104,10 @@ function ConvertTo-CanonicalWritePath {
     if (-not $TargetPath) { return $null }
     $sep = [System.IO.Path]::DirectorySeparatorChar
     $resolved = $TargetPath.Trim()
-    # Strip \\?\ extended-length prefix (\\?\C:\x -> C:\x)
-    if ($resolved.StartsWith('\\?\')) { $resolved = $resolved.Substring(4) }
+    if (-not $resolved) { return $null }
+    # Strip \\?\ extended-length prefix; \\?\UNC\server\share -> \\server\share
+    if ($resolved.StartsWith('\\?\UNC\')) { $resolved = '\\' + $resolved.Substring(8) }
+    elseif ($resolved.StartsWith('\\?\')) { $resolved = $resolved.Substring(4) }
     $isHome = $resolved.StartsWith('~')
     $isPosix = $resolved.StartsWith('/')
     if (-not $isHome -and -not $isPosix -and $resolved -notmatch '^[A-Za-z]:[\\/]' -and $resolved -notmatch '^[\\/]') {
