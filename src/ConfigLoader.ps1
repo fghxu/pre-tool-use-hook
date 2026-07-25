@@ -114,6 +114,17 @@ function Test-ConfigSchema {
         throw "Configuration validation failed: 'tool_name_mapping' must be non-empty"
     }
 
+    # Default path_tool_mapping if missing. Maps tool_name -> dot-path of the
+    # payload field holding a FILE PATH (not a command). Tools listed here are
+    # decided by Resolve-PathPolicy (system_paths/editable_paths/CWD/strictness)
+    # instead of the command classifier.
+    if (-not (Get-Member -InputObject $Config -Name 'path_tool_mapping' -MemberType NoteProperty)) {
+        $Config | Add-Member -MemberType NoteProperty -Name 'path_tool_mapping' -Value ([PSCustomObject]@{}) -Force
+    }
+    if ($Config.path_tool_mapping -isnot [PSCustomObject]) {
+        throw "Configuration validation failed: 'path_tool_mapping' must be an object"
+    }
+
     # Default log_file_path to empty string if missing
     if (-not (Get-Member -InputObject $Config -Name 'log_file_path' -MemberType NoteProperty)) {
         $Config | Add-Member -MemberType NoteProperty -Name 'log_file_path' -Value '' -Force
