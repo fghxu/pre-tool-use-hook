@@ -63,22 +63,14 @@
   "untrusted_pattern": [
 	  "^untrusted_stuff.*$",
 	  "^untrusted_stuff\\s+$",
-	  "^[A-Za-z]:[/\\\\].*\\.\\.[/\\\\]",
-	  "^/.*\\.\\.[/\\\\]",
-	  "^(?![A-Za-z]:[/\\\\][Tt][Ee][Mm][Pp][/\\\\]|[Cc]:[/\\\\][Gg][Ii][Tt][/\\\\])[A-Za-z]:[/\\\\](?!.*(?i:\\.(exe|bat|cmd|com|msi|scr))\\b).*$",
-	  "^[A-Za-z]:[/\\\\](?!.*(?i:System32|Program Files)).*(?i:\\.(exe|bat|cmd|com|msi|scr))\\b.*$",
-	  "^/(etc|var|boot|sys|proc|opt)/",
-	  "^/usr/(?!bin/|sbin/)"
+	  "^[A-Za-z]:[/\\\\](?!.*(?i:System32|Program Files)).*(?i:\\.(exe|bat|cmd|com|msi|scr))\\b.*$"
   ],
   "trusted_pattern": [
-	  "src.Parser.ps1",
+	"src.Parser.ps1",
 	  "src.TestRunner.ps1",
 	  "src.ConfigLoader.ps1",
 	  "C..git.cc.pretoolhook",
-	"^trusted_stuff\\s+$",
-	"^[A-Za-z]:[/\\\\][Tt][Ee][Mm][Pp][/\\\\](?!.*(?i:\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar))\\b).*$",
-	"^/[Tt][Mm][Pp]/(?!.*(?i:\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar))\\b).*$",
-	"^[Cc]:[/\\\\][Gg][Ii][Tt][/\\\\](?!.*(?i:\\.(exe|bat|cmd|ps1|msi|dll|com|scr|sh|py|pl|rb|js|jar))\\b).*$"
+	  "^trusted_stuff\\s+$"
   ],
   
   "intercept_tool_name": [
@@ -193,8 +185,11 @@
     "run_in_terminal": "tool_input.command",
     "send_to_terminal": "tool_input.command",
     "Bash": "tool_input.command",
+	"PowerShell": "tool_input.command"
+  },
+
+  "path_tool_mapping": {
 	"Write": "tool_input.file_path",
-	"PowerShell": "tool_input.command",
 	"Edit": "tool_input.file_path",
 	"MultiEdit": "tool_input.file_path",
 	"NotebookEdit": "tool_input.notebook_path",
