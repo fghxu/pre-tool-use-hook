@@ -13,6 +13,7 @@ Design and implement the strictness_gated config section + per-domain strictness
 - Plan Task 5 (5e8b277): fixtures test/config/config.{git-strict,strict}.json + 3 suites test/test-cases.strictness-gated.{normal,strict,git-strict}.xml. RED baseline confirmed: normal 24/24 GREEN; strict 6/24 (6 controls pass, 18 gated fail — still read_only); git-strict 6/12 (isolation+AWS-reach pass, 6 Git-gated fail). Both fixtures load via Load-Config. Live config.json untouched.
 - Plan Task 6 (221c1b8): config.json migration — moved Git×10 (pull, switch, init, clone, tag -d, add, worktree add, commit, rev-parse, stash) + Linux printf read_only → strictness_gated; git switch gained risk:low; comments updated (_comment_planned→_comment_gated, "(planned)"→live). Fixtures regenerated from migrated config. Normal-mode byte-identical (684/690); suites flipped GREEN: normal 24/24, strict 24/24, git-strict 12/12.
 - Plan Task 7 (ae1197b): redirect-strict now fixture-driven — `-ConfigPath test/config/config.strict.json` (no -Strictness) verified identical to -Strictness strict (24/25, same #22 pre-existing fail). README updated.
+- test-cases.xml made strictness_gated-aware: stale VarAssignment case `$x = git add .` flipped expect ask→allow (reason points to SG suites; strict-mode ask already pinned at test-cases.strictness-gated.strict.xml SG-Strict-VarAssignment). Main suite now 685/690 — only the 5 pre-existing redirect-non-system fails remain. SG suites re-verified: normal 24/24, strict 24/24, git-strict 12/12.
 
 ## Locked decisions (L1-L5)
 - L1 name: strictness_gated. L2 scope: third section + per-domain strictness. L3 guard: global strict/loose forces all domains; global normal defers to per-domain. L4 reach: strictness_gated + AWS flag-strip + parameter_commands use effective strictness; path policy stays global. L5 testing: separate test config fixtures via new -ConfigPath param; live config.json untouched by feature tests.
@@ -33,4 +34,4 @@ ALL 8 plan tasks COMPLETE on branch strictness-gated (070586a..70d292e, 9 commit
 - After merge: regenerate fixtures from config.json whenever it changes (noted in fixture _comment_fixture).
 
 ## Blockers / Notes
-- 6 pre-existing test-cases.xml fails are documented (editable_paths populated disables normal-mode fallback for the redirect-non-system cases; git add is read_only).
+- 5 pre-existing test-cases.xml fails are documented (#666-669, #685 redirect-non-system: editable_paths populated disables the normal-mode allow fallback, Parser.ps1:1176 — design consequence, expectations stale for current config).

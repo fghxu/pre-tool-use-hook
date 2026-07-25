@@ -3157,8 +3157,8 @@ if ($retries -ge 3) { "Service still down after 3 attempts" }
       <description>$var = git push origin main (modifying)</description>
       <copilot-command><![CDATA[$result = git push origin main]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="git add" category="VarAssignment-Git-Modifying">
-      <description>$var = git add . (modifying)</description>
+    <test-case expected="allow" reason="strictness_gated: allows in normal; asks under strict (covered by test-cases.strictness-gated.strict.xml SG-Strict-VarAssignment)" category="VarAssignment-Git-Gated">
+      <description>$var = git add . (strictness_gated — allow in normal; strict-mode ask is pinned in the SG suites)</description>
       <copilot-command><![CDATA[$x = git add .]]></copilot-command>
     </test-case>
     <test-case expected="ask" reason="git clean" category="VarAssignment-Git-Modifying">
