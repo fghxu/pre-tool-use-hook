@@ -315,6 +315,8 @@
         "low":    ["Out-File", "Out-Printer", "Out-*", "Export-Csv", "Export-Clixml", "Tee-Object"]
       },
       "read_only": [
+        { "name": "Split-Path",        "patterns": ["Split-Path *"],                             "description": "Split-Path" },
+        { "name": "Format-List",        "patterns": ["Format-List *"],                             "description": "Format-List" },
         { "name": "Get-Command",        "patterns": ["Get-Command *"],                             "description": "List available commands" },
         { "name": "Get-Help",           "patterns": ["Get-Help *"],                                "description": "Display help for a command" },
         { "name": "Get-Member",         "patterns": ["Get-Member", "gm"],                          "description": "Get object members" },
@@ -333,6 +335,7 @@
         { "name": "Get-NetIPAddress",   "patterns": ["Get-NetIPAddress *"],                        "description": "Get IP configuration" },
         { "name": "Get-NetIPConfiguration", "patterns": ["Get-NetIPConfiguration *"],              "description": "Get IP configuration (detailed)" },
         { "name": "Invoke-Command",     "patterns": ["Invoke-Command *", "icm *"],                 "description": "Execute commands remotely (ScriptBlock classified separately)" },
+        { "name": "Remove-PSRemoting",  "patterns": ["Remove-PSRemoting *"],                       "description": "Remove PowerShell remoting" },
         { "name": "pwsh",               "patterns": ["pwsh *", "powershell *"],                    "description": "PowerShell wrapper (inner commands classified separately)" }
       ],
       "modifying": [
@@ -406,7 +409,7 @@
         { "name": "stat",     "patterns": ["stat *"],                          "description": "Display file status" },
         { "name": "which",    "patterns": ["which *"],                         "description": "Locate command path" },
         { "name": "cd",       "patterns": ["cd *"],                            "description": "Change directory (read-only for filesystem)" },
-        { "name": "who",      "patterns": ["who", "whoami", "w$"],             "description": "Show logged-in users" },
+        { "name": "who",      "patterns": ["who", "whoami","quser","w$"],  "description": "Show logged-in users" },
         { "name": "env",      "patterns": ["env", "printenv"],                 "description": "Display environment variables" },
         { "name": "history",  "patterns": ["history *"],                       "description": "Show command history" },
         { "name": "date",     "patterns": ["date"],                            "description": "Display current date/time" },
