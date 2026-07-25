@@ -26,8 +26,9 @@ For anything touching patterns or prefixes, run the full differential (all 9 sui
 
 **What they do:** applied by the Parser's redirect analysis (`echo x > target`) to the *target path* of `>` / `>>` inside **shell commands**.
 
-- `editable_paths`: writes under these roots auto-approve when `modifying_strictness` is `normal`/`loose`.
+- `editable_paths`: writes under these roots auto-approve in **every** strictness mode (the CWD/editable check runs before the strictness fallbacks in `Resolve-PathPolicy`).
 - `system_paths`: writes under these roots **always prompt**, any strictness. Windows entries are raw regex; linux entries too (see ConfigLoader notes).
+- **POSIX-path gotcha (Windows host):** redirect targets like `/home/user/x` are resolved through `GetFullPath` inside `Test-EditableOrCwd`, so the regex sees `C:\home\user\x` — a plain `/home/user/` pattern never matches. Use the `([A-Za-z]:)?[/\\]home[/\\](user|dev)[/\\]` form (see the shipped `linux` entries and their `_comment_linux`). `~` home paths keep their `~\` form.
 
 **When adding entries:**
 - These apply **only to shell redirection**, NOT to file-tool writes (Write/Edit). File-tool writes are governed by `trusted_pattern`/`untrusted_pattern` (see companion doc).

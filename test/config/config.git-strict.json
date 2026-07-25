@@ -14,9 +14,11 @@
 
   "editable_paths": {
     "description": "Parent directories where file writes (shell redirects > / >> and file tools like Write/Edit/create_file) are auto-approved when modifying_strictness is normal or loose. The current working directory and its subdirectories are always editable, in every mode.",
+    "_comment_linux": "POSIX redirect targets are resolved via GetFullPath on Windows (Test-EditableOrCwd), so /home/user/x is matched as C:\\home\\user\\x - patterns must fit that form; [/\\\\] covers both separators. ~ home paths keep their ~\\ form.",
     "linux": [
       "/tmp/",
-	  "/home/user/"
+      "([A-Za-z]:)?[/\\\\]home[/\\\\](user|dev)[/\\\\]",
+      "~[/\\\\]"
     ],
     "windows": [
       "C:\\\\temp\\\\",
@@ -80,7 +82,8 @@
 	  "src.TestRunner.ps1",
 	  "src.ConfigLoader.ps1",
 	  "C..git.cc.pretoolhook",
-	  "^trusted_stuff\\s+$"
+	  "^trusted_stuff\\s+$",
+	  "docker\\s+exec\\s+(?:-\\S+\\s+)?comfyui\\b"
   ],
 
   "_comment_intercept_tool_name": "Tool names the hook inspects. Each intercepted tool is classified via tool_name_mapping (command tools) or path_tool_mapping (file tools) below; an intercepted tool with no mapping asks by default. Tools in neither list also ask by default.",

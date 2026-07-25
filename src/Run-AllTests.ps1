@@ -34,7 +34,7 @@ $testDir  = Join-Path $repoRoot 'test'
 $suiteConfig = @{
     'test-cases.xml' = @{
         Args       = @()
-        KnownFails = 5   # redirect-non-system #666-669/#685: editable_paths populated disables normal-mode fallback (Parser.ps1:1176)
+        KnownFails = 0
     }
     'test-cases.redirect-strict.xml' = @{
         Args       = @('-ConfigPath', (Join-Path $testDir 'config\config.strict.json'))
@@ -42,7 +42,7 @@ $suiteConfig = @{
     }
     'test-cases.trustedpattern.xml' = @{
         Args       = @('-Cwd', 'C:\git\repo')   # CWD-dependent cases (see xml header)
-        KnownFails = 5   # docker-comfyui cases need the optional trusted_pattern (see xml header)
+        KnownFails = 0
     }
     'test-cases.strictness-gated.strict.xml' = @{
         Args       = @('-Strictness', 'strict')

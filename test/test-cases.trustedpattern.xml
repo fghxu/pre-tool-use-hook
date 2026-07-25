@@ -3,8 +3,8 @@
 
   <!-- =================================================================== -->
   <!-- Trusted Pattern Gate (bypasses classification)                      -->
-  <!-- To successful test, add below to the "trusted_pattern" in config    -->
-  <!--   "docker\\s+exec\\s+(?:-\\S+\\s+)?comfyui\\b"                      -->
+  <!-- The docker-comfyui cases below require this trusted_pattern entry:   -->
+  <!--   "docker\\s+exec\\s+(?:-\\S+\\s+)?comfyui\\b"  (now shipped in config.json) -->
   
   <!-- =================================================================== -->
   <category-group name="TrustedPattern">
@@ -152,8 +152,8 @@ done]]></copilot-command>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"/usr/bin/evil"}</tool-input-json>
     </test-case>
-    <test-case expected="ask" reason="fixed: default-ask for unlisted paths" category="TP-Write-Linux">
-      <description>Write /home/user/notes.txt — default-ask (residual fixed)</description>
+    <test-case expected="allow" reason="editable path: /home/user/ consented in editable_paths.linux" category="TP-Write-Linux">
+      <description>Write /home/user/notes.txt — allow (now consented via editable_paths.linux home pattern)</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"/home/user/notes.txt"}</tool-input-json>
     </test-case>
@@ -402,8 +402,8 @@ done]]></copilot-command>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"C:\\git\\repo\\..\\other-project\\x.md"}</tool-input-json>
     </test-case>
-    <test-case expected="ask" reason="home path never under CWD; default-ask" category="TP-PathBranch">
-      <description>Write ~/notes.txt — ~ never resolves under project CWD; default-ask</description>
+    <test-case expected="allow" reason="editable path: ~ consented in editable_paths.linux (still never under CWD)" category="TP-PathBranch">
+      <description>Write ~/notes.txt — allow (now consented via editable_paths.linux ~ pattern; still never resolves under project CWD)</description>
       <tool-name>Write</tool-name>
       <tool-input-json>{"file_path":"~/notes.txt"}</tool-input-json>
     </test-case>
