@@ -272,6 +272,31 @@ function Test-ConfigSchema {
             }
         }
 
+        # Validate optional per-domain modifying_strictness (guard: only consulted
+        # when the global modifying_strictness is 'normal' — see Get-EffectiveStrictness)
+        if (Get-Member -InputObject $domain -Name 'modifying_strictness' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            if ($domain.modifying_strictness -notin @('strict', 'normal', 'loose')) {
+                throw "Configuration validation failed: domain '$domainKey' modifying_strictness must be 'strict', 'normal', or 'loose', got '$($domain.modifying_strictness)'"
+            }
+        }
+
+        # Validate strictness_gated entry patterns compile (optional middle tier)
+        $hasGated = Get-Member -InputObject $domain -Name 'strictness_gated' -MemberType NoteProperty -ErrorAction SilentlyContinue
+        if ($hasGated) {
+            foreach ($entry in $domain.strictness_gated) {
+                if (Get-Member -InputObject $entry -Name 'patterns' -MemberType NoteProperty) {
+                    foreach ($pattern in $entry.patterns) {
+                        try {
+                            $null = [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+                        }
+                        catch {
+                            throw "Invalid regex pattern in config (domain '$domainKey', strictness_gated entry '$($entry.name)'): $pattern"
+                        }
+                    }
+                }
+            }
+        }
+
         # Validate parameter_commands (optional, per-domain)
         $hasParamCmds = Get-Member -InputObject $domain -Name 'parameter_commands' -MemberType NoteProperty -ErrorAction SilentlyContinue
         if ($hasParamCmds) {
@@ -397,6 +422,23 @@ function Load-Config {
         # Compile modifying entry patterns
         if (Get-Member -InputObject $domain -Name 'modifying' -MemberType NoteProperty) {
             foreach ($entry in $domain.modifying) {
+                $compiledPatterns = @()
+                if (Get-Member -InputObject $entry -Name 'patterns' -MemberType NoteProperty) {
+                    foreach ($pattern in $entry.patterns) {
+                        # Auto-anchor with ^ to prevent substring false positives
+                        $anchoredPattern = if ($pattern.StartsWith('^')) { $pattern } else { '^' + $pattern }
+                        # Convert glob * to .* only when * follows a non-special character
+                        $anchoredPattern = $anchoredPattern -replace '(?<![.*\\])\*(?!\?|\*|\{)', '.*'
+                        $compiledPatterns += [regex]::new($anchoredPattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+                    }
+                }
+                $entry | Add-Member -MemberType NoteProperty -Name '_compiledPatterns' -Value $compiledPatterns -Force
+            }
+        }
+
+        # Compile strictness_gated entry patterns
+        if (Get-Member -InputObject $domain -Name 'strictness_gated' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            foreach ($entry in $domain.strictness_gated) {
                 $compiledPatterns = @()
                 if (Get-Member -InputObject $entry -Name 'patterns' -MemberType NoteProperty) {
                     foreach ($pattern in $entry.patterns) {
