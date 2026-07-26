@@ -114,6 +114,17 @@ function Test-ConfigSchema {
         throw "Configuration validation failed: 'tool_name_mapping' must be non-empty"
     }
 
+    # Default path_tool_mapping if missing. Maps tool_name -> dot-path of the
+    # payload field holding a FILE PATH (not a command). Tools listed here are
+    # decided by Resolve-PathPolicy (system_paths/editable_paths/CWD/strictness)
+    # instead of the command classifier.
+    if (-not (Get-Member -InputObject $Config -Name 'path_tool_mapping' -MemberType NoteProperty)) {
+        $Config | Add-Member -MemberType NoteProperty -Name 'path_tool_mapping' -Value ([PSCustomObject]@{}) -Force
+    }
+    if ($Config.path_tool_mapping -isnot [PSCustomObject]) {
+        throw "Configuration validation failed: 'path_tool_mapping' must be an object"
+    }
+
     # Default log_file_path to empty string if missing
     if (-not (Get-Member -InputObject $Config -Name 'log_file_path' -MemberType NoteProperty)) {
         $Config | Add-Member -MemberType NoteProperty -Name 'log_file_path' -Value '' -Force
@@ -261,6 +272,31 @@ function Test-ConfigSchema {
             }
         }
 
+        # Validate optional per-domain modifying_strictness (guard: only consulted
+        # when the global modifying_strictness is 'normal' — see Get-EffectiveStrictness)
+        if (Get-Member -InputObject $domain -Name 'modifying_strictness' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            if ($domain.modifying_strictness -notin @('strict', 'normal', 'loose')) {
+                throw "Configuration validation failed: domain '$domainKey' modifying_strictness must be 'strict', 'normal', or 'loose', got '$($domain.modifying_strictness)'"
+            }
+        }
+
+        # Validate strictness_gated entry patterns compile (optional middle tier)
+        $hasGated = Get-Member -InputObject $domain -Name 'strictness_gated' -MemberType NoteProperty -ErrorAction SilentlyContinue
+        if ($hasGated) {
+            foreach ($entry in $domain.strictness_gated) {
+                if (Get-Member -InputObject $entry -Name 'patterns' -MemberType NoteProperty) {
+                    foreach ($pattern in $entry.patterns) {
+                        try {
+                            $null = [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+                        }
+                        catch {
+                            throw "Invalid regex pattern in config (domain '$domainKey', strictness_gated entry '$($entry.name)'): $pattern"
+                        }
+                    }
+                }
+            }
+        }
+
         # Validate parameter_commands (optional, per-domain)
         $hasParamCmds = Get-Member -InputObject $domain -Name 'parameter_commands' -MemberType NoteProperty -ErrorAction SilentlyContinue
         if ($hasParamCmds) {
@@ -386,6 +422,23 @@ function Load-Config {
         # Compile modifying entry patterns
         if (Get-Member -InputObject $domain -Name 'modifying' -MemberType NoteProperty) {
             foreach ($entry in $domain.modifying) {
+                $compiledPatterns = @()
+                if (Get-Member -InputObject $entry -Name 'patterns' -MemberType NoteProperty) {
+                    foreach ($pattern in $entry.patterns) {
+                        # Auto-anchor with ^ to prevent substring false positives
+                        $anchoredPattern = if ($pattern.StartsWith('^')) { $pattern } else { '^' + $pattern }
+                        # Convert glob * to .* only when * follows a non-special character
+                        $anchoredPattern = $anchoredPattern -replace '(?<![.*\\])\*(?!\?|\*|\{)', '.*'
+                        $compiledPatterns += [regex]::new($anchoredPattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+                    }
+                }
+                $entry | Add-Member -MemberType NoteProperty -Name '_compiledPatterns' -Value $compiledPatterns -Force
+            }
+        }
+
+        # Compile strictness_gated entry patterns
+        if (Get-Member -InputObject $domain -Name 'strictness_gated' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            foreach ($entry in $domain.strictness_gated) {
                 $compiledPatterns = @()
                 if (Get-Member -InputObject $entry -Name 'patterns' -MemberType NoteProperty) {
                     foreach ($pattern in $entry.patterns) {

@@ -105,6 +105,23 @@ function Detect-IDE {
     }
 }
 
+function Get-InputFieldValue {
+    <# Traverse a dot-path (e.g. 'tool_input.file_path') on the raw input object.
+       Returns the trimmed string value, or $null if any segment is missing/empty. #>
+    param([PSCustomObject]$RawInput, [string]$FieldPath)
+    if (-not $FieldPath) { return $null }
+    $current = $RawInput
+    foreach ($part in ($FieldPath -split '\.')) {
+        if ($null -eq $current) { return $null }
+        if ($current.PSObject.Properties.Name -contains $part) {
+            $current = $current.$part
+        }
+        else { return $null }
+    }
+    if ($current -is [string] -and $current.Trim().Length -gt 0) { return $current.Trim() }
+    return $null
+}
+
 function Get-CommandFromInput {
     param([PSCustomObject]$RawInput, [PSCustomObject]$Config)
 
@@ -133,40 +150,18 @@ function Get-CommandFromInput {
 
         # If fieldPath is null/empty, skip mapping and fall through to heuristic
         if ($fieldPath) {
-            # Split on "." and traverse the object tree
+            $mapped = Get-InputFieldValue -RawInput $RawInput -FieldPath $fieldPath
+            if ($mapped) { return $mapped }
+            # Object at path with .command sub-field (VS Code Copilot pattern)
             $pathParts = $fieldPath -split '\.'
             $current = $RawInput
-            $valid = $true
-
             foreach ($part in $pathParts) {
-                if ($null -eq $current) {
-                    # Edge case: hit null mid-traversal
-                    $valid = $false
-                    break
-                }
-
-                if ($current.PSObject.Properties.Name -contains $part) {
-                    $current = $current.$part
-                }
-                else {
-                    $valid = $false
-                    break
-                }
+                if ($null -eq $current) { break }
+                if ($current.PSObject.Properties.Name -contains $part) { $current = $current.$part } else { $current = $null; break }
             }
-
-            if ($valid -and $null -ne $current) {
-                # Traversal succeeded — check if result is a usable string
-                if ($current -is [string] -and $current.Trim().Length -gt 0) {
-                    return $current
-                }
-
-                # Result is an object — try .command sub-field (VS Code Copilot pattern)
-                if ($current.PSObject.Properties.Name -contains 'command' -and $current.command -is [string]) {
-                    $trimmed = $current.command.Trim()
-                    if ($trimmed.Length -gt 0) {
-                        return $trimmed
-                    }
-                }
+            if ($null -ne $current -and $current -isnot [string] -and ($current.PSObject.Properties.Name -contains 'command') -and $current.command -is [string]) {
+                $trimmed = $current.command.Trim()
+                if ($trimmed.Length -gt 0) { return $trimmed }
             }
         }
         # Fall through to heuristic — mapping path didn't yield a usable string

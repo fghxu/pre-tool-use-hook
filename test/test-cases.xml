@@ -937,6 +937,51 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
       <copilot-command><![CDATA[pwsh -Command "Get-ChildItem -Path C:\Logs -Recurse -Filter '*.log' | Select-Object Name, Length, LastWriteTime | Sort-Object Length -Descending"]]></copilot-command>
     </test-case>
 
+    <test-case expected="allow" reason="read-only: flags skipped, inner Get-ChildItem" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -ExecutionPolicy Bypass -Command with read-only inner (flags must be skipped)</description>
+      <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -Command "Get-ChildItem C:\Logs"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: multiple flags skipped, inner Get-Date" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -NoProfile -NonInteractive -Command with read-only inner</description>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -NonInteractive -Command "Get-Date"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: pwsh.exe + flag skipped, inner Get-Service" category="PSWrapper-FlagSkipping">
+      <description>pwsh.exe -NoProfile -Command with read-only inner (.exe suffix must not defeat wrapper detection)</description>
+      <copilot-command><![CDATA[pwsh.exe -NoProfile -Command "Get-Service"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: flags skipped, inner Remove-Item" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -ExecutionPolicy Bypass -Command with modifying inner (unwrap must not weaken modifying detection)</description>
+      <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -Command "Remove-Item C:\temp\old.log"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: flags skipped, inner docker run" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -NoProfile -Command wrapping cross-domain modifying (docker run)</description>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -Command "docker run -d redis"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="unknown: script file execution is opaque (pinned accepted behavior)" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -ExecutionPolicy Bypass -File stays ask — script content not inspectable</description>
+      <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -File "src/Run-AllTests.ps1"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: -c short form + flag skipped, inner Get-ChildItem" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -NoProfile -c "Get-ChildItem" (short -c form must unwrap like -Command)</description>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -c "Get-ChildItem C:\Windows"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: -ScriptBlock + flag skipped, inner Get-ChildItem" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -NoProfile -ScriptBlock with read-only inner (flags must be skipped)</description>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -ScriptBlock { Get-ChildItem C:\Logs }]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: -ScriptBlock + flag skipped, inner Stop-Service" category="PSWrapper-FlagSkipping">
+      <description>pwsh.exe -NoProfile -ScriptBlock with modifying inner (unwrap must not weaken modifying detection)</description>
+      <copilot-command><![CDATA[pwsh.exe -NoProfile -ScriptBlock { Stop-Service Spooler }]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: value-taking flag skipped, cross-domain inner git status" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -ExecutionPolicy Bypass -NoProfile -c "git status" (flag with value + cross-domain read-only)</description>
+      <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -NoProfile -c "git status"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: wrapper as pipeline head, both segments read-only" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -NoProfile -Command piped to Select-Object (unwrap first segment, pipe second segment read-only)</description>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -Command "Get-Process" | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
     <test-case expected="ask" reason="modifying: Remove-LocalUser" category="PowerShell-UserManagement">
       <description>Remove-LocalUser deletes a local user account</description>
       <copilot-command><![CDATA[Remove-LocalUser -Name "tempUser"]]></copilot-command>
@@ -2981,6 +3026,1036 @@ if ($retries -ge 3) { "Service still down after 3 attempts" }
     <test-case expected="ask" reason="s3 sync" category="AWS-Normal-Modifying">
       <description>aws s3 sync with --delete flag (normal mode: flags stripped, sync is modifying)</description>
       <copilot-command><![CDATA[aws s3 sync ./build s3://my-bucket/ --delete --exclude "*.tmp"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <!-- ============================================================
+  FullPath cases (merged from test-cases.fullpath.xml)
+  ============================================================ -->
+
+  <!-- ============================================================
+  Windows Full-Path (Local) — 6 cases
+  ============================================================ -->
+  <category-group name="FullPath-Windows-Local">
+    <test-case expected="allow" reason="findstr (read-only)" category="FullPath-Windows-ReadOnly">
+      <description>C:\Windows\System32\findstr.exe searches for strings (read-only)</description>
+      <copilot-command><![CDATA[C:\Windows\System32\findstr.exe /n "error" *.log]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="tasklist (read-only)" category="FullPath-Windows-ReadOnly">
+      <description>C:\Windows\System32\tasklist.exe lists running processes (read-only)</description>
+      <copilot-command><![CDATA[C:\Windows\System32\tasklist.exe /v /fo csv]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="netstat (read-only)" category="FullPath-Windows-ReadOnly">
+      <description>C:\Windows\System32\netstat.exe shows network connections (read-only)</description>
+      <copilot-command><![CDATA[C:\Windows\System32\netstat.exe -ano | findstr ":443"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="taskkill (modifying)" category="FullPath-Windows-Modifying">
+      <description>C:\Windows\System32\taskkill.exe kills a process (modifying)</description>
+      <copilot-command><![CDATA[C:\Windows\System32\taskkill.exe /f /im notepad.exe]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push (modifying)" category="FullPath-Windows-Modifying">
+      <description>Quoted full path "C:\Program Files\Git\bin\git.exe" push origin main (modifying)</description>
+      <copilot-command><![CDATA["C:\Program Files\Git\bin\git.exe" push origin main]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="net stop (modifying)" category="FullPath-Windows-Modifying">
+      <description>C:\Windows\System32\net.exe stop wuauserv (modifying)</description>
+      <copilot-command><![CDATA[C:\Windows\System32\net.exe stop wuauserv]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <!-- ============================================================
+  Linux Full-Path (Local) — 4 cases
+  ============================================================ -->
+  <category-group name="FullPath-Linux-Local">
+    <test-case expected="allow" reason="grep (read-only)" category="FullPath-Linux-ReadOnly">
+      <description>/usr/bin/grep searches for pattern in files (read-only)</description>
+      <copilot-command><![CDATA[/usr/bin/grep -r "TODO" /home/user/project/]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="find (read-only)" category="FullPath-Linux-ReadOnly">
+      <description>/usr/bin/find searches for files by name (read-only)</description>
+      <copilot-command><![CDATA[/usr/bin/find /var/log -name "*.log" -mtime -7]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="rm (modifying, high)" category="FullPath-Linux-Modifying">
+      <description>/bin/rm deletes files recursively (modifying, high risk)</description>
+      <copilot-command><![CDATA[/bin/rm -rf /tmp/build/]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="systemctl stop (modifying)" category="FullPath-Linux-Modifying">
+      <description>/usr/bin/systemctl stop stops a service (modifying)</description>
+      <copilot-command><![CDATA[/usr/bin/systemctl stop nginx]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <!-- ============================================================
+  SSH + Full-Path — 4 cases (2 Windows, 2 Linux)
+  ============================================================ -->
+  <category-group name="FullPath-SSH">
+    <test-case expected="allow" reason="read-only" category="FullPath-SSH-Windows-ReadOnly">
+      <description>SSH with Windows full path: ssh user@host "C:\Windows\System32\findstr.exe error *.log" (inner findstr read-only)</description>
+      <copilot-command><![CDATA[ssh user@host "C:\Windows\System32\findstr.exe error *.log"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="taskkill" category="FullPath-SSH-Windows-Modifying">
+      <description>SSH with Windows full path: ssh user@host "C:\Windows\System32\taskkill.exe /f /im notepad.exe" (inner taskkill modifying)</description>
+      <copilot-command><![CDATA[ssh user@host "C:\Windows\System32\taskkill.exe /f /im notepad.exe"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="FullPath-SSH-Linux-ReadOnly">
+      <description>SSH with Linux full path: ssh user@host "/usr/bin/grep ERROR /var/log/app.log" (inner grep read-only)</description>
+      <copilot-command><![CDATA[ssh user@host "/usr/bin/grep ERROR /var/log/app.log"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="systemctl restart" category="FullPath-SSH-Linux-Modifying">
+      <description>SSH with Linux full path: ssh -i key.pem admin@host "/usr/bin/systemctl restart apache2" (inner systemctl modifying)</description>
+      <copilot-command><![CDATA[ssh -i key.pem admin@host "/usr/bin/systemctl restart apache2"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <!-- ============================================================
+  PowerShell Remoting + Full-Path — 4 cases (2 Windows, 2 Linux)
+  ============================================================ -->
+  <category-group name="FullPath-PSRemoting">
+    <test-case expected="allow" reason="read-only" category="FullPath-PSRemoting-Windows-ReadOnly">
+      <description>Invoke-Command with Windows full path: call operator with findstr (inner findstr read-only)</description>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { & "C:\Windows\System32\findstr.exe" /n "TODO" *.ps1 }]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Remove-Item" category="FullPath-PSRemoting-Windows-Modifying">
+      <description>Invoke-Command with Remove-Item (PowerShell cmdlet, modifying)</description>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { Remove-Item -Path "C:\temp\test.txt" -Force }]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="FullPath-PSRemoting-Linux-ReadOnly">
+      <description>pwsh -Command with Linux full path: /usr/bin/grep pattern file (inner grep read-only)</description>
+      <copilot-command><![CDATA[pwsh -Command "/usr/bin/grep ERROR /var/log/syslog"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="rm" category="FullPath-PSRemoting-Linux-Modifying">
+      <description>pwsh -Command with Linux full path: /bin/rm -rf /tmp/cache (inner rm modifying)</description>
+      <copilot-command><![CDATA[pwsh -Command "/bin/rm -rf /tmp/cache"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <!-- ============================================================
+  Mixed / Edge Cases — 2 cases
+  ============================================================ -->
+  <category-group name="FullPath-Mixed">
+    <test-case expected="ask" reason="git push + systemctl restart (both modifying)" category="FullPath-Mixed-Chained">
+      <description>Chained: full-path git push and full-path systemctl restart (both modifying)</description>
+      <copilot-command><![CDATA["C:\Program Files\Git\bin\git.exe" push origin main && /usr/bin/systemctl restart myapp]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="FullPath-Mixed-Pipeline">
+      <description>Pipeline: full-path grep piped to sort (both read-only)</description>
+      <copilot-command><![CDATA[/usr/bin/grep ERROR /var/log/app.log | /usr/bin/sort -u]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <!-- ============================================================
+  VarAssignment cases (merged from test-cases.var-assignment.xml)
+  ============================================================ -->
+  <category-group name="VarAssignment-Basic-AWS">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-AWS-ReadOnly">
+      <description>$var = aws sts get-caller-identity (get-* read-only)</description>
+      <copilot-command><![CDATA[$creds = aws sts get-caller-identity]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-AWS-ReadOnly">
+      <description>$var = aws ec2 describe-instances --region us-east-1 (describe-* read-only, --flags stripped in normal mode)</description>
+      <copilot-command><![CDATA[$instances = aws ec2 describe-instances --region us-east-1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-AWS-ReadOnly">
+      <description>$var = aws s3 ls (s3 ls read-only)</description>
+      <copilot-command><![CDATA[$buckets = aws s3 ls]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-AWS-ReadOnly">
+      <description>$var = aws sts get-caller-identity with --profile global flag (flags stripped in normal mode)</description>
+      <copilot-command><![CDATA[$who = aws --profile prod sts get-caller-identity]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="aws sts assume-role" category="VarAssignment-AWS-Modifying">
+      <description>$var = aws sts assume-role (modifying, generates credentials)</description>
+      <copilot-command><![CDATA[$creds = aws sts assume-role --role-arn arn:aws:iam::123456789012:role/admin]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="aws ec2 terminate-instances" category="VarAssignment-AWS-Modifying">
+      <description>$var = aws ec2 terminate-instances (modifying, high risk)</description>
+      <copilot-command><![CDATA[$x = aws ec2 terminate-instances --instance-ids i-1234567890abcdef0]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="aws s3 rm" category="VarAssignment-AWS-Modifying">
+      <description>$var = aws s3 rm (modifying, high risk)</description>
+      <copilot-command><![CDATA[$x = aws s3 rm s3://my-bucket/backup.tar.gz]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="aws s3 sync" category="VarAssignment-AWS-Modifying">
+      <description>$var = aws s3 sync with --delete flag (modifying)</description>
+      <copilot-command><![CDATA[$x = aws s3 sync ./build s3://my-bucket/ --delete]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-Basic-Git">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Git-ReadOnly">
+      <description>$var = git status (read-only)</description>
+      <copilot-command><![CDATA[$status = git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Git-ReadOnly">
+      <description>$var = git log --oneline -5 (read-only)</description>
+      <copilot-command><![CDATA[$log = git log --oneline -5]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Git-ReadOnly">
+      <description>$var = git -C /opt/repo status (read-only, -C flag stripped)</description>
+      <copilot-command><![CDATA[$result = git -C /opt/repo status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Git-ReadOnly">
+      <description>$var = git diff --cached (read-only)</description>
+      <copilot-command><![CDATA[$diff = git diff --cached]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push" category="VarAssignment-Git-Modifying">
+      <description>$var = git push origin main (modifying)</description>
+      <copilot-command><![CDATA[$result = git push origin main]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="strictness_gated: allows in normal; asks under strict (covered by test-cases.strictness-gated.strict.xml SG-Strict-VarAssignment)" category="VarAssignment-Git-Gated">
+      <description>$var = git add . (strictness_gated — allow in normal; strict-mode ask is pinned in the SG suites)</description>
+      <copilot-command><![CDATA[$x = git add .]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git clean" category="VarAssignment-Git-Modifying">
+      <description>$var = git clean -fd (modifying, high risk)</description>
+      <copilot-command><![CDATA[$x = git clean -fd]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git reset" category="VarAssignment-Git-Modifying">
+      <description>$var = git reset --hard HEAD~1 (modifying, high risk)</description>
+      <copilot-command><![CDATA[$x = git reset --hard HEAD~1]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-Basic-Docker">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Docker-ReadOnly">
+      <description>$var = docker ps (read-only)</description>
+      <copilot-command><![CDATA[$containers = docker ps]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Docker-ReadOnly">
+      <description>$var = docker images (read-only)</description>
+      <copilot-command><![CDATA[$images = docker images]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="docker stop" category="VarAssignment-Docker-Modifying">
+      <description>$var = docker stop my-container (modifying)</description>
+      <copilot-command><![CDATA[$x = docker stop my-container]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="docker exec" category="VarAssignment-Docker-Modifying">
+      <description>$var = docker exec container cat /etc/hosts (modifying, docker exec is modifying even with read-only inner cmd)</description>
+      <copilot-command><![CDATA[$x = docker exec my-container cat /etc/hosts]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="docker rm" category="VarAssignment-Docker-Modifying">
+      <description>$var = docker rm container (modifying, high risk)</description>
+      <copilot-command><![CDATA[$x = docker rm old-container]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-Basic-Kubernetes">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-K8s-ReadOnly">
+      <description>$var = kubectl get pods (read-only)</description>
+      <copilot-command><![CDATA[$pods = kubectl get pods]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-K8s-ReadOnly">
+      <description>$var = kubectl describe pod my-pod (read-only)</description>
+      <copilot-command><![CDATA[$desc = kubectl describe pod my-pod]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="kubectl delete" category="VarAssignment-K8s-Modifying">
+      <description>$var = kubectl delete pod my-pod (modifying)</description>
+      <copilot-command><![CDATA[$x = kubectl delete pod my-pod]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="kubectl apply" category="VarAssignment-K8s-Modifying">
+      <description>$var = kubectl apply -f manifest.yaml (modifying)</description>
+      <copilot-command><![CDATA[$x = kubectl apply -f manifest.yaml]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-Basic-Terraform">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-TF-ReadOnly">
+      <description>$var = terraform plan (read-only)</description>
+      <copilot-command><![CDATA[$plan = terraform plan]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="terraform apply" category="VarAssignment-TF-Modifying">
+      <description>$var = terraform apply -auto-approve (modifying)</description>
+      <copilot-command><![CDATA[$x = terraform apply -auto-approve]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-Basic-PowerShell">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PS-ReadOnly">
+      <description>$var = Get-ChildItem (Get-* read-only verb)</description>
+      <copilot-command><![CDATA[$items = Get-ChildItem -Path C:\temp]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PS-ReadOnly">
+      <description>$var = Get-Service (Get-* read-only verb)</description>
+      <copilot-command><![CDATA[$svc = Get-Service -Name wuauserv]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PS-ReadOnly">
+      <description>$var = Get-Process (Get-* read-only verb)</description>
+      <copilot-command><![CDATA[$procs = Get-Process -Name pwsh]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Stop-Process" category="VarAssignment-PS-Modifying">
+      <description>$var = Stop-Process (Stop-* modifying verb)</description>
+      <copilot-command><![CDATA[$x = Stop-Process -Name notepad]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Remove-Item" category="VarAssignment-PS-Modifying">
+      <description>$var = Remove-Item (Remove-* modifying verb)</description>
+      <copilot-command><![CDATA[$x = Remove-Item -Path C:\temp\test.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Set-Service" category="VarAssignment-PS-Modifying">
+      <description>$var = Set-Service (Set-* modifying verb)</description>
+      <copilot-command><![CDATA[$x = Set-Service -Name wuauserv -StartupType Disabled]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-Comparison-NotStripped">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Comparison">
+      <description>if ($x -eq 5) { Get-ChildItem } — -eq is comparison NOT variable assignment, Get-ChildItem is read-only</description>
+      <copilot-command><![CDATA[if ($x -eq 5) { Get-ChildItem }]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Comparison">
+      <description>if ($result -ne $null) { Get-Content file.txt } — -ne is comparison, Get-Content is read-only</description>
+      <copilot-command><![CDATA[if ($result -ne $null) { Get-Content file.txt }]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Comparison">
+      <description>while ($i -lt 10) { $x = Get-ChildItem } — -lt is comparison, Get-ChildItem is read-only</description>
+      <copilot-command><![CDATA[while ($i -lt 10) { $x = Get-ChildItem }]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-Chained">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Chained">
+      <description>$a = $b = Get-ChildItem (recursive strip, Get-* read-only)</description>
+      <copilot-command><![CDATA[$a = $b = Get-ChildItem]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Chained">
+      <description>$a = $b = aws sts get-caller-identity (recursive strip, get-* read-only)</description>
+      <copilot-command><![CDATA[$a = $b = aws sts get-caller-identity]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Stop-Process" category="VarAssignment-Chained">
+      <description>$a = $b = Stop-Process -Name test (recursive strip, Stop-* modifying)</description>
+      <copilot-command><![CDATA[$a = $b = Stop-Process -Name test]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-MidSegment">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-MidSegment">
+      <description>git status; $creds = aws sts get-caller-identity (both read-only after split and strip)</description>
+      <copilot-command><![CDATA[git status; $creds = aws sts get-caller-identity]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push" category="VarAssignment-MidSegment">
+      <description>git push origin main; $data = aws sts get-caller-identity (git push modifies, aggregate ask)</description>
+      <copilot-command><![CDATA[git push origin main; $data = aws sts get-caller-identity]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-MidSegment">
+      <description>git status &amp;&amp; $result = aws ec2 describe-instances (both read-only after &amp;&amp; split and strip)</description>
+      <copilot-command><![CDATA[git status && $result = aws ec2 describe-instances]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-Pipeline">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-Pipeline">
+      <description>$result = Get-ChildItem | Get-Member (both Get-* read-only in pipeline)</description>
+      <copilot-command><![CDATA[$result = Get-ChildItem | Get-Member]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Remove-Item" category="VarAssignment-Pipeline">
+      <description>$result = Get-ChildItem | Remove-Item (Remove-* modifying in pipeline)</description>
+      <copilot-command><![CDATA[$result = Get-ChildItem | Remove-Item]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Stop-Process" category="VarAssignment-Pipeline">
+      <description>$x = Get-Process | Stop-Process (Stop-* modifying in pipeline)</description>
+      <copilot-command><![CDATA[$x = Get-Process | Stop-Process]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-MultiLine">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-MultiLine">
+      <description>Multi-line: both lines are read-only Get-* cmdlets</description>
+      <copilot-command><![CDATA[$x = Get-ChildItem
+$y = Get-Process]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="Stop-Process" category="VarAssignment-MultiLine">
+      <description>Multi-line: first line read-only, second line Stop-Process modifying</description>
+      <copilot-command><![CDATA[$x = Get-ChildItem
+$y = Stop-Process -Name notepad]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-MultiLine">
+      <description>Multi-line: git status and git log (both read-only)</description>
+      <copilot-command><![CDATA[$status = git status
+$log = git log --oneline -3]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-SSH-Nesting">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-SSH">
+      <description>ssh user@host with $var = aws sts get-caller-identity inside (read-only)</description>
+      <copilot-command><![CDATA[ssh user@host "$creds = aws sts get-caller-identity"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="aws sts assume-role" category="VarAssignment-SSH">
+      <description>ssh user@host with $var = aws sts assume-role inside (modifying)</description>
+      <copilot-command><![CDATA[ssh user@host "$creds = aws sts assume-role --role-arn arn:aws:iam::123456789012:role/admin"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-SSH">
+      <description>ssh user@host with $var = git status inside (read-only)</description>
+      <copilot-command><![CDATA[ssh user@host "$result = git status"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push" category="VarAssignment-SSH">
+      <description>ssh user@host with $var = git push inside (modifying)</description>
+      <copilot-command><![CDATA[ssh user@host "$result = git push origin main"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-SSH">
+      <description>ssh user@host with $var = Get-ChildItem inside pwsh (VerbNoun anchor fix correctly resolves inner Get-ChildItem)</description>
+      <copilot-command><![CDATA[ssh user@host "pwsh -Command '$items = Get-ChildItem'"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-PowerShell-Remoting">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PSRemoting">
+      <description>Invoke-Command -ScriptBlock with $var = git status (read-only)</description>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { $result = git status }]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push" category="VarAssignment-PSRemoting">
+      <description>Invoke-Command -ScriptBlock with $var = git push (modifying)</description>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { $result = git push origin main }]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-PSRemoting">
+      <description>pwsh -Command with $var = aws sts get-caller-identity (read-only)</description>
+      <copilot-command><![CDATA[pwsh -Command "$creds = aws sts get-caller-identity"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="aws sts assume-role" category="VarAssignment-PSRemoting">
+      <description>pwsh -Command with $var = aws sts assume-role (modifying)</description>
+      <copilot-command><![CDATA[pwsh -Command "$creds = aws sts assume-role --role-arn arn:aws:iam::123456789012:role/admin"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-Nested-PowerShell-SSH">
+    <test-case expected="ask" reason="ssh unknown" category="VarAssignment-Nested-PS-SSH">
+      <description>pwsh wrapping ssh with aws get-caller-identity (double-nested: intermediate ssh wrapper triggers ask)</description>
+      <copilot-command><![CDATA[pwsh -Command "ssh user@host 'aws sts get-caller-identity'"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="git push" category="VarAssignment-Nested-PS-SSH">
+      <description>pwsh wrapping ssh with git push (modifying)</description>
+      <copilot-command><![CDATA[pwsh -Command "ssh user@host 'git push origin main'"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="pwsh unknown" category="VarAssignment-Nested-PS-SSH">
+      <description>pwsh wrapping ssh wrapping pwsh with $var = Get-ChildItem (triple-nested: intermediate wrappers trigger ask)</description>
+      <copilot-command><![CDATA[pwsh -Command "ssh user@host 'pwsh -Command \"`$items = Get-ChildItem\"'"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="VarAssignment-SSH-Nested-BashSubshell">
+    <test-case expected="allow" reason="read-only" category="VarAssignment-SSH-BashSubshell">
+      <description>ssh user@host with bash creds=$(aws sts get-caller-identity) — subshell read-only</description>
+      <copilot-command><![CDATA[ssh user@host "creds=$(aws sts get-caller-identity)"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="aws sts assume-role" category="VarAssignment-SSH-BashSubshell">
+      <description>ssh user@host with bash creds=$(aws sts assume-role ...) — subshell modifying</description>
+      <copilot-command><![CDATA[ssh user@host "creds=$(aws sts assume-role --role-arn arn:aws:iam::123456789012:role/admin)"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-SSH-BashSubshell">
+      <description>ssh user@host with bash data=$(git status) — subshell read-only</description>
+      <copilot-command><![CDATA[ssh user@host "data=$(git status)"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="VarAssignment-SSH-BashSubshell">
+      <description>ssh user@host with bash pods=$(kubectl get pods) — subshell read-only</description>
+      <copilot-command><![CDATA[ssh user@host "pods=$(kubectl get pods)"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <!-- ============================================================
+  Adhoc cases (merged from test-cases.adhoc.xml)
+  ============================================================ -->
+  <category-group name="Quick-Smoke">
+    <test-case expected="allow" reason="read-only" category="Quick-Smoke">
+      <description>Smoke test: dir lists directory contents (read-only)</description>
+      <copilot-command><![CDATA[dir C:\temp]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <!-- =================================================================== -->
+  <!-- Parameter-Value-Aware Classification                                -->
+  <!-- The point of this group: the deciding parameter (Method, d, X,      -->
+  <!-- version) appears at ANY position in the line.                       -->
+  <!-- =================================================================== -->
+
+  <category-group name="Parameter-PS-RestMethod">
+
+    <!-- read-only: Get / Head / absent -->
+    <test-case expected="allow" reason="read-only: Invoke-RestMethod -Method Get" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod GET (Method at end) — read-only</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Uri "https://example.com" -Method Get]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: Invoke-RestMethod default GET (no -Method)" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod with no -Method defaults to GET — read-only</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: Invoke-RestMethod -Method Head" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod HEAD — read-only</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Uri "https://example.com" -Method Head]]></copilot-command>
+    </test-case>
+
+    <!-- modifying: Post/Put/Patch/Delete at any position -->
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Post" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod POST (Method first) — modifying</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method Post -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Put" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod PUT (Method last) — modifying</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Uri "https://example.com" -Method Put]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Patch" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod PATCH (Method first) — modifying</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method Patch -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Delete (high)" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod DELETE (uppercase, reordered) — modifying</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method DELETE -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method:Post (colon form)" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod colon-form -Method:Post — modifying</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method:Post -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="ask: Invoke-RestMethod -Method Custom (unrecognized value, normal mode)" category="Parameter-PS-RestMethod">
+      <description>Invoke-RestMethod with an unrecognized -Method value — ask in strict/normal (forces explicit config)</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -Method Custom -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+
+    <!-- Invoke-WebRequest + aliases -->
+    <test-case expected="allow" reason="read-only: Invoke-WebRequest -Method Get" category="Parameter-PS-RestMethod">
+      <description>Invoke-WebRequest GET — read-only</description>
+      <copilot-command><![CDATA[Invoke-WebRequest -Uri "https://example.com" -Method Get]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-WebRequest -Method Delete (high)" category="Parameter-PS-RestMethod">
+      <description>Invoke-WebRequest DELETE — modifying</description>
+      <copilot-command><![CDATA[Invoke-WebRequest -Uri "https://example.com" -Method Delete]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: irm alias -Method Post" category="Parameter-PS-RestMethod">
+      <description>irm alias POST — modifying (alias resolved)</description>
+      <copilot-command><![CDATA[irm -Uri "https://example.com" -Method Post]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: iwr alias -Method Get (reordered)" category="Parameter-PS-RestMethod">
+      <description>iwr alias GET with Method first — read-only (alias + reorder)</description>
+      <copilot-command><![CDATA[iwr -Method Get -Uri "https://example.com"]]></copilot-command>
+    </test-case>
+
+    <!-- variable assignment wrapping a modifying call -->
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Post (after var-assignment strip)" category="Parameter-PS-RestMethod">
+      <description>$response = Invoke-RestMethod ... -Method Post — var stripped, then rule fires</description>
+      <copilot-command><![CDATA[$response = Invoke-RestMethod -Uri "https://example.com" -Method Post]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="Parameter-PS-Embedded">
+
+    <test-case expected="allow" reason="read-only: Invoke-RestMethod -Method Get inside remoting" category="Parameter-PS-Embedded">
+      <description>Invoke-Command remoting wrapping a GET — read-only</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName SRV1 -ScriptBlock { Invoke-RestMethod -Uri "https://example.com" -Method Get }]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Post inside remoting" category="Parameter-PS-Embedded">
+      <description>Invoke-Command remoting wrapping a POST — modifying (inner command classified)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName SRV1 -ScriptBlock { Invoke-RestMethod -Uri "https://example.com" -Method Post }]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Delete inside pwsh -Command" category="Parameter-PS-Embedded">
+      <description>pwsh -Command wrapping a DELETE — modifying (inner extracted from quoted string)</description>
+      <copilot-command><![CDATA[pwsh -Command "Invoke-RestMethod -Method Delete -Uri https://example.com"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: Invoke-RestMethod -Method Post in a chained line" category="Parameter-PS-Embedded">
+      <description>Chained: POST call ; Get-Process — modifying sub-command wins</description>
+      <copilot-command><![CDATA[$r = Invoke-RestMethod -Method Post -Uri https://example.com; Get-Process]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="Parameter-Linux-Curl">
+
+    <!-- modifying: -d (short) and long data flag at any position -->
+    <test-case expected="ask" reason="modifying: curl -d (data before URL)" category="Parameter-Linux-Curl">
+      <description>curl POST via -d before the URL — modifying</description>
+      <copilot-command><![CDATA[curl -H "Content-Type: application/json" -d '{"name":"John","age":30}' https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl -d (data after URL)" category="Parameter-Linux-Curl">
+      <description>curl POST via -d AFTER the URL — modifying (position-independent)</description>
+      <copilot-command><![CDATA[curl https://example.com -H "Content-Type: application/json" -d '{"name":"John","age":30}']]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl --data" category="Parameter-Linux-Curl">
+      <description>curl POST via long --data flag — modifying</description>
+      <copilot-command><![CDATA[curl --data '{"a":1}' https://example.com]]></copilot-command>
+    </test-case>
+
+    <!-- modifying: -X verb (space and attached forms) -->
+    <test-case expected="ask" reason="modifying: curl -X POST" category="Parameter-Linux-Curl">
+      <description>curl explicit POST — modifying</description>
+      <copilot-command><![CDATA[curl -X POST https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl -X PUT" category="Parameter-Linux-Curl">
+      <description>curl explicit PUT — modifying</description>
+      <copilot-command><![CDATA[curl -X PUT https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl -X DELETE" category="Parameter-Linux-Curl">
+      <description>curl explicit DELETE (spaced) — modifying</description>
+      <copilot-command><![CDATA[curl -X DELETE https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl -XDELETE (attached)" category="Parameter-Linux-Curl">
+      <description>curl DELETE attached (-XDELETE, no space) — modifying</description>
+      <copilot-command><![CDATA[curl -XDELETE https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="ask: curl -X FROG (unrecognized verb, normal mode)" category="Parameter-Linux-Curl">
+      <description>curl with an unrecognized -X verb — ask in strict/normal</description>
+      <copilot-command><![CDATA[curl -X FROG https://example.com]]></copilot-command>
+    </test-case>
+
+    <!-- modifying: upload flags -->
+    <test-case expected="ask" reason="modifying: curl -F (form upload)" category="Parameter-Linux-Curl">
+      <description>curl multipart form upload (-F) — modifying</description>
+      <copilot-command><![CDATA[curl -F 'file=@report.txt' https://example.com/upload]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: curl -T (file upload)" category="Parameter-Linux-Curl">
+      <description>curl file upload (-T) — modifying</description>
+      <copilot-command><![CDATA[curl -T archive.zip https://example.com/upload]]></copilot-command>
+    </test-case>
+
+    <!-- read-only: plain GET -->
+    <test-case expected="allow" reason="read-only: curl -X GET" category="Parameter-Linux-Curl">
+      <description>curl explicit GET — read-only</description>
+      <copilot-command><![CDATA[curl -X GET https://example.com]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: curl silent GET" category="Parameter-Linux-Curl">
+      <description>curl silent GET — read-only (no modifying flag)</description>
+      <copilot-command><![CDATA[curl -s https://httpbin.org/ip]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: curl plain GET" category="Parameter-Linux-Curl">
+      <description>curl plain GET — read-only</description>
+      <copilot-command><![CDATA[curl https://example.com]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="Parameter-Linux-Python">
+
+    <test-case expected="allow" reason="read-only: python --version" category="Parameter-Linux-Python">
+      <description>python --version with stderr redirect — read-only</description>
+      <copilot-command><![CDATA[python --version 2>&1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: python -V" category="Parameter-Linux-Python">
+      <description>python -V short flag — read-only</description>
+      <copilot-command><![CDATA[python -V]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: python --help" category="Parameter-Linux-Python">
+      <description>python --help — read-only</description>
+      <copilot-command><![CDATA[python --help]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: python3 --version (alias)" category="Parameter-Linux-Python">
+      <description>python3 alias --version — read-only</description>
+      <copilot-command><![CDATA[python3 --version]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="modifying: python runs a script (default)" category="Parameter-Linux-Python">
+      <description>python runs a script — modifying (no read-only flag, default modifying)</description>
+      <copilot-command><![CDATA[python gen_t4.py]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: python3 runs a script with args (alias)" category="Parameter-Linux-Python">
+      <description>python3 runs a training script with args — modifying</description>
+      <copilot-command><![CDATA[python3 train.py --epochs 10]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: py alias runs a script" category="Parameter-Linux-Python">
+      <description>py alias runs a script — modifying</description>
+      <copilot-command><![CDATA[py script.py]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="New-Samples-Regex-Confusion">
+
+    <test-case expected="ask" reason="git tag" category="DOS-Git-Modifying">
+      <description>git tag with multi-line message + git log + git tag list pipeline</description>
+      <copilot-command><![CDATA[git tag -a v3.2.0-observability -m "V3 and graceful shutdown
+
+Added
+see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select-Object -First 3]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PowerShell-ReadOnly">
+      <description>Select-String path+pattern with pipes and brackets in regex, piped to ForEach/Where</description>
+      <copilot-command><![CDATA[Select-String -Path "$env:temp\build.log" -Pattern "server.*not ready|server is healthy" | ForEach-Object { $_.Line } | Where-Object { $_ -match "step|18:" -or $_ -notmatch "^\[" }]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PowerShell-ReadOnly">
+      <description>Select-String simple regex with anchors and pipes</description>
+      <copilot-command><![CDATA[Select-String -Pattern '^## | ^### ']]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PowerShell-ReadOnly">
+      <description>Variable assignment using -replace with regex string containing pipes/parens and scriptblock</description>
+      <copilot-command><![CDATA[$line = $line -replace 'deploy BC|Deploy BC|Summary \(BC\)', { $_.Value -replace 'BC', 'PC' -replace 'bc', 'pc' }]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PowerShell-ReadOnly">
+      <description>Call operator &amp; with scriptblock containing Get-Content and ConvertFrom-Json</description>
+      <copilot-command><![CDATA[& { $json = Get-Content -Path 'jenkins\build.json' -Raw; $buildinfo = $json | ConvertFrom-Json; }]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="AWS-Normal-ReadOnly">
+      <description>AWS configure get is a read-only lookup</description>
+      <copilot-command><![CDATA[aws configure get sso_role_name]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PowerShell-ReadOnly">
+      <description>.NET file read + substring with Math::Max expression</description>
+      <copilot-command><![CDATA[$raw = [System.IO.File]::ReadAllText("c:\a.txt"); $tail = $raw.Substring([Math]::Max(0, $raw.Length));]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="PS-Safe-Expressions">
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>Hashtable assignment with variable value</description>
+      <copilot-command><![CDATA[$headers = @{'provate-token' = $gittoken}]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>String split piped to Select-Object</description>
+      <copilot-command><![CDATA[$log -split "`n" | Select-Object -First 40]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>Invoke-RestMethod GET followed by regex filter pipeline with pipes in pattern</description>
+      <copilot-command><![CDATA[Invoke-RestMethod -method Get -Headers $hdr -Uri 'https://server/text'; ($b801log -split "`n" | Select-String -Pattern 'Error:|Exception out|failure|pass:' | Select-Object -First 20)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>SSH with key variable and read-only remote commands</description>
+      <copilot-command><![CDATA[$key='c:\temp\a path\a.pem'; ssh -i $key -o StrictHostKeyChecking=accept-new -o BatchMode=yes user@server 'whoami;hostname']]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>AWS version and Get-Content in same line</description>
+      <copilot-command><![CDATA[aws --version; Get-Content $file]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>Bare hashtable expression</description>
+      <copilot-command><![CDATA[@{ authorization  = "Basice $encodeed" }]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="PS-Safe-Expressions">
+      <description>JSON string assignment (inner JSON is string data)</description>
+      <copilot-command><![CDATA[$body = '{"id": "1", "name": "2" "context":{"id": "1"} }']]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="AST-Arbiter-Guard">
+
+    <test-case expected="ask" reason="git" category="AST-Arbiter-Guard">
+      <description>Unknown git subcommand stays ask (arbiter inconclusive)</description>
+      <copilot-command><![CDATA[git --online -3]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>Unknown cmdlet stays ask</description>
+      <copilot-command><![CDATA[Some-UnknownCmdlet -Foo]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>One unknown element poisons a pipeline</description>
+      <copilot-command><![CDATA[weirdcmd -x | Get-Process]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="Invoke-Expression" category="AST-Arbiter-Guard">
+      <description>Command inside an assignment is never a safe expression</description>
+      <copilot-command><![CDATA[$x = Invoke-Expression 'evil']]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>Bash for-loop with unknown command: PS parse error, arbiter aborts</description>
+      <copilot-command><![CDATA[for f in /etc/*; do weirdcmd $f; done]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>.NET Delete is not in the method allowlist</description>
+      <copilot-command><![CDATA[$x = [System.IO.File]::Delete('c:\temp\x.txt')]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>Instance method Kill is not in the method allowlist</description>
+      <copilot-command><![CDATA[$proc.Kill()]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unknown command" category="AST-Arbiter-Guard">
+      <description>Property SET on a type is a side effect</description>
+      <copilot-command><![CDATA[[Console]::Title = 'x']]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="redirection-target" category="AST-Arbiter-Guard">
+      <description>Redirect outside CWD/editable blocks; redirect blockers bypass the arbiter</description>
+      <copilot-command><![CDATA[echo hi > ..\outside\file.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="rm" category="AST-Arbiter-Guard">
+      <description>Known-modifying inner command: arbiter never runs</description>
+      <copilot-command><![CDATA[ssh user@host 'rm -rf /tmp/x']]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <!-- =================================================================== -->
+  <!-- Log-Gap-Fill: commands seen as "unknown command" in prehook logs     -->
+  <!-- (spec 2026-07-19-agent-command-guidelines-design.md).                -->
+  <!-- =================================================================== -->
+
+  <category-group name="LogGap-Git">
+    <test-case expected="allow" reason="read-only: git worktree list" category="LogGap-Git">
+      <description>git worktree list — read-only</description>
+      <copilot-command><![CDATA[git worktree list]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: git worktree remove" category="LogGap-Git">
+      <description>git worktree remove — modifying (low)</description>
+      <copilot-command><![CDATA[git worktree remove mywt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: git worktree prune" category="LogGap-Git">
+      <description>git worktree prune — modifying (low)</description>
+      <copilot-command><![CDATA[git worktree prune]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: git tag -a" category="LogGap-Git">
+      <description>git tag -a with -m — annotated tag creation, modifying (low)</description>
+      <copilot-command><![CDATA[git tag -a v1.2 -m "release 1.2"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: git tag -l (regression guard)" category="LogGap-Git">
+      <description>git tag -l stays read-only after adding tag creation patterns</description>
+      <copilot-command><![CDATA[git tag -l "v1.*"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="LogGap-DOS">
+    <test-case expected="allow" reason="read-only: reg query" category="LogGap-DOS">
+      <description>reg query — read-only</description>
+      <copilot-command><![CDATA[reg query "HKLM\SOFTWARE\Microsoft\Windows" /s]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: sc qc" category="LogGap-DOS">
+      <description>sc qc — query service config, read-only</description>
+      <copilot-command><![CDATA[sc qc wuauserv]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: sc start" category="LogGap-DOS">
+      <description>sc start — modifying (medium)</description>
+      <copilot-command><![CDATA[sc start wuauserv]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: net share (bare)" category="LogGap-DOS">
+      <description>net share bare — list shares, read-only</description>
+      <copilot-command><![CDATA[net share]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: net share name (view)" category="LogGap-DOS">
+      <description>net share docs — view one share, read-only</description>
+      <copilot-command><![CDATA[net share docs]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: net share name=path" category="LogGap-DOS">
+      <description>net share docs=C:\docs — create share, modifying (high)</description>
+      <copilot-command><![CDATA[net share docs=C:\docs]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: net share /delete" category="LogGap-DOS">
+      <description>net share docs /delete — delete share, modifying (high)</description>
+      <copilot-command><![CDATA[net share docs /delete]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="LogGap-DevTools">
+    <test-case expected="allow" reason="read-only: adb devices" category="LogGap-DevTools">
+      <description>adb devices — read-only</description>
+      <copilot-command><![CDATA[adb devices]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: adb logcat (no -c)" category="LogGap-DevTools">
+      <description>adb logcat -d — dump log, read-only</description>
+      <copilot-command><![CDATA[adb logcat -d]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: adb logcat -c" category="LogGap-DevTools">
+      <description>adb logcat -c — clears log buffer, modifying (low); contrast pair with -d</description>
+      <copilot-command><![CDATA[adb logcat -c]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: adb shell getprop" category="LogGap-DevTools">
+      <description>adb shell getprop — read-only</description>
+      <copilot-command><![CDATA[adb shell getprop ro.product.model]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: adb shell pm list" category="LogGap-DevTools">
+      <description>adb shell pm list packages — read-only</description>
+      <copilot-command><![CDATA[adb shell pm list packages]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: adb install" category="LogGap-DevTools">
+      <description>adb install -r — modifying (low)</description>
+      <copilot-command><![CDATA[adb install -r app.apk]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: adb push" category="LogGap-DevTools">
+      <description>adb push — modifying (low)</description>
+      <copilot-command><![CDATA[adb push file.txt /sdcard/]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: adb shell am start" category="LogGap-DevTools">
+      <description>adb shell am start — launches activity, modifying (low)</description>
+      <copilot-command><![CDATA[adb shell am start -n com.app/.MainActivity]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: unzip" category="LogGap-DevTools">
+      <description>unzip writes files — modifying (low)</description>
+      <copilot-command><![CDATA[unzip -o archive.zip -d out]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="LogGap-JavaGradle">
+    <test-case expected="allow" reason="read-only: javap" category="LogGap-JavaGradle">
+      <description>javap disassembly — read-only</description>
+      <copilot-command><![CDATA[javap -p com.example.Foo]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: ./gradlew" category="LogGap-JavaGradle">
+      <description>./gradlew assembleDebug — build writes outputs, modifying (low)</description>
+      <copilot-command><![CDATA[./gradlew assembleDebug]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: gradlew" category="LogGap-JavaGradle">
+      <description>gradlew clean — modifying (low)</description>
+      <copilot-command><![CDATA[gradlew clean]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: .\gradlew" category="LogGap-JavaGradle">
+      <description>.\gradlew test (Windows form) — modifying (low)</description>
+      <copilot-command><![CDATA[.\gradlew test]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="LogGap-GH">
+    <test-case expected="allow" reason="read-only: gh pr list" category="LogGap-GH">
+      <description>gh pr list — read-only</description>
+      <copilot-command><![CDATA[gh pr list]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: gh pr view" category="LogGap-GH">
+      <description>gh pr view — read-only</description>
+      <copilot-command><![CDATA[gh pr view 123]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: gh repo view" category="LogGap-GH">
+      <description>gh repo view — read-only</description>
+      <copilot-command><![CDATA[gh repo view]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: gh release list" category="LogGap-GH">
+      <description>gh release list — read-only</description>
+      <copilot-command><![CDATA[gh release list]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: gh pr create" category="LogGap-GH">
+      <description>gh pr create — modifying (medium)</description>
+      <copilot-command><![CDATA[gh pr create --title "x" --body "y"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: gh release delete" category="LogGap-GH">
+      <description>gh release delete — modifying (medium)</description>
+      <copilot-command><![CDATA[gh release delete v1.0]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <!-- ============================================================
+  Redirect (normal-mode) cases (merged from test-cases.redirect-normal.xml)
+  ============================================================ -->
+  <category-group name="Redirect-Normal-Basic">
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-NonSystem">
+      <description>echo &gt; /home/user/file.txt (non-system path, allowed in normal mode)</description>
+      <copilot-command><![CDATA[echo hello > /home/user/output.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-NonSystem">
+      <description>echo &gt;&gt; /home/user/log.txt (non-system append, allowed in normal mode)</description>
+      <copilot-command><![CDATA[echo "log entry" >> /home/user/app.log]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-NonSystem">
+      <description>git status &gt; /home/dev/repo-status.txt (non-system, normal mode allow)</description>
+      <copilot-command><![CDATA[git status > /home/dev/repo-status.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-NonSystem">
+      <description>ls &gt; ~/output.txt (home directory, non-system, allowed)</description>
+      <copilot-command><![CDATA[ls -la > ~/output.txt]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Normal-TempDiscard">
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-Temp">
+      <description>ls &gt; /tmp/output.txt (temp path, always allowed)</description>
+      <copilot-command><![CDATA[ls -la > /tmp/output.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-Temp">
+      <description>cat &gt; /dev/null (discard, always allowed)</description>
+      <copilot-command><![CDATA[cat access.log > /dev/null]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-Temp">
+      <description>dir &gt; NUL (DOS discard, always allowed)</description>
+      <copilot-command><![CDATA[dir > NUL]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-Temp">
+      <description>type data.txt &gt; %TEMP%\out.txt (temp path, always allowed)</description>
+      <copilot-command><![CDATA[type data.txt > %TEMP%\out.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-Temp">
+      <description>cat &gt;&gt; /tmp/log.txt (append to temp, always allowed)</description>
+      <copilot-command><![CDATA[echo "log" >> /tmp/app.log]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Normal-ReadOnly">
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-Fd">
+      <description>command 2&gt;&amp;1 (file descriptor redirect, always allowed)</description>
+      <copilot-command><![CDATA[git status 2>&1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-Input">
+      <description>cat &lt; /etc/hostname (input redirect, always allowed)</description>
+      <copilot-command><![CDATA[cat < /etc/hostname]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-HereString">
+      <description>grep &lt;&lt;&lt; "pattern" (here-string, always allowed)</description>
+      <copilot-command><![CDATA[grep error <<< "error: disk full"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Normal-System">
+    <test-case expected="ask" reason="high risk" category="Redirect-Normal-SystemPath">
+      <description>echo &gt; /etc/config.conf (system path, always ask)</description>
+      <copilot-command><![CDATA[echo "debug=true" > /etc/config.conf]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Normal-SystemPath">
+      <description>echo &gt;&gt; /etc/hosts (system path append, always ask)</description>
+      <copilot-command><![CDATA[echo "127.0.0.1 myapp" >> /etc/hosts]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Normal-SystemPath">
+      <description>echo &gt;&gt; /var/log/app.log (system path, /var/ blocked)</description>
+      <copilot-command><![CDATA[echo "error" >> /var/log/app.log]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Normal-SystemPath">
+      <description>echo &gt; /opt/config/settings.conf (system path, /opt/ blocked)</description>
+      <copilot-command><![CDATA[echo "key=val" > /opt/config/settings.conf]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Normal-SystemPath">
+      <description>echo &gt; /usr/local/bin/script (system path, /usr/ blocked)</description>
+      <copilot-command><![CDATA[echo "#!/bin/sh" > /usr/local/bin/script.sh]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Normal-Windows-System">
+    <test-case expected="ask" reason="high risk" category="Redirect-Normal-WinSystem">
+      <description>dir &gt; C:\Windows\System32\file.txt (windows system path, always ask)</description>
+      <copilot-command><![CDATA[dir > C:\Windows\System32\file.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Normal-WinSystem">
+      <description>dir &gt; C:\Windows\Temp\file.txt (windows system path under C:\Windows, always ask)</description>
+      <copilot-command><![CDATA[dir > C:\Windows\Temp\file.txt]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Normal-SSH">
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-SSH">
+      <description>ssh user@host "ls &gt; /home/user/out.txt" (non-system in SSH, normal mode allow)</description>
+      <copilot-command><![CDATA[ssh user@host "ls -la > /home/user/out.txt"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="high risk" category="Redirect-Normal-SSH">
+      <description>ssh user@host "echo x &gt;&gt; /etc/hosts" (system path in SSH, always ask)</description>
+      <copilot-command><![CDATA[ssh user@host "echo '127.0.0.1 app' >> /etc/hosts"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Normal-PSRemoting">
+    <test-case expected="allow" reason="read-only" category="Redirect-Normal-PSRemoting">
+      <description>Invoke-Command with Get-Service &gt; C:\temp\svc.txt (temp path, always allow)</description>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { Get-Service > C:\temp\svc.txt }]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="unknown" category="Redirect-Normal-PSRemoting">
+      <description>pwsh wrapping ssh with cat &gt; /tmp/out.txt (double-nested wrapper limitation, safe default ask)</description>
+      <copilot-command><![CDATA[pwsh -Command "ssh user@host 'cat /var/log/syslog > /tmp/out.txt'"]]></copilot-command>
+    </test-case>
+  </category-group>
+
+  <category-group name="Redirect-Normal-PowerShell-Cmdlets">
+    <test-case expected="ask" reason="modifying" category="Redirect-Normal-PS-Cmdlet">
+      <description>Get-Process | Out-File C:\temp\proc.txt (Out-* modifying verb, not redirect-based)</description>
+      <copilot-command><![CDATA[Get-Process | Out-File C:\temp\proc.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying" category="Redirect-Normal-PS-Cmdlet">
+      <description>Set-Content -Path C:\temp\file.txt -Value hello (Set-* modifying verb)</description>
+      <copilot-command><![CDATA[Set-Content -Path C:\temp\file.txt -Value hello]]></copilot-command>
     </test-case>
   </category-group>
 

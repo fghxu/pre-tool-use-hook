@@ -348,7 +348,9 @@ pwsh -NoProfile -File src/TestRunner.ps1
 # Filter by category
 pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/test-cases.xml -Filter "Docker"
 
-# Redirect suites use a strictness override
+# Strict-mode suites: use a fixture config (decoupled from live config.json)...
+pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/test-cases.redirect-strict.xml -ConfigPath test/config/config.strict.json
+# ...or a strictness override against the live config (equivalent)
 pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/test-cases.redirect-strict.xml -Strictness strict
 
 # editable_paths / CWD overrides (for redirect experimentation)

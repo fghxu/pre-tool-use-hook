@@ -105,8 +105,8 @@
 
   <category-group name="Redirect-Strict-PSRemoting">
     <test-case expected="ask" reason="unknown" category="Redirect-Strict-PSRemoting">
-      <description>Invoke-Command with Get-Service &gt; C:\temp\svc.txt (strict mode, C:\temp not in temp patterns)</description>
-      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { Get-Service > C:\temp\svc.txt }]]></copilot-command>
+      <description>Invoke-Command with Get-Service &gt; C:\some_dir\svc.txt (strict mode, C:\some_dir not in temp patterns)</description>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { Get-Service > C:\some_dir\svc.txt }]]></copilot-command>
     </test-case>
     <test-case expected="ask" reason="unknown" category="Redirect-Strict-PSRemoting">
       <description>pwsh wrapping ssh with cat &gt; /tmp/out.txt (double-nested wrapper limitation, safe default ask)</description>

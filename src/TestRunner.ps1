@@ -3,7 +3,8 @@ param(
     [string]$Filter = "",
     [string]$Strictness = "",
     [string]$Cwd = "",
-    [string]$EditablePaths = ""
+    [string]$EditablePaths = "",
+    [string]$ConfigPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,7 +23,8 @@ if (Test-Path "$PSScriptRoot\Classifier.ps1") {
 }
 
 # Load config, optionally override strictness for testing
-$config = Load-Config -Path "$PSScriptRoot\..\config.json"
+$configFile = if ($ConfigPath) { $ConfigPath } else { "$PSScriptRoot\..\config.json" }
+$config = Load-Config -Path $configFile
 if ($Strictness) {
     $config.modifying_strictness = $Strictness
 }
@@ -80,6 +82,20 @@ for ($i = 0; $i -lt $total; $i++) {
     }
     $command = $command.Trim()
 
+    # Optional per-case tool name (default: run_in_terminal for backward compat)
+    $toolName = "run_in_terminal"
+    $toolNameNode = $tc.SelectSingleNode('tool-name')
+    if ($toolNameNode -and $toolNameNode.InnerText.Trim()) {
+        $toolName = $toolNameNode.InnerText.Trim()
+    }
+
+    # Optional per-case raw tool_input JSON (e.g. {"file_path":"C:\\x"} for Write)
+    $toolInputJson = $null
+    $toolInputNode = $tc.SelectSingleNode('tool-input-json')
+    if ($toolInputNode -and $toolInputNode.InnerText.Trim()) {
+        $toolInputJson = $toolInputNode.InnerText.Trim()
+    }
+
     # Draw progress line — truncate to console width to avoid line wrapping
     $consoleWidth = [Math]::Max(80, $Host.UI.RawUI.BufferSize.Width - 1)
     $progressMsg = "[$num/$total $pct% - $name]"
@@ -93,9 +109,15 @@ for ($i = 0; $i -lt $total; $i++) {
     try {
         if ($ClassifierLoaded) {
             # Build a mock $rawInput PSCustomObject
+            if ($null -ne $toolInputJson) {
+                $toolInput = ($toolInputJson | ConvertFrom-Json)
+            }
+            else {
+                $toolInput = [PSCustomObject]@{ command = $command }
+            }
             $rawInput = [PSCustomObject]@{
-                tool_name  = "run_in_terminal"
-                tool_input = [PSCustomObject]@{ command = $command }
+                tool_name  = $toolName
+                tool_input = $toolInput
             }
             $result = Invoke-Classify -RawInput $rawInput -IDE "ClaudeCode" -Config $config
         }
@@ -160,7 +182,7 @@ Write-Host "Total:    $total"
 Write-Host "Passed:   $passed ($pctPassed%)"
 Write-Host "Failed:   $failed"
 Write-Host "Duration: $([math]::Round($totalTime.TotalSeconds, 1))s"
-Write-Host "Config:   config.json"
+Write-Host "Config:   $configFile"
 Write-Host ""
 
 if ($failures.Count -gt 0) {

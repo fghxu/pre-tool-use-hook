@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  strictness_gated suite — NORMAL mode (default config.json).
+  Every gated entry must ALLOW; read_only and modifying controls unchanged.
+  This suite must pass both before and after the config migration (byte-identical guard).
+-->
+<commands>
+  <category-group name="SG-Normal">
+
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git add stages (gated)</description>
+      <copilot-command><![CDATA[git add .]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git add -A stages all (gated)</description>
+      <copilot-command><![CDATA[git add -A]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git pull (gated)</description>
+      <copilot-command><![CDATA[git pull]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git pull --rebase (gated)</description>
+      <copilot-command><![CDATA[git pull --rebase]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git commit single -m (gated)</description>
+      <copilot-command><![CDATA[git commit -m "test message"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git commit repeated -m for multi-line body (gated)</description>
+      <copilot-command><![CDATA[git commit -m "subject" -m "body line"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git switch branch (gated)</description>
+      <copilot-command><![CDATA[git switch main]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git init (gated)</description>
+      <copilot-command><![CDATA[git init]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git clone (gated)</description>
+      <copilot-command><![CDATA[git clone https://github.com/user/repo.git]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git tag -d (gated)</description>
+      <copilot-command><![CDATA[git tag -d v1.0]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git tag --delete (gated)</description>
+      <copilot-command><![CDATA[git tag --delete v1.0]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git worktree add (gated)</description>
+      <copilot-command><![CDATA[git worktree add ../wt feature]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git rev-parse (gated, medium risk shown when it asks in strict)</description>
+      <copilot-command><![CDATA[git rev-parse HEAD]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git stash (gated)</description>
+      <copilot-command><![CDATA[git stash]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Git-Gated">
+      <description>git stash push with message (gated)</description>
+      <copilot-command><![CDATA[git stash push -m "wip"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Linux-Gated">
+      <description>printf simple (gated)</description>
+      <copilot-command><![CDATA[printf "hello world"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated allow in normal" category="SG-Normal-Linux-Gated">
+      <description>printf with format string (gated)</description>
+      <copilot-command><![CDATA[printf '%s\n' one two]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read_only unaffected" category="SG-Normal-Controls">
+      <description>git status stays read_only allow</description>
+      <copilot-command><![CDATA[git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read_only unaffected" category="SG-Normal-Controls">
+      <description>git log stays read_only allow</description>
+      <copilot-command><![CDATA[git log --oneline -5]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read_only unaffected" category="SG-Normal-Controls">
+      <description>git fetch stays read_only allow</description>
+      <copilot-command><![CDATA[git fetch origin]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying unaffected" category="SG-Normal-Controls">
+      <description>git push still asks</description>
+      <copilot-command><![CDATA[git push origin main]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying unaffected" category="SG-Normal-Controls">
+      <description>git reset --hard still asks</description>
+      <copilot-command><![CDATA[git reset --hard HEAD]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying unaffected" category="SG-Normal-Controls">
+      <description>rm -rf still asks</description>
+      <copilot-command><![CDATA[rm -rf /tmp/junk]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="gated allow in normal (var-assignment strip)" category="SG-Normal-VarAssignment">
+      <description>$x = git add . allows in normal (documents pre-existing #521 behavior)</description>
+      <copilot-command><![CDATA[$x = git add .]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

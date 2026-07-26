@@ -1,45 +1,43 @@
 ## Goal
-Implement the AST-as-arbiter design (spec 2026-07-18-ast-aware-safe-expressions-design.md, plan 2026-07-18-ast-arbiter-implementation-plan.md) so 14 canonical misclassified read-only commands are auto-allowed, with zero behavior change on existing suites.
+Design and implement the strictness_gated config section + per-domain strictness (global guard): a third tier per domain that allows in normal/loose but asks in strict, with per-domain strictness honored by strictness_gated + AWS flag-strip + parameter_commands. Spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md
 
-## Baseline (pre-change), captured 2026-07-18 in ast-arbiter worktree @ 202be06 (corrected trusted_pattern)
-
-| Suite | Invocation | Result |
-|---|---|---|
-| test-cases.xml | default | 487/487 pass |
-| test-cases.adhoc.xml | default | 39/39 pass |
-| test-cases.var-assignment.xml | default | 63/64 (1 pre-existing fail) |
-| test-cases.fullpath.xml | default | 20/20 pass |
-| test-cases.redirect-normal.xml | `-Strictness normal` | 20/25 (5 pre-existing fails) |
-| test-cases.redirect-strict.xml | `-Strictness strict` | 24/25 (1 pre-existing fail) |
-| test-cases.trustedpattern.xml | default | 1/6 (5 pre-existing fails: expects custom trusted patterns) |
-| test-cases.new-samples.xml | default | 1/14 (13 fails = the work to implement) |
-| test-fullpipe.xml | FullPipeTestRunner.ps1 | 19/19 pass |
-
-Differential acceptance: pre-existing suites must be byte-identical after implementation; adhoc grows by +24 (14 canonical + 10 guard), all passing; new-samples 14/14.
+## State note (2026-07-25)
+- master @ 539f8eb. path-branch merged (864e85c) + test consolidation done.
+- strictness_gated implementation branches from master.
 
 ## Completed Steps
-- Reverted corrupted debug trusted_pattern (^.*$) on branch (202be06); merged into worktree.
-- Captured true baseline (above). HEAD code identical to f84bf50 — no half-implemented code anywhere.
-- P2 config (f34c2cc): aws configure get/list read_only + safe_expressions dotnet allowlist.
-- P3 (a0c75d7): hardened Test-SafeAst + Get-PowerShellSafeExpressions; '(safe expression)' early-allow in Resolver; zero-command fallback in Classifier.
-- P4 (0b80eaf): string-constant heuristic fix (top-level CommandExpressionAst check).
-- P5 (b750094): call-operator & { } handling (InvocationOperator skip + wrapper safety-net).
-- P6: Step 0e aws --version ≥2-token guard.
-- P7: arbiter gate — Invoke-PowerShellArbitration + Resolve-AsArbiter + activation gate in Invoke-Classify.
-- P7 hardening (review findings): CommandExpressionAst/NamedBlockAst cases in Test-SafeAst; nested-first wrapper resolution (pwsh read_only must not bypass inner-command classification); Find-NestedCommands-only wrapper extraction (ssh -W flag-value table); 2.5h heredoc rule narrowed to exclude .NET invocations ($proc.Kill() hole); flow-control statements in Test-SafeAst; fixed unbalanced paren in VarAssignment-PS-ForLoop test (was invalid PowerShell, previously masked by the 2.5h hole).
-- P8: merged 14 canonical + 10 AST-Arbiter-Guard tests into adhoc (now 63 cases).
+- path-branch: merged to master; all suites green (byte-identical + trustedpattern 69/74).
+- Test consolidation: test-cases.xml now 690 cases (merged adhoc, fullpath, var-assignment, redirect-normal); 4 source files + redirect-normal.xml deleted (content merged). 684/690, 6 pre-existing fails (1 git-add + 5 redirect-non-system). Remaining separate files (by necessity): redirect-strict (strict-mode), trustedpattern (cwd-keyed), fullpipe (different runner).
+- strictness_gated spec written + self-reviewed + committed (5b27112).
+- Plan Tasks 1-4 (branch strictness-gated, all dormant): TestRunner -ConfigPath (d23c2b6) → ConfigLoader compiles/validates strictness_gated + per-domain modifying_strictness (1b652c5) → Resolver Get-EffectiveStrictness + step 1a.5 + effective-strictness reach for AWS flag-strip/param_commands (5c4b780).
+- Plan Task 5 (5e8b277): fixtures test/config/config.{git-strict,strict}.json + 3 suites test/test-cases.strictness-gated.{normal,strict,git-strict}.xml. RED baseline confirmed: normal 24/24 GREEN; strict 6/24 (6 controls pass, 18 gated fail — still read_only); git-strict 6/12 (isolation+AWS-reach pass, 6 Git-gated fail). Both fixtures load via Load-Config. Live config.json untouched.
+- Plan Task 6 (221c1b8): config.json migration — moved Git×10 (pull, switch, init, clone, tag -d, add, worktree add, commit, rev-parse, stash) + Linux printf read_only → strictness_gated; git switch gained risk:low; comments updated (_comment_planned→_comment_gated, "(planned)"→live). Fixtures regenerated from migrated config. Normal-mode byte-identical (684/690); suites flipped GREEN: normal 24/24, strict 24/24, git-strict 12/12.
+- Plan Task 7 (ae1197b): redirect-strict now fixture-driven — `-ConfigPath test/config/config.strict.json` (no -Strictness) verified identical to -Strictness strict (24/25, same #22 pre-existing fail). README updated.
+- test-cases.xml made strictness_gated-aware: stale VarAssignment case `$x = git add .` flipped expect ask→allow (reason points to SG suites; strict-mode ask already pinned at test-cases.strictness-gated.strict.xml SG-Strict-VarAssignment). Main suite now 685/690 — only the 5 pre-existing redirect-non-system fails remain. SG suites re-verified: normal 24/24, strict 24/24, git-strict 12/12.
+- src/Run-AllTests.ps1: one-shot runner over every test/*.xml (auto-discovers new suites; per-suite invocation table for -Strictness/-Cwd/-ConfigPath/fullpipe; KnownFails baselines; REGRESSION/OK/IMPROVED verdicts; -Filter, -ShowOutput; exit 1 on regression). Verified: 7 suites, 858/868, 10 fails all within baseline. NOTE: pure ASCII only — powershell.exe 5.1 misreads UTF-8 em-dashes as smart quotes (string-delimiter parse cascade).
+- Baseline correction: redirect-strict is 25/25 (fixture and -Strictness strict both verified). CORRECTION to the earlier note: the #22 fix (C:\temp\svc.txt → C:\some_dir\svc.txt) was the user's own uncommitted edit, not "since a4ed09f" — the git-log attribution I made was a misread (the -S output belonged to the first command). The C:\temp PSRemoting case is test-cases.xml #687 and passes.
+- PS wrapper unwrap (user-reported: `powershell.exe -ExecutionPolicy Bypass -Command "..."` hit unknown-ask): two gaps — (a) AST wrapper detection `$CommandName -match '^(pwsh|powershell)$'` missed the `.exe` suffix; (b) regex Find-NestedCommands required `-Command` immediately after the binary (no flag tolerance). Fixed: AST CommandName regex +`(\.exe)?`; Find-NestedCommands `-Command`/`-c`/`-ScriptBlock` regexes made flag-tolerant (lazy `.*?`). `-File` stays ask by design (opaque script content — pinned by test). PSWrapper-FlagSkipping block now 11 cases (6 original + 5 added on request: -c short form, -ScriptBlock allow/ask, value-taking flag + cross-domain inner, wrapper-as-pipeline-head). Full suite 879/879, no regressions.
+- Known failures ELIMINATED via config: trusted_pattern += `docker\s+exec\s+(?:-\S+\s+)?comfyui\b` (fixes the 5 trustedpattern comfyui cases); editable_paths.linux reworked — the user's dead `/home/user/` replaced by working patterns `([A-Za-z]:)?[/\\]home[/\\](user|dev)[/\\]` + `~[/\\]` that match the GetFullPath-resolved form (POSIX redirect targets become `C:\home\...` on Windows inside Test-EditableOrCwd, Parser.ps1:1066) — fixes #666-669/#685. Collateral (by design): 2 trustedpattern Write cases (/home/user, ~) flipped ask→allow, expectations updated. config.strict.json deliberately does NOT get the editable additions (its strict redirect cases must stay non-editable) — _comment_fixture annotated; config-json-guide §2 gained the POSIX gotcha + editable=allow-in-every-mode correction. Run-AllTests KnownFails zeroed. **ALL SUITES GREEN: 868/868.**
+- All 8 command domains now carry explicit `"modifying_strictness": "normal"` (discoverability; behavior byte-identical to absent per Get-EffectiveStrictness; ConfigLoader validates the value). Fixtures mirrored: config.strict.json +8, config.git-strict.json +7 (Git stays "strict"). config-json-guide §10 updated. Also removed an accidental DUPLICATE modifying_strictness key in config.json's Git domain (user's fixture paste _comment_fixture+"strict" landed after my "normal"; JSON last-wins would have made live Git strict).
+- User edits observed and kept: editable_paths.linux += /home/user/ (NOTE: does NOT make the 5 redirect-non-system cases allow — canonicalization unifies / to \, and Parser.ps1:1176 normal-fallback stays disabled while editable_paths is populated); redirect-strict #22 retarget (above). Verified after all changes: Run-AllTests 858/868, all within baseline.
 
-## Final verification (all green / byte-identical to baseline)
-- test-cases.xml 487/487 ✓ · adhoc 63/63 ✓ (+24) · var-assignment 63/64 ✓ (same pre-existing test-14 fail) · fullpath 20/20 ✓ · redirect-normal 20/25 ✓ · redirect-strict 24/25 ✓ · trustedpattern 1/6 ✓ · new-samples 14/14 ✓ · fullpipe 19/19 ✓
+## Locked decisions (L1-L5)
+- L1 name: strictness_gated. L2 scope: third section + per-domain strictness. L3 guard: global strict/loose forces all domains; global normal defers to per-domain. L4 reach: strictness_gated + AWS flag-strip + parameter_commands use effective strictness; path policy stays global. L5 testing: separate test config fixtures via new -ConfigPath param; live config.json untouched by feature tests.
+
+## Design summary
+- Get-EffectiveStrictness(Config, Domain): global!=normal → global; else domain's own modifying_strictness; else normal.
+- New match step 1a.5 (between read_only and modifying): strictness_gated → ask iff effective==strict, else allow.
+- AWS flag-strip (Resolver:180) + param_commands unrecognized (Resolver:890) use effective strictness; path policy unchanged.
+- Move list (read_only-with-risk → strictness_gated): Git×10 (pull, switch, init, clone, tag -d, add, worktree add, commit, rev-parse, stash) + Linux printf (cross-domain isolation demo). No per-domain strictness shipped by default → normal behavior byte-identical.
+- Fixtures: test/config/config.git-strict.json (Git=strict) + config.strict.json. New suites: test-cases.strictness-gated.{normal,strict,git-strict}.xml.
 
 ## Current Step
-DONE — ast-arbiter merged into master (merge commit d97c272). All suites verified green on master after merge.
+ALL 8 plan tasks COMPLETE on branch strictness-gated (070586a..70d292e, 9 commits). Final whole-implementation review: READY TO MERGE. Awaiting explicit user approval to merge to master.
 
 ## Next Steps
-- Optional: push master to origin (not done — awaiting user decision).
-- Optional: fast-forward fix-var-assignment-detection to master (it is exactly one merge behind; `git checkout fix-var-assignment-detection; git merge master`).
-- Optional: delete the merged ast-arbiter branch.
+- Merge strictness-gated → master ONLY with explicit user approval.
+- Optional follow-ups (non-blocking, from final review): config.aws-strict.json fixture for AWS-reach differentiating test; make Evaluate-ParameterRules -Domain mandatory.
+- After merge: regenerate fixtures from config.json whenever it changes (noted in fixture _comment_fixture).
 
 ## Blockers / Notes
-- Pre-existing issues found (not caused by this work, flagged to user): test-cases.var-assignment #14 ($x = git add . — config lists git add read_only but test expects ask); redirect/trustedpattern suites have environment-dependent reds.
-
+- None — all suites green (868/868). Run-AllTests KnownFails baselines are all 0; any future failure is a REGRESSION by definition.

@@ -11,10 +11,45 @@
 
     Match order per domain:
       1. Explicit "read_only" entries (compiled regex)
+      1a.5. Explicit "strictness_gated" entries (allow in normal/loose, ask in strict
+            per Get-EffectiveStrictness)
       2. Explicit "modifying" entries (compiled regex)
       3. Verb-based classification (PowerShell / AWS domains only)
       4. Fallback: ask with reason "unknown command"
 #>
+
+function Get-EffectiveStrictness {
+    <#
+    .SYNOPSIS
+        Resolve the effective modifying_strictness for a command domain.
+    .DESCRIPTION
+        Guard rule: a global 'strict' or 'loose' forces ALL domains. Only when the
+        global value is 'normal' does a domain's own modifying_strictness apply;
+        domains without one inherit 'normal'. Used by the strictness_gated tier,
+        AWS flag-stripping, and parameter_commands unrecognized-value handling.
+        Path policy (Parser.ps1) intentionally stays on the global value.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$Config,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Domain
+    )
+
+    if ($Config.modifying_strictness -ne 'normal') { return $Config.modifying_strictness }
+
+    foreach ($key in $Config.commands.PSObject.Properties.Name) {
+        if ($key.ToLowerInvariant() -eq $Domain.ToLowerInvariant()) {
+            $dom = $Config.commands.$key
+            if (Get-Member -InputObject $dom -Name 'modifying_strictness' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+                return $dom.modifying_strictness
+            }
+            break
+        }
+    }
+    return 'normal'
+}
 
 function Resolve-Command {
     <#
@@ -177,7 +212,7 @@ function Resolve-Command {
     #     → "aws ec2 describe-instances"
     #   In "strict" mode, current behavior is preserved (unknown flags → ask).
     # -------------------------------------------------
-    if ($domainLower -eq 'aws_cli' -and $Config.modifying_strictness -eq 'normal' -and $Command -match '^aws\s') {
+    if ($domainLower -eq 'aws_cli' -and (Get-EffectiveStrictness -Config $Config -Domain $domainKey) -eq 'normal' -and $Command -match '^aws\s') {
         $awsTokens = @($Command.Trim() -split '\s+')
         $awsFiltered = [System.Collections.Generic.List[string]]::new()
         $i = 0
@@ -321,7 +356,8 @@ function Resolve-Command {
             # A $null map means the AST parse failed -> skip (fall through).
             # An empty map (no flags) is valid -> evaluate -> default.
             if ($null -ne $paramMap) {
-                $pResult = Evaluate-ParameterRules -Entry $entry -ParamMap $paramMap -Config $Config -Command $Command -DisplayName $firstToken
+                $owningDomain = if ($asPowerShell) { 'PowerShell' } else { $domainKey }
+                $pResult = Evaluate-ParameterRules -Entry $entry -ParamMap $paramMap -Config $Config -Command $Command -DisplayName $firstToken -Domain $owningDomain
                 if ($pResult) { return $pResult }
             }
         }
@@ -337,6 +373,32 @@ function Resolve-Command {
                 foreach ($regex in $entry._compiledPatterns) {
                     if ($regex.IsMatch($Command)) {
                         return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (read-only)" -MatchedPattern $entry.name -Risk "none"
+                    }
+                }
+            }
+        }
+    }
+
+    # -------------------------------------------------
+    # Step 1a.5: Check strictness_gated entries
+    #   Middle tier: allow in normal/loose, ask when the EFFECTIVE
+    #   strictness for this domain is strict (Get-EffectiveStrictness).
+    # -------------------------------------------------
+    $hasGated = Get-Member -InputObject $domainConfig -Name 'strictness_gated' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasGated) {
+        foreach ($entry in $domainConfig.strictness_gated) {
+            if (Get-Member -InputObject $entry -Name '_compiledPatterns' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+                foreach ($regex in $entry._compiledPatterns) {
+                    if ($regex.IsMatch($Command)) {
+                        $effective = Get-EffectiveStrictness -Config $Config -Domain $domainKey
+                        if ($effective -eq 'strict') {
+                            $risk = "unknown"
+                            if (Get-Member -InputObject $entry -Name 'risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+                                $risk = $entry.risk
+                            }
+                            return New-ResolutionResult -Decision "ask" -Reason "$($entry.name)" -MatchedPattern $entry.name -Risk $risk
+                        }
+                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (strictness-gated)" -MatchedPattern $entry.name -Risk "none"
                     }
                 }
             }
@@ -852,7 +914,8 @@ function Evaluate-ParameterRules {
         $ParamMap,
         $Config,
         [string]$Command,
-        [string]$DisplayName
+        [string]$DisplayName,
+        [string]$Domain
     )
 
     # 1. modifying rules first (fail-safe: any modifying match => ask)
@@ -887,7 +950,7 @@ function Evaluate-ParameterRules {
         }
         if ($unrecognized) { break }
     }
-    if ($unrecognized -and $Config.modifying_strictness -ne 'loose') {
+    if ($unrecognized -and (Get-EffectiveStrictness -Config $Config -Domain $Domain) -ne 'loose') {
         return [PSCustomObject]@{
             Command = $Command; Decision = 'ask'
             Reason = "$DisplayName (unrecognized parameter value)"; MatchedPattern = $DisplayName; Risk = 'unknown'
