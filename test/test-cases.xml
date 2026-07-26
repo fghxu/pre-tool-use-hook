@@ -961,6 +961,26 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
       <description>powershell.exe -ExecutionPolicy Bypass -File stays ask — script content not inspectable</description>
       <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -File "src/Run-AllTests.ps1"]]></copilot-command>
     </test-case>
+    <test-case expected="allow" reason="read-only: -c short form + flag skipped, inner Get-ChildItem" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -NoProfile -c "Get-ChildItem" (short -c form must unwrap like -Command)</description>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -c "Get-ChildItem C:\Windows"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: -ScriptBlock + flag skipped, inner Get-ChildItem" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -NoProfile -ScriptBlock with read-only inner (flags must be skipped)</description>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -ScriptBlock { Get-ChildItem C:\Logs }]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: -ScriptBlock + flag skipped, inner Stop-Service" category="PSWrapper-FlagSkipping">
+      <description>pwsh.exe -NoProfile -ScriptBlock with modifying inner (unwrap must not weaken modifying detection)</description>
+      <copilot-command><![CDATA[pwsh.exe -NoProfile -ScriptBlock { Stop-Service Spooler }]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: value-taking flag skipped, cross-domain inner git status" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -ExecutionPolicy Bypass -NoProfile -c "git status" (flag with value + cross-domain read-only)</description>
+      <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -NoProfile -c "git status"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only: wrapper as pipeline head, both segments read-only" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -NoProfile -Command piped to Select-Object (unwrap first segment, pipe second segment read-only)</description>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -Command "Get-Process" | Select-Object -First 5]]></copilot-command>
+    </test-case>
 
     <test-case expected="ask" reason="modifying: Remove-LocalUser" category="PowerShell-UserManagement">
       <description>Remove-LocalUser deletes a local user account</description>
