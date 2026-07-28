@@ -1,0 +1,806 @@
+{
+  "version": "1.0",
+  "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
+  "_comment_fixture": "TEST FIXTURE - copy of test-strictness-gate/normal/config.normal.json with global strictness forced to strict. Drives test-cases.redirect-strict.xml in this folder without -Strictness. DELIBERATE DIVERGENCE: editable_paths.linux omits the /home + ~ patterns - this suite's strict-mode non-system redirect cases must stay non-editable to keep asking. Regenerate from test-strictness-gate/normal/config.normal.json whenever it changes.",
+
+  "_readme": "HOW CLASSIFICATION WORKS: every intercepted tool call is decided 'allow' (run without prompting) or 'ask' (prompt the user). Command-running tools (Bash, PowerShell, run_in_terminal, ...) are classified by matching the command string against the per-domain tiers in 'commands' below. File-writing tools (Write, Edit, create_file, ...) are decided by path policy: system_paths always ask; editable_paths and the current working directory subtree auto-approve. Keys starting with '_' are documentation only and are ignored by the loader.",
+  "_readme_tiers": "Per-domain tiers: read_only => allow in every strictness mode | strictness_gated => allow in normal/loose, ask in strict | modifying => always ask (the 'risk' level is shown in the prompt).",
+  "_readme_strictness_guard": "modifying_strictness = strict | normal | loose. A global 'strict' or 'loose' FORCES every domain. A per-domain commands.<domain>.modifying_strictness is consulted only when the global value is 'normal'; domains without one inherit 'normal'.",
+
+  "log_file_path": "c:\\temp\\logs\\prehook\\",
+  "_comment_log_file_path": "Directory where the hook appends decision logs (one record per intercepted call).",
+
+  "modifying_strictness": "strict",
+  "_comment_modifying_strictness": "strict: more prompts (strictness_gated entries ask; AWS flag-stripping disabled). loose: fewer prompts (unrecognized parameter_commands values auto-allow). normal: default; also the only global value that lets per-domain modifying_strictness take effect (see _readme_strictness_guard).",
+
+  "editable_paths": {
+    "description": "Parent directories where file writes (shell redirects > / >> and file tools like Write/Edit/create_file) are auto-approved when modifying_strictness is normal or loose. The current working directory and its subdirectories are always editable, in every mode.",
+    "linux": [
+      "/tmp/"
+    ],
+    "windows": [
+      "C:\\\\temp\\\\",
+      "D:\\\\temp\\\\"
+    ]
+  },
+  "system_paths": {
+    "description": "Parent directories where file writes (redirects and file tools) always require approval, in every strictness mode including loose. All subdirectories under these paths are also blocked.",
+    "linux": [
+      "/etc/",
+      "/var/",
+      "/usr/",
+      "/boot/",
+      "/sys/",
+      "/proc/",
+      "/opt/"
+    ],
+    "windows": [
+      "[A-Za-z]:\\\\Windows\\\\",
+      "[A-Za-z]:\\\\Program Files\\\\",
+      "[A-Za-z]:\\\\Program Files \\(x86\\)\\\\",
+      "%SystemRoot%\\\\",
+      "%ProgramFiles%\\\\",
+      "%ProgramFiles(x86)%\\\\"
+    ]
+  },
+  "safe_expressions": {
+    "description": "Allowlist for the safe-expression certifier (AST arbiter + zero-command fallback). Method names matched case-insensitively.",
+    "dotnet_method_allowlist": [
+      "ReadAllText", "ReadAllLines", "ReadLines", "OpenRead",
+      "Substring", "Split", "Replace", "ToString", "ToUpper", "ToLower",
+      "Trim", "TrimStart", "TrimEnd", "Contains", "StartsWith", "EndsWith",
+      "IndexOf", "LastIndexOf", "PadLeft", "PadRight",
+      "Max", "Min", "Abs", "Round", "Floor", "Ceiling", "Sqrt", "Pow",
+      "Compare", "Equals", "GetHashCode", "GetType"
+    ]
+  },
+
+  "_comment_known_command_prefixes": "First-token lookup used for domain routing: a command starting with one of these tokens is routed to the matching domain's rules (docker -> Docker, kubectl -> Kubernetes, aws -> AWS_CLI, git -> Git, ...). Shell launchers (pwsh, powershell, cmd, bash, sh) unwrap and re-classify the inner command. Unlisted tokens fall back to shell heuristics (PowerShell markers, then DOS markers, else Linux).",
+  "known_command_prefixes": [
+    "docker", "kubectl", "aws", "npm", "git", "terraform", "helm", "gh", "az", "gcloud",
+    "python", "node", "ruby", "go", "cargo", "dotnet","java",
+    "pwsh", "powershell", "cmd", "bash", "sh",
+    "curl", "wget",
+    "cd", "dir", "ls", "cat", "ping", "ps", "type", "tree", "findstr",
+    "ipconfig", "netstat", "tasklist", "whoami", "sc", "net", "ver", "hostname",
+    "get-childitem", "get-content", "get-process", "get-service", "get-item",
+    "adb", "unzip", "javap", "gradlew"
+  ],
+
+
+  "_comment_untrusted_pattern": "Regexes matched against the WHOLE command string before any other check (even before trusted_pattern). Any match => ask, no matter what would otherwise allow it. Use for shapes that must never auto-approve, e.g. the third entry: exe/bat/cmd/com/msi/scr launched from outside System32 / Program Files. The first two entries are legacy scaffolding kept as examples.",
+  "untrusted_pattern": [
+	  "^untrusted_stuff.*$",
+	  "^untrusted_stuff\\s+$",
+	  "^[A-Za-z]:[/\\\\](?!.*(?i:System32|Program Files)).*(?i:\\.(exe|bat|cmd|com|msi|scr))\\b.*$"
+  ],
+  "_comment_trusted_pattern": "Regexes matched against the WHOLE command string, checked after untrusted_pattern and before all per-command tiers. Any match => allow immediately, bypassing every command rule below. Keep entries tight: anything matching is never prompted. (The src.* and C..git.cc.pretoolhook entries are local debug escape-hatches, not needed in normal use.)",
+  "trusted_pattern": [
+	"src.Parser.ps1",
+	  "src.TestRunner.ps1",
+	  "src.ConfigLoader.ps1",
+	  "C..git.cc.pretoolhook",
+	  "^trusted_stuff\\s+$",
+	  "docker\\s+exec\\s+(?:-\\S+\\s+)?comfyui\\b"
+  ],
+
+  "_comment_intercept_tool_name": "Tool names the hook inspects. Each intercepted tool is classified via tool_name_mapping (command tools) or path_tool_mapping (file tools) below; an intercepted tool with no mapping asks by default. Tools in neither list also ask by default.",
+  "intercept_tool_name": [
+		"send_to_terminal",
+		"apply_patch",
+		"run_notebook_cell",
+		"install_extension",
+		"github_repo",
+		"run_vscode_command",
+		"run_in_terminal",
+		"create_and_run_task",
+		"run_task",
+		"edit_files",
+		"runSubagent",
+		"vscode_get_confirmation",
+		"vscode_get_confirmation_with_options",
+		"vscode_get_terminal_confirmation",
+		"create_file",
+		"create_directory",
+		"create_new_workspace",
+		"create_new_jupyter_notebook",
+		"edit_notebook_file",
+		"replace_string_in_file",
+		"multi_replace_string_in_file",
+		"insert_edit_into_file",
+
+
+		"Bash",
+		"PowerShell",
+		"Write",
+		"NotebookEdit",
+		"Edit",
+		"MultiEdit"
+  ],
+  "_comment_ignore_tool_name": "Tool names the hook passes through without inspection (read-only or non-executing tools: file reading, search, web fetch, task management, ...).",
+  "ignore_tool_name": [
+
+
+		"mcp__mobile__ui",
+		"mcp__mobile__screen",
+		"mcp__mobile__app",
+		"mcp__mobile__input",
+		"mcp__mobile__system",
+		"mcp__mobile__flow",
+
+		"execution_subagent",
+		"get_vscode_api",
+		"get_project_setup_info",
+		"get_search_view_results",
+		"get_terminal_output",
+		"test_failure",
+		"read_file",
+		"view_image",
+		"list_dir",
+		"get_errors",
+		"get_changed_files",
+		"read_project_structure",
+		"copilot_getNotebookSummary",
+		"read_notebook_cell_output",
+		"fetch_webpage",
+		"memory",
+		"resolve_memory_file_uri",
+		"test_search",
+		"manage_todo_list",
+		"terminal_selection",
+		"terminal_last_command",
+		"get_task_output",
+		"runTests",
+		"search_subagent",
+		"search_workspace_symbols",
+		"semantic_search",
+		"file_search",
+		"grep_search",
+		"vscode_askQuestions",
+		"switch_agent",
+		"tool_search",
+
+		"mcp__brave-search__brave_web_search",
+
+
+
+		"Explore",
+		"AskUserQuestion",
+		"CronCreate",
+		"CronDelete",
+		"EnterPlanMode",
+		"Glob",
+		"Grep",
+		"ListMcpResourcesTool",
+		"PushNotification",
+		"ReadMcpResourceTool",
+		"ShareOnboardingGuide",
+		"Read",
+		"Skill",
+		"TaskCreate",
+		"TaskGet",
+		"TaskOutput",
+		"TaskUpdate",
+		"TodoWrite",
+		"ToolSearch",
+		"WebFetch",
+		"WebSearch",
+
+		"ExitPlanMode",
+
+		"TaskStop",
+		"Agent",
+		"ScheduleWakeup"
+
+  ],
+
+  "_comment_tool_name_mapping": "Command-running tools: tool name => JSON dot-path into the hook payload that yields the shell command string to classify (e.g. tool_input.command).",
+  "tool_name_mapping": {
+    "run_in_terminal": "tool_input.command",
+    "send_to_terminal": "tool_input.command",
+    "Bash": "tool_input.command",
+	"PowerShell": "tool_input.command"
+  },
+
+  "_comment_path_tool_mapping": "File-writing tools: tool name => JSON dot-path into the hook payload that yields the target file/directory path. These are decided by path policy (system_paths / editable_paths / current working directory subtree), NOT by the command tiers.",
+  "path_tool_mapping": {
+	"Write": "tool_input.file_path",
+	"Edit": "tool_input.file_path",
+	"MultiEdit": "tool_input.file_path",
+	"NotebookEdit": "tool_input.notebook_path",
+	"create_file": "tool_input.filePath",
+	"replace_string_in_file": "tool_input.filePath",
+	"multi_replace_string_in_file": "tool_input.filePath",
+	"insert_edit_into_file": "tool_input.filePath",
+	"edit_notebook_file": "tool_input.filePath",
+	"create_new_jupyter_notebook": "tool_input.filePath",
+	"create_directory": "tool_input.dirPath",
+	"create_new_workspace": "tool_input.workspacePath"
+  },
+
+  "_comment_dry_run_flags": "Base-command + flag combinations that are simulations only; treated as read-only even when the base command is normally modifying.",
+  "dry_run_flags": {
+    "terraform plan": "read-only",
+    "terraform plan -destroy": "read-only",
+    "terraform apply --dry-run": "read-only",
+    "rsync --dry-run": "read-only",
+    "rsync -n": "read-only",
+    "apt-get install -s": "read-only",
+    "apt-get install --simulate": "read-only",
+    "apt-get remove -s": "read-only",
+    "kubectl apply --dry-run=client": "read-only",
+    "kubectl apply --dry-run=server": "read-only",
+    "kubectl delete --dry-run=client": "read-only",
+    "docker run --dry-run": "read-only",
+    "aws cloudformation create-change-set": "read-only",
+    "aws cloudformation estimate-template-cost": "read-only"
+  },
+
+  "risk_legend": {
+    "low": "Changes that are easily reversible or localized (creating files, copying data, setting env vars)",
+    "medium": "Changes that affect system configuration, service state, or persistent storage but are generally recoverable",
+    "high": "Destructive operations causing irreversible data loss, permanent resource deletion, or security-compromising changes"
+  },
+
+  "commands": {
+
+    "DOS_CMD": {
+      "modifying_strictness": "normal",
+      "description": "DOS / Windows CMD commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "read_only": [
+
+	    { "name": "nvidia-smi",      "patterns": ["nvidia-smi /s *"],                        "description": "show Nvidia gpu usage" },
+        { "name": "dir",      "patterns": ["dir *", "dir /s *", "dir /b *"],                        "description": "List directory contents" },
+        { "name": "type",     "patterns": ["type *"],                                                "description": "Display file contents" },
+        { "name": "tree",     "patterns": ["tree *", "tree /f *"],                                   "description": "Display directory tree" },
+        { "name": "findstr",  "patterns": ["findstr *"],                                             "description": "Search for strings in files" },
+        { "name": "where",    "patterns": ["where *"],                                               "description": "Locate executable files" },
+        { "name": "ipconfig", "patterns": ["ipconfig", "ipconfig /all", "ipconfig /displaydns"],     "description": "Display network configuration" },
+        { "name": "ping",     "patterns": ["ping *"],                                                "description": "Send ICMP echo requests" },
+        { "name": "tracert",  "patterns": ["tracert *"],                                             "description": "Trace network route" },
+        { "name": "netstat",  "patterns": ["netstat *"],                                             "description": "Display network statistics" },
+        { "name": "systeminfo", "patterns": ["systeminfo", "systeminfo /fo *"],                      "description": "Display system information" },
+        { "name": "whoami",   "patterns": ["whoami", "whoami /all", "whoami /groups"],              "description": "Display current user identity" },
+        { "name": "tasklist", "patterns": ["tasklist", "tasklist /v", "tasklist /m *"],             "description": "List running processes" },
+        { "name": "sc query", "patterns": ["sc query *"],                                            "description": "Query service status" },
+        { "name": "sc qc",    "patterns": ["sc qc *"],                                                 "description": "Query service configuration" },
+        { "name": "reg query","patterns": ["reg query *"],                                             "description": "Query registry keys/values" },
+        { "name": "net share","patterns": ["^net share$", "net share (?!.*=|.*\\/delete).*"],          "description": "List shares / view one share (no create/delete)" },
+        { "name": "set",      "patterns": ["set *", "set"],                                          "description": "Display environment variables" },
+        { "name": "cd",       "patterns": ["cd *", "cd /d *", "chdir *"],                           "description": "Change directory (read-only for filesystem)" },
+        { "name": "path",     "patterns": ["path"],                                                  "description": "Display current PATH" },
+        { "name": "ver",      "patterns": ["ver"],                                                   "description": "Display OS version" },
+        { "name": "date",     "patterns": ["date /t"],                                               "description": "Display current date" },
+        { "name": "time",     "patterns": ["time /t"],                                               "description": "Display current time" },
+        { "name": "comp",     "patterns": ["comp *"],                                                "description": "Compare two files" },
+        { "name": "fc",       "patterns": ["fc *"],                                                  "description": "File compare" },
+        { "name": "wmic",     "patterns": ["wmic (?!.*process.*call.*create).*"],                     "description": "WMI query (excludes process call create)" },
+        { "name": "nbtstat",  "patterns": ["nbtstat *"],                                             "description": "NetBIOS over TCP/IP statistics" },
+        { "name": "pathping", "patterns": ["pathping *"],                                            "description": "Trace route with latency stats" },
+        { "name": "nslookup", "patterns": ["nslookup *"],                                            "description": "DNS lookup" },
+        { "name": "hostname", "patterns": ["hostname"],                                              "description": "Display hostname" },
+        { "name": "arp",      "patterns": ["arp *"],                                                 "description": "ARP cache" },
+        { "name": "driverquery", "patterns": ["driverquery *", "driverquery /v *"],                  "description": "List installed drivers" },
+        { "name": "net view", "patterns": ["net view *", "net view"],                               "description": "List network shares/computers" },
+        { "name": "icacls save", "patterns": ["icacls * /save*"],                                   "description": "Export ACLs to file" },
+        { "name": "wevtutil", "patterns": ["wevtutil *"],                                          "description": "Query Windows Event Logs" }
+      ],
+      "strictness_gated": [
+        { "name": "move",      "patterns": ["move *"],                                              "risk": "low",    "description": "Move/rename files" },
+        { "name": "mkdir",     "patterns": ["mkdir *", "md *"],                                     "risk": "low",    "description": "Create directory" },
+        { "name": "rename",    "patterns": ["rename *", "ren *"],                                   "risk": "low",    "description": "Rename files" },
+        { "name": "setx",      "patterns": ["setx *"],                                              "risk": "low",    "description": "Set persistent environment variable" }
+      ],
+      "modifying": [
+        { "name": "del",       "patterns": ["del *", "erase *"],                                    "risk": "high",   "description": "Delete files" },
+        { "name": "rmdir",     "patterns": ["rmdir *", "rmdir /s *", "rmdir /q *"],                "risk": "high",   "description": "Remove directories" },
+        { "name": "copy",      "patterns": ["copy *"],                                              "risk": "medium", "description": "Copy files" },
+        { "name": "xcopy",     "patterns": ["xcopy *"],                                             "risk": "medium", "description": "Extended copy with recursion" },
+        { "name": "robocopy",  "patterns": ["robocopy *"],                                          "risk": "medium", "description": "Robust file copy" },
+        { "name": "taskkill",  "patterns": ["taskkill *"],                                          "risk": "high",   "description": "Kill running processes" },
+        { "name": "shutdown",  "patterns": ["shutdown *"],                                          "risk": "high",   "description": "Shutdown/restart system" },
+        { "name": "net start", "patterns": ["net start *"],                                         "risk": "medium", "description": "Start a service" },
+        { "name": "net stop",  "patterns": ["net stop *"],                                          "risk": "medium", "description": "Stop a service" },
+        { "name": "reg add",   "patterns": ["reg add *"],                                           "risk": "high",   "description": "Add/modify registry entries" },
+        { "name": "reg delete","patterns": ["reg delete *"],                                        "risk": "high",   "description": "Delete registry entries" },
+        { "name": "reg import","patterns": ["reg import *"],                                        "risk": "high",   "description": "Import registry file" },
+        { "name": "sc config", "patterns": ["sc config *"],                                         "risk": "medium", "description": "Modify service configuration" },
+        { "name": "sc delete", "patterns": ["sc delete *"],                                         "risk": "high",   "description": "Delete a service" },
+        { "name": "sc stop",   "patterns": ["sc stop *"],                                            "risk": "medium", "description": "Stop a service" },
+        { "name": "sc start",  "patterns": ["sc start *"],                                             "risk": "medium", "description": "Start a service" },
+        { "name": "sc create", "patterns": ["sc create *"],                                            "risk": "high",   "description": "Create a service" },
+        { "name": "net share create", "patterns": ["net share *=*"],                                   "risk": "high",   "description": "Create a network share" },
+        { "name": "net share delete", "patterns": ["net share */delete*"],                             "risk": "high",   "description": "Delete a network share" },
+        { "name": "netsh advfirewall", "patterns": ["netsh advfirewall *"],                         "risk": "high",   "description": "Modify firewall rules" },
+        { "name": "format",    "patterns": ["format *"],                                             "risk": "high",   "description": "Format a disk volume" },
+        { "name": "diskpart",  "patterns": ["diskpart *"],                                           "risk": "high",   "description": "Disk partition management" },
+        { "name": "icacls",    "patterns": ["icacls *"],                                             "risk": "high",   "description": "Modify file ACLs" },
+        { "name": "wmic process call create", "patterns": ["wmic *process *call *create*", "wmic *process *call *create *"], "risk": "high", "description": "Create new process via WMI" },
+        { "name": "takeown",   "patterns": ["takeown *"],                                            "risk": "high",   "description": "Take file ownership" },
+        { "name": "cacls",     "patterns": ["cacls *"],                                              "risk": "high",   "description": "Modify file ACLs (legacy)" },
+        { "name": "bcdedit",   "patterns": ["bcdedit *", "bcdedit /set *"],                          "risk": "high",   "description": "Modify boot configuration" },
+        { "name": "assoc",     "patterns": ["assoc *"],                                              "risk": "medium", "description": "Modify file associations" },
+        { "name": "ftype",     "patterns": ["ftype *"],                                              "risk": "medium", "description": "Modify file type commands" }
+      ]
+    },
+
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "description": "PowerShell cmdlets — classified primarily by approved verb",
+      "_comment_tiers": "Explicit read_only/modifying pattern entries (if present) decide first; otherwise the cmdlet verb decides: read_only_verbs => allow, modifying_verbs => ask by risk tier (low/medium/high). strictness_gated covers explicit command patterns only, not verb tiers. Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Compare-*", "Group-*", "Format-*", "ForEach-*", "Out-GridView", "Write-Host", "Write-Output", "Write-Information", "Write-Verbose", "Write-Debug", "Write-Warning", "Read-Host", "Show-*", "Trace-*", "Wait-*", "Connect-*", "Disconnect-*", "Receive-*", "Start-Sleep"],
+      "modifying_verbs": {
+        "high":   ["Remove-*", "Stop-*", "Restart-*", "Disable-*", "Clear-*", "Unregister-*", "Uninstall-*", "Undo-*", "Block-*", "Revoke-*", "Dismount-*", "Disconnect-*", "Suspend-*", "Reset-*"],
+        "medium": ["New-*", "Set-*", "Start-*", "Copy-*", "Move-*", "Rename-*", "Enable-*", "Register-*", "Install-*", "Update-*", "Publish-*", "Mount-*", "Save-*", "Send-*", "Push-*", "Import-*", "ConvertTo-*", "Export-*", "Add-*", "Approve-*", "Assert-*", "Backup-*", "Complete-*", "Confirm-*", "Join-*", "Lock-*", "Merge-*", "Perform-*", "Redo-*", "Repair-*", "Request-*", "Resolve-*", "Resume-*", "Skip-*", "Split-*", "Step-*", "Submit-*", "Switch-*", "Sync-*", "Unblock-*", "Unlock-*", "Watch-*"],
+        "low":    ["Out-File", "Out-Printer", "Out-*", "Export-Csv", "Export-Clixml", "Tee-Object"]
+      },
+      "read_only": [
+        { "name": "Split-Path",        "patterns": ["Split-Path *"],                             "description": "Split-Path" },
+        { "name": "Format-List",        "patterns": ["Format-List *"],                             "description": "Format-List" },
+        { "name": "Get-Command",        "patterns": ["Get-Command *"],                             "description": "List available commands" },
+        { "name": "Get-Help",           "patterns": ["Get-Help *"],                                "description": "Display help for a command" },
+        { "name": "Get-Member",         "patterns": ["Get-Member", "gm"],                          "description": "Get object members" },
+        { "name": "Get-Process",        "patterns": ["Get-Process *", "ps"],                       "description": "List running processes" },
+        { "name": "Get-Service",        "patterns": ["Get-Service *"],                             "description": "List services" },
+        { "name": "Get-EventLog",       "patterns": ["Get-EventLog *"],                            "description": "Read event logs" },
+        { "name": "Get-Content",        "patterns": ["Get-Content *", "gc *", "cat *", "type *"],  "description": "Read file contents" },
+        { "name": "Get-ChildItem",      "patterns": ["Get-ChildItem *", "dir *", "ls *", "gci *"], "description": "List directory contents" },
+        { "name": "Select-String",      "patterns": ["Select-String *", "sls *"],                  "description": "Search text patterns in files" },
+        { "name": "ConvertFrom-Json",   "patterns": ["ConvertFrom-Json", "ConvertFrom-Json *"],    "description": "Convert from Json format" },
+        { "name": "ConvertTo-Json",     "patterns": ["ConvertTo-Json", "ConvertTo-Json *"],        "description": "Convert to Json format" },
+        { "name": "Test-Connection",    "patterns": ["Test-Connection *"],                         "description": "Ping test" },
+        { "name": "Test-NetConnection", "patterns": ["Test-NetConnection *"],                      "description": "check port" },
+        { "name": "Test-Path",          "patterns": ["Test-Path *"],                               "description": "Check if path exists" },
+        { "name": "Resolve-DnsName",    "patterns": ["Resolve-DnsName *"],                         "description": "DNS lookup" },
+        { "name": "Get-NetIPAddress",   "patterns": ["Get-NetIPAddress *"],                        "description": "Get IP configuration" },
+        { "name": "Get-NetIPConfiguration", "patterns": ["Get-NetIPConfiguration *"],              "description": "Get IP configuration (detailed)" },
+        { "name": "Invoke-Command",     "patterns": ["Invoke-Command *", "icm *"],                 "description": "Execute commands remotely (ScriptBlock classified separately)" },
+        { "name": "Remove-PSRemoting",  "patterns": ["Remove-PSRemoting *"],                       "description": "Remove PowerShell remoting" },
+        { "name": "pwsh",               "patterns": ["pwsh *", "powershell *"],                    "description": "PowerShell wrapper (inner commands classified separately)" }
+      ],
+      "strictness_gated": [
+        { "name": "New-Item",           "patterns": ["New-Item *", "ni *", "mkdir *"],             "risk": "low",    "description": "Create file/directory" },
+        { "name": "Copy-Item",          "patterns": ["Copy-Item *", "cp *", "copy *", "cpi *"],    "risk": "low",    "description": "Copy files" },
+        { "name": "Move-Item",          "patterns": ["Move-Item *", "mv *", "move *", "mi *"],     "risk": "low",    "description": "Move/rename files" },
+        { "name": "Rename-Item",        "patterns": ["Rename-Item *", "ren *", "rni *"],           "risk": "low",    "description": "Rename file" },
+        { "name": "Set-Content",        "patterns": ["Set-Content *", "sc *"],                     "risk": "low",    "description": "Write file contents" },
+        { "name": "Add-Content",        "patterns": ["Add-Content *", "ac *"],                     "risk": "low",    "description": "Append file contents" },
+        { "name": "Out-File",           "patterns": ["Out-File *"],                                "risk": "low",    "description": "Write output to file" },
+        { "name": "New-PSSession",      "patterns": ["New-PSSession *", "nsn *"],                  "risk": "low",    "description": "Create persistent remote session" }
+      ],
+      "modifying": [
+        { "name": "Remove-Item",        "patterns": ["Remove-Item *", "rm *", "del *", "ri *"],    "risk": "high",   "description": "Delete files/directories" },
+        { "name": "Stop-Process",       "patterns": ["Stop-Process *", "kill *", "spps *"],        "risk": "high",   "description": "Kill processes" },
+        { "name": "Stop-Service",       "patterns": ["Stop-Service *"],                            "risk": "medium", "description": "Stop a service" },
+        { "name": "Start-Service",      "patterns": ["Start-Service *"],                           "risk": "medium", "description": "Start a service" },
+        { "name": "Restart-Service",    "patterns": ["Restart-Service *"],                         "risk": "medium", "description": "Restart a service" },
+        { "name": "Set-Service",        "patterns": ["Set-Service *"],                             "risk": "medium", "description": "Modify service config" },
+        { "name": "Invoke-Expression",  "patterns": ["Invoke-Expression *", "iex *"],              "risk": "high",   "description": "Execute string as command" },
+        { "name": "Enter-PSSession",    "patterns": ["Enter-PSSession *", "etsn *"],               "risk": "medium", "description": "Start interactive remote session" },
+        { "name": "Enable-PSRemoting",  "patterns": ["Enable-PSRemoting *"],                       "risk": "high",   "description": "Enable PowerShell remoting" },
+        { "name": "Set-ExecutionPolicy","patterns": ["Set-ExecutionPolicy *"],                     "risk": "high",   "description": "Change script execution policy" },
+        { "name": "Register-PSSessionConfiguration", "patterns": ["Register-PSSessionConfiguration *"], "risk": "high", "description": "Register session endpoint configuration" }
+      ],
+      "parameter_commands": {
+        "Invoke-RestMethod": {
+          "aliases": ["irm"],
+          "rules": [
+            { "param": "Method", "match": "values", "values": ["Get","Head","Options"], "decision": "read-only" },
+            { "param": "Method", "match": "values", "values": ["Post","Put","Patch"], "decision": "modifying", "risk": "medium" },
+            { "param": "Method", "match": "values", "values": ["Delete"], "decision": "modifying", "risk": "high" }
+          ],
+          "default": "read-only"
+        },
+        "Invoke-WebRequest": {
+          "aliases": ["iwr"],
+          "rules": [
+            { "param": "Method", "match": "values", "values": ["Get","Head","Options"], "decision": "read-only" },
+            { "param": "Method", "match": "values", "values": ["Post","Put","Patch"], "decision": "modifying", "risk": "medium" },
+            { "param": "Method", "match": "values", "values": ["Delete"], "decision": "modifying", "risk": "high" }
+          ],
+          "default": "read-only"
+        }
+      }
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "description": "Linux / Bash / Zsh commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "read_only": [
+        { "name": "ls",       "patterns": ["ls *"],                            "description": "List directory contents" },
+        { "name": "sar",      "patterns": ["sar *"],                           "description": "System Activity Reporter" },
+        { "name": "cat",      "patterns": ["cat *"],                           "description": "Print file contents" },
+        { "name": "head",     "patterns": ["head *"],                          "description": "Output first lines of file" },
+        { "name": "tail",     "patterns": ["tail *"],                          "description": "Output last lines of file" },
+        { "name": "grep",     "patterns": ["grep *"],                          "description": "Search text patterns (read-only, no -i or redirection)" },
+        { "name": "awk",      "patterns": ["awk *"],                           "description": "Text processing (read-only, no redirection)" },
+        { "name": "sort",     "patterns": ["sort *", "sort"],                  "description": "Sort lines of text" },
+        { "name": "sed",      "patterns": ["sed (?!-i|--in-place).*"],         "description": "Stream editor (read-only, excludes in-place editing)" },
+        { "name": "uniq",     "patterns": ["uniq", "uniq *"],                  "description": "Report or omit repeated lines" },
+        { "name": "wc",       "patterns": ["wc *"],                            "description": "Word/line/byte count" },
+        { "name": "ps",       "patterns": ["ps *"],                            "description": "List processes" },
+        { "name": "top",      "patterns": ["top -b *", "top -n *"],            "description": "System monitor (batch mode)" },
+        { "name": "df",       "patterns": ["df *"],                            "description": "Disk space usage" },
+        { "name": "du",       "patterns": ["du *"],                            "description": "Directory space usage" },
+        { "name": "free",     "patterns": ["free *"],                          "description": "Memory usage" },
+        { "name": "uname",    "patterns": ["uname *"],                         "description": "System information" },
+        { "name": "ss",       "patterns": ["ss *"],                            "description": "Socket statistics" },
+        { "name": "ip addr",  "patterns": ["ip addr *", "ip a *", "ip link *", "ip route *"],     "description": "Network interface/route info" },
+        { "name": "journalctl","patterns": ["journalctl *"],                   "description": "Query systemd journal" },
+        { "name": "file",     "patterns": ["file *"],                          "description": "Determine file type" },
+        { "name": "stat",     "patterns": ["stat *"],                          "description": "Display file status" },
+        { "name": "which",    "patterns": ["which *"],                         "description": "Locate command path" },
+        { "name": "cd",       "patterns": ["cd *"],                            "description": "Change directory (read-only for filesystem)" },
+        { "name": "who",      "patterns": ["who", "whoami","quser","w$"],  "description": "Show logged-in users" },
+        { "name": "env",      "patterns": ["env", "printenv"],                 "description": "Display environment variables" },
+        { "name": "history",  "patterns": ["history *"],                       "description": "Show command history" },
+        { "name": "date",     "patterns": ["date"],                            "description": "Display current date/time" },
+        { "name": "uptime",   "patterns": ["uptime"],                          "description": "Show system uptime" },
+        { "name": "lsof",     "patterns": ["lsof *"],                          "description": "List open files" },
+        { "name": "fdisk -l", "patterns": ["fdisk -l *"],                      "description": "List partition tables" },
+        { "name": "diff",     "patterns": ["diff *"],                          "description": "Compare files line by line" },
+        { "name": "tar -t",   "patterns": ["tar -t*", "tar --list*"],          "description": "List tar archive contents" },
+        { "name": "less",     "patterns": ["less *"],                          "description": "View file contents" },
+        { "name": "find",     "patterns": ["find (?!.*-exec|.*-delete|.*-ok).*"],                 "description": "Find files (read-only, excludes -exec/-delete/-ok)" },
+        { "name": "locate",   "patterns": ["locate *"],                        "description": "Find files by name" },
+        { "name": "id",       "patterns": ["id *", "id"],                      "description": "Display user/group IDs" },
+        { "name": "hostname", "patterns": ["hostname", "hostname *"],          "description": "Show system hostname" },
+        { "name": "pgrep",    "patterns": ["pgrep *"],                         "description": "Find processes by name" },
+        { "name": "nslookup", "patterns": ["nslookup *"],                      "description": "DNS lookup" },
+        { "name": "dig",      "patterns": ["dig *"],                           "description": "DNS lookup utility" },
+        { "name": "wget stdout", "patterns": ["wget *-O-*", "wget *-qO-*"],    "description": "Download to stdout (read-only)" },
+        { "name": "echo",     "patterns": ["echo *", "echo"],                  "description": "Print text to stdout" },
+        { "name": "ping",     "patterns": ["ping *"],                          "description": "Send ICMP echo requests" },
+        { "name": "bash",     "patterns": ["bash", "sh *"],                    "description": "Shell interpreter receiving piped/redirected input" },
+        { "name": "sleep",    "patterns": ["sleep *"],                         "description": "Delay/suspend execution" },
+        { "name": "true",     "patterns": ["true"],                            "description": "Return success (shell builtin)" },
+        { "name": "javap",    "patterns": ["javap *"],                          "description": "Disassemble/inspect Java class files" },
+        { "name": "adb devices",     "patterns": ["adb devices*"],              "description": "List attached Android devices" },
+        { "name": "adb logcat read", "patterns": ["adb logcat (?!.*-c).*"], "description": "Dump device log (excludes -c clear)" },
+        { "name": "adb shell getprop", "patterns": ["adb shell getprop *"],     "description": "Read device properties" },
+        { "name": "adb shell pm list", "patterns": ["adb shell pm list *"],     "description": "List installed packages" },
+        { "name": "gh pr list",      "patterns": ["gh pr list*"],        "description": "List pull requests" },
+        { "name": "gh pr view",      "patterns": ["gh pr view*"],        "description": "View a pull request" },
+        { "name": "gh pr status",    "patterns": ["gh pr status*"],      "description": "Show PR status" },
+        { "name": "gh repo view",    "patterns": ["gh repo view*"],      "description": "View repository" },
+        { "name": "gh release list", "patterns": ["gh release list*"],   "description": "List releases" },
+        { "name": "gh release view", "patterns": ["gh release view*"],   "description": "View a release" }
+      ],
+      "strictness_gated": [
+        { "name": "printf",   "patterns": ["printf *"],      "risk": "low",    "description": "Print Out" },
+        { "name": "mkdir",    "patterns": ["mkdir *"],                         "risk": "low",    "description": "Create directory" },
+        { "name": "ln",       "patterns": ["ln *"],                            "risk": "low",    "description": "Create hard/symbolic links" },
+        { "name": "unzip",    "patterns": ["unzip *", "unzip"],                 "risk": "low", "description": "Extract archive (writes files)" },
+        { "name": "gradlew",  "patterns": ["[.][/\\\\]gradlew", "gradlew *", "gradlew"], "risk": "low", "description": "Gradle build wrapper (writes build outputs)" },
+        { "name": "adb install", "patterns": ["adb install *"],                 "risk": "low", "description": "Install APK on device" },
+        { "name": "adb push", "patterns": ["adb push *"],                       "risk": "low", "description": "Push file to device" },
+        { "name": "adb pull", "patterns": ["adb pull *"],                       "risk": "low", "description": "Pull file from device" },
+        { "name": "adb shell am start", "patterns": ["adb shell am start *"],   "risk": "low", "description": "Launch activity on device" },
+        { "name": "adb logcat -c", "patterns": ["adb logcat *-c*"],             "risk": "low", "description": "Clear device log buffer" }
+      ],
+      "modifying": [
+
+        { "name": "rm",       "patterns": ["rm *"],                            "risk": "high",   "description": "Remove files/directories" },
+        { "name": "mv",       "patterns": ["mv *"],                            "risk": "medium", "description": "Move/rename files" },
+        { "name": "cp",       "patterns": ["cp *"],                            "risk": "medium", "description": "Copy files" },
+        { "name": "chmod",    "patterns": ["chmod *"],                         "risk": "high",   "description": "Change file permissions" },
+        { "name": "chown",    "patterns": ["chown *"],                         "risk": "high",   "description": "Change file ownership" },
+        { "name": "sed -i",   "patterns": ["sed -i*", "sed --in-place*"],      "risk": "medium", "description": "Edit file in-place" },
+        { "name": "rmdir",    "patterns": ["rmdir *"],                         "risk": "high",   "description": "Remove empty directory" },
+        { "name": "systemctl start",  "patterns": ["systemctl start *"],       "risk": "medium", "description": "Start a systemd unit" },
+        { "name": "systemctl stop",   "patterns": ["systemctl stop *"],        "risk": "medium", "description": "Stop a systemd unit" },
+        { "name": "systemctl restart","patterns": ["systemctl restart *"],     "risk": "medium", "description": "Restart a systemd unit" },
+        { "name": "systemctl enable", "patterns": ["systemctl enable *"],      "risk": "medium", "description": "Enable a systemd unit" },
+        { "name": "systemctl disable","patterns": ["systemctl disable *"],     "risk": "medium", "description": "Disable a systemd unit" },
+        { "name": "systemctl mask",   "patterns": ["systemctl mask *"],        "risk": "medium", "description": "Mask a systemd unit" },
+        { "name": "systemctl daemon-reload", "patterns": ["systemctl daemon-reload"],             "risk": "medium", "description": "Reload systemd manager config" },
+        { "name": "useradd",  "patterns": ["useradd *"],                       "risk": "high",   "description": "Create user account" },
+        { "name": "userdel",  "patterns": ["userdel *"],                       "risk": "high",   "description": "Delete user account" },
+        { "name": "usermod",  "patterns": ["usermod *"],                       "risk": "high",   "description": "Modify user account" },
+        { "name": "passwd",   "patterns": ["passwd *"],                        "risk": "high",   "description": "Change user password" },
+        { "name": "apt install",    "patterns": ["apt install *", "apt-get install *"],           "risk": "medium", "description": "Install packages" },
+        { "name": "apt remove",     "patterns": ["apt remove *", "apt-get remove *"],             "risk": "medium", "description": "Remove packages" },
+        { "name": "apt purge",      "patterns": ["apt purge *", "apt-get purge *"],               "risk": "high",   "description": "Purge packages with config" },
+        { "name": "apt autoremove", "patterns": ["apt autoremove *", "apt-get autoremove *"],     "risk": "medium", "description": "Auto-remove unused packages" },
+        { "name": "iptables -A",    "patterns": ["iptables -A*"],              "risk": "high",   "description": "Append firewall rule" },
+        { "name": "iptables -D",    "patterns": ["iptables -D*"],              "risk": "high",   "description": "Delete firewall rule" },
+        { "name": "mount",    "patterns": ["mount *"],                         "risk": "medium", "description": "Mount filesystem" },
+        { "name": "umount",   "patterns": ["umount *"],                        "risk": "medium", "description": "Unmount filesystem" },
+        { "name": "dd",       "patterns": ["dd *"],                            "risk": "high",   "description": "Low-level disk copy/wipe" },
+        { "name": "shutdown", "patterns": ["shutdown *"],                      "risk": "high",   "description": "Shutdown/reboot system" },
+        { "name": "reboot",   "patterns": ["reboot *"],                        "risk": "high",   "description": "Reboot system" },
+        { "name": "modprobe", "patterns": ["modprobe *"],                      "risk": "high",   "description": "Load/unload kernel modules" },
+        { "name": "crontab",  "patterns": ["crontab *", "crontab -e", "crontab -r", "crontab -"], "risk": "medium", "description": "Edit/remove scheduled jobs" },
+        { "name": "wget",      "patterns": ["wget (?!.*-O-).*", "wget (?!.*-qO-).*"],             "risk": "medium", "description": "Download files from web" },
+        { "name": "tee",       "patterns": ["tee *"],                          "risk": "medium", "description": "Write stdin to file(s)" },
+        { "name": "chpasswd",  "patterns": ["chpasswd *", "chpasswd"],         "risk": "high",   "description": "Change user passwords in batch" },
+        { "name": "gh pr create",      "patterns": ["gh pr create*"],      "risk": "medium", "description": "Create pull request" },
+        { "name": "gh pr merge",       "patterns": ["gh pr merge*"],       "risk": "medium", "description": "Merge pull request" },
+        { "name": "gh pr close",       "patterns": ["gh pr close*"],       "risk": "medium", "description": "Close pull request" },
+        { "name": "gh issue create",   "patterns": ["gh issue create*"],   "risk": "medium", "description": "Create issue" },
+        { "name": "gh release create", "patterns": ["gh release create*"], "risk": "medium", "description": "Create release" },
+        { "name": "gh release delete", "patterns": ["gh release delete*"], "risk": "medium", "description": "Delete release" }
+      ],
+      "parameter_commands": {
+        "curl": {
+          "rules": [
+            { "param": "-X", "match": "values", "values": ["GET","HEAD","OPTIONS"], "decision": "read-only" },
+            { "param": "-X", "match": "values", "values": ["POST","PUT","PATCH"], "decision": "modifying", "risk": "medium" },
+            { "param": "-X", "match": "values", "values": ["DELETE"], "decision": "modifying", "risk": "high" },
+            { "param": ["-d","--data","--data-raw","--data-binary","--data-urlencode"], "match": "present", "decision": "modifying", "risk": "medium" },
+            { "param": ["-F","--form"], "match": "present", "decision": "modifying", "risk": "medium" },
+            { "param": ["-T","--upload-file"], "match": "present", "decision": "modifying", "risk": "medium" }
+          ],
+          "default": "read-only"
+        },
+        "python": {
+          "aliases": ["python3","py"],
+          "rules": [
+            { "param": ["--version","-V"], "match": "present", "decision": "read-only" },
+            { "param": ["--help","-h"], "match": "present", "decision": "read-only" }
+          ],
+          "default": "modifying",
+          "default_risk": "medium"
+        }
+      }
+    },
+
+    "Git": {
+      "modifying_strictness": "normal",
+      "description": "Git version control commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "_comment_gated": "strictness_gated below: git add, pull, commit, switch, init, clone, tag -d, tag create, worktree add/remove/prune/move/lock/unlock, remote modify, rev-parse, stash — allow in normal/loose, ask in strict.",
+      "read_only": [
+        { "name": "git status",    "patterns": ["git status*", "git status *"],                  "description": "Show working tree status" },
+        { "name": "git log",       "patterns": ["git log*", "git log *"],                        "description": "Show commit logs" },
+        { "name": "git ls-remote", "patterns": ["git ls-remote*", "git ls-remote *"],            "description": "Show remote" },
+		{ "name": "git ls-files", "patterns": ["git ls-files*", "git ls-files *"],            "description": "Show file logs" },
+        { "name": "git diff",      "patterns": ["git diff*", "git diff *"],                      "description": "Show changes" },
+		{ "name": "git check-ignore", "patterns": ["git check-ignore*", "git check-ignore *"],                      "description": "Show whether specific files or directories are ignored" },
+        { "name": "git show",      "patterns": ["git show*", "git show *"],                      "description": "Show various objects" },
+        { "name": "git branch",    "patterns": ["^git branch$", "git branch -a*", "git branch -l*", "git branch --list*", "git branch --show*"], "description": "List branches (no write)" },
+        { "name": "git tag",       "patterns": ["^git tag$", "git tag -l*", "git tag --list*"],  "description": "List tags (no write)" },
+        { "name": "git remote",    "patterns": ["^git remote$", "git remote -v*", "git remote --verbose*"], "description": "List remotes (no write)" },
+        { "name": "git fetch",     "patterns": ["git fetch*", "git fetch *"],                    "description": "Download objects and refs" },
+        { "name": "git worktree list", "patterns": ["git worktree list*", "git worktree list *"], "description": "List worktrees (no write)" }
+      ],
+      "strictness_gated": [
+        { "name": "git pull",      "patterns": ["git pull*", "git pull *"],                      "risk": "low", "description": "Fetch and integrate (may modify working tree)" },
+        { "name": "git switch",    "patterns": ["git switch$", "git switch *"],                  "risk": "low", "description": "Switch to a branch (modifies working tree)" },
+        { "name": "git init",      "patterns": ["git init*", "git init *"],                      "risk": "low",    "description": "Create empty repository" },
+        { "name": "git clone",     "patterns": ["git clone*", "git clone *"],                    "risk": "low",    "description": "Clone repository" },
+        { "name": "git tag -d",    "patterns": ["git tag -d*", "git tag --delete*"],             "risk": "low",    "description": "Delete tag" },
+        { "name": "git add",       "patterns": ["git add*", "git add *"],                        "risk": "low",    "description": "Stage file changes" },
+        { "name": "git worktree add", "patterns": ["git worktree add*", "git worktree add *"], "risk": "low",    "description": "Add a linked worktree" },
+        { "name": "git commit",    "patterns": ["git commit*", "git commit *"],                  "risk": "low",    "description": "Record changes to repository" },
+        { "name": "git rev-parse",   "patterns": ["git rev-parse*", "git rev-parse *"],                "risk": "medium", "description": "rev-parse working tree files" },
+        { "name": "git stash",     "patterns": ["git stash*", "git stash *"],                    "risk": "low",    "description": "Stash changes" },
+        { "name": "git tag create",      "patterns": ["git tag -a*", "git tag -s *", "git tag -m *"], "risk": "low", "description": "Create annotated/signed tag" },
+        { "name": "git remote modify", "patterns": ["git remote add*", "git remote remove*", "git remote set-url*", "git remote rename*"], "risk": "low", "description": "Modify remote configuration" },
+        { "name": "git worktree remove", "patterns": ["git worktree remove*", "git worktree remove *"], "risk": "low", "description": "Remove a worktree" },
+        { "name": "git worktree prune",  "patterns": ["git worktree prune*"],                        "risk": "low", "description": "Prune stale worktree metadata" },
+        { "name": "git worktree move",   "patterns": ["git worktree move*"],                         "risk": "low", "description": "Move a worktree" },
+        { "name": "git worktree lock",   "patterns": ["git worktree lock*"],                         "risk": "low", "description": "Lock a worktree" },
+        { "name": "git worktree unlock", "patterns": ["git worktree unlock*"],                       "risk": "low", "description": "Unlock a worktree" }
+      ],
+      "modifying": [
+        { "name": "git push",      "patterns": ["git push*", "git push *"],                      "risk": "medium", "description": "Update remote refs" },
+        { "name": "git merge",     "patterns": ["git merge*", "git merge *"],                    "risk": "medium", "description": "Join development histories" },
+        { "name": "git rebase",    "patterns": ["git rebase*", "git rebase *"],                  "risk": "medium", "description": "Reapply commits" },
+        { "name": "git reset",     "patterns": ["git reset*", "git reset *"],                    "risk": "high",   "description": "Reset current HEAD" },
+        { "name": "git clean",     "patterns": ["git clean*", "git clean *"],                    "risk": "high",   "description": "Remove untracked files" },
+        { "name": "git checkout",  "patterns": ["git checkout*", "git checkout *"],              "risk": "medium", "description": "Switch branches or restore files" },
+        { "name": "git restore",   "patterns": ["git restore*", "git restore *"],                "risk": "medium", "description": "Restore working tree files" },
+        { "name": "git branch -D", "patterns": ["git branch -D*", "git branch --delete*", "git branch -d*", "git branch -m*", "git branch --move*"], "risk": "medium", "description": "Delete or rename branch" }
+      ]
+    },
+
+    "Terraform": {
+      "modifying_strictness": "normal",
+      "description": "HashiCorp Terraform IaC commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "read_only": [
+        { "name": "terraform fmt -check",   "patterns": ["terraform *fmt*-check*"],               "description": "Check config formatting (dry-run, read-only)" },
+        { "name": "terraform plan",         "patterns": ["terraform plan*"],                       "description": "Show execution plan" },
+        { "name": "terraform state list",   "patterns": ["terraform *state list*"],                "description": "List resources in state" },
+        { "name": "terraform state show",   "patterns": ["terraform *state show*"],                "description": "Show resource in state" },
+        { "name": "terraform output",       "patterns": ["terraform *output*"],                    "description": "Show output values" },
+        { "name": "terraform console",      "patterns": ["terraform *console*"],                   "description": "Interactive console" },
+        { "name": "terraform fmt -check",   "patterns": ["terraform *fmt -check*", "terraform *fmt --check*"], "description": "Check formatting (no write)" },
+        { "name": "terraform validate",     "patterns": ["terraform *validate*"],                  "description": "Validate configuration" },
+        { "name": "terraform providers",    "patterns": ["terraform providers", "terraform *providers schema*", "terraform *providers lock*"], "description": "Show required providers (read-only subcommands)" },
+        { "name": "terraform graph",        "patterns": ["terraform *graph*"],                     "description": "Generate dependency graph" },
+        { "name": "terraform version",      "patterns": ["terraform *version*"],                   "description": "Show Terraform version" },
+        { "name": "terraform show",         "patterns": ["terraform *show*"],                      "description": "Show state or plan" },
+        { "name": "terraform workspace list","patterns": ["terraform *workspace list*"],           "description": "List workspaces" },
+        { "name": "terraform workspace show","patterns": ["terraform *workspace show*"],           "description": "Show current workspace" }
+      ],
+      "strictness_gated": [
+        { "name": "terraform init",          "patterns": ["terraform *init*"],                     "risk": "low",    "description": "Initialize working directory, download providers" },
+        { "name": "terraform get",           "patterns": ["terraform get*"],                       "risk": "low",    "description": "Download and install modules" },
+        { "name": "terraform providers mirror","patterns": ["terraform *providers mirror*"],       "risk": "low",    "description": "Mirror providers to local filesystem" },
+        { "name": "terraform fmt",           "patterns": ["terraform fmt*", "terraform *fmt*"],        "risk": "low",    "description": "Reformat config files in place" }
+      ],
+      "modifying": [
+        { "name": "terraform apply",         "patterns": ["terraform *apply*"],                    "risk": "high",   "description": "Apply changes to infrastructure" },
+        { "name": "terraform destroy",       "patterns": ["terraform *destroy*"],                  "risk": "high",   "description": "Destroy all managed resources" },
+        { "name": "terraform state rm",      "patterns": ["terraform *state rm*"],                 "risk": "high",   "description": "Remove resource from state" },
+        { "name": "terraform state mv",      "patterns": ["terraform *state mv*"],                 "risk": "high",   "description": "Move resource in state" },
+        { "name": "terraform force-unlock",  "patterns": ["terraform *force-unlock*"],             "risk": "high",   "description": "Force-unlock state lock" },
+        { "name": "terraform import",        "patterns": ["terraform *import*"],                   "risk": "medium", "description": "Import existing resource into state" },
+        { "name": "terraform workspace new", "patterns": ["terraform *workspace new*"],            "risk": "medium", "description": "Create new workspace" },
+        { "name": "terraform workspace select","patterns": ["terraform *workspace select*"],       "risk": "medium", "description": "Switch workspace" },
+        { "name": "terraform workspace delete","patterns": ["terraform *workspace delete*"],       "risk": "high",   "description": "Delete workspace" },
+        { "name": "terraform taint",         "patterns": ["terraform *taint*"],                    "risk": "medium", "description": "Mark resource for recreation" },
+        { "name": "terraform untaint",       "patterns": ["terraform *untaint*"],                  "risk": "medium", "description": "Remove taint from resource" },
+        { "name": "terraform refresh",       "patterns": ["terraform *refresh*"],                  "risk": "medium", "description": "Refresh state against real resources" }
+      ]
+    },
+
+    "Docker": {
+      "modifying_strictness": "normal",
+      "description": "Docker and Docker Compose commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "_comment_gated": "strictness_gated intentionally empty: Docker has no risk:low modifying entries (all medium/high).",
+      "read_only": [
+	    { "name": "docker cp",               "patterns": ["docker cp*"],                           "description": "copy files between host and containers" },
+        { "name": "docker ps",               "patterns": ["docker ps*"],                           "description": "List running containers" },
+        { "name": "docker inspect",          "patterns": ["docker inspect*"],                      "description": "Inspect container/image details" },
+        { "name": "docker logs",             "patterns": ["docker logs*"],                         "description": "View container logs" },
+        { "name": "docker stats",            "patterns": ["docker stats*"],                        "description": "Container resource usage" },
+        { "name": "docker images",           "patterns": ["docker images*"],                       "description": "List images" },
+        { "name": "docker history",          "patterns": ["docker history*"],                      "description": "Show image layer history" },
+        { "name": "docker diff",             "patterns": ["docker diff*"],                         "description": "Show filesystem changes" },
+        { "name": "docker events",           "patterns": ["docker events*"],                       "description": "Stream docker events" },
+        { "name": "docker info",             "patterns": ["docker info*"],                         "description": "Display system-wide info" },
+        { "name": "docker top",              "patterns": ["docker top*"],                          "description": "Display container processes" },
+        { "name": "docker volume ls",        "patterns": ["docker volume ls*"],                    "description": "List volumes" },
+        { "name": "docker volume inspect",   "patterns": ["docker volume inspect*"],               "description": "Inspect volumes" },
+        { "name": "docker network ls",       "patterns": ["docker network ls*"],                   "description": "List networks" },
+        { "name": "docker network inspect",  "patterns": ["docker network inspect*"],              "description": "Inspect networks" },
+        { "name": "docker compose ps",       "patterns": ["docker compose *ps*", "docker compose ps*", "docker-compose ps*", "docker-compose *ps*"], "description": "List compose containers" },
+        { "name": "docker compose config",   "patterns": ["docker compose *config*", "docker compose config*", "docker-compose config*", "docker-compose *config*"], "description": "Show parsed compose config" },
+        { "name": "docker compose logs",     "patterns": ["docker compose *logs*", "docker compose logs*", "docker-compose logs*", "docker-compose *logs*"], "description": "View compose logs" },
+        { "name": "docker compose images",   "patterns": ["docker compose *images*", "docker compose images*"], "description": "List compose images" },
+        { "name": "docker buildx ls",        "patterns": ["docker buildx ls*"],                    "description": "List builder instances" }
+      ],
+      "strictness_gated": [],
+      "modifying": [
+        { "name": "docker rm",               "patterns": ["docker rm *"],                          "risk": "high",   "description": "Remove container (data lost if no volume)" },
+        { "name": "docker stop",             "patterns": ["docker stop *"],                        "risk": "medium", "description": "Stop running container" },
+        { "name": "docker kill",             "patterns": ["docker kill *"],                        "risk": "high",   "description": "Force-kill container" },
+        { "name": "docker volume rm",        "patterns": ["docker volume rm *"],                   "risk": "high",   "description": "Remove volume (destroys data)" },
+        { "name": "docker system prune -a",  "patterns": ["docker system prune *-a*"],             "risk": "high",   "description": "Prune all unused objects" },
+        { "name": "docker system prune",     "patterns": ["docker system prune*"],                 "risk": "medium", "description": "Prune unused docker objects" },
+        { "name": "docker run",              "patterns": ["docker run *"],                         "risk": "medium", "description": "Run new container" },
+        { "name": "docker start",            "patterns": ["docker start *"],                       "risk": "medium", "description": "Start stopped container" },
+        { "name": "docker restart",          "patterns": ["docker restart *"],                     "risk": "medium", "description": "Restart container" },
+        { "name": "docker exec",             "patterns": ["docker exec *"],                        "risk": "medium", "description": "Execute command in running container" },
+        { "name": "docker build",            "patterns": ["docker build *"],                       "risk": "medium", "description": "Build image from Dockerfile" },
+        { "name": "docker push",             "patterns": ["docker push *"],                        "risk": "medium", "description": "Push image to registry" },
+        { "name": "docker rmi",              "patterns": ["docker rmi *"],                         "risk": "high",   "description": "Remove image" },
+        { "name": "docker compose up",       "patterns": ["docker compose up*", "docker-compose up*"], "risk": "medium", "description": "Start compose services" },
+        { "name": "docker compose down",     "patterns": ["docker compose down*", "docker-compose down*"], "risk": "medium", "description": "Stop compose services" },
+        { "name": "docker compose down -v",  "patterns": ["docker compose down *-v*"],             "risk": "high",   "description": "Stop compose + remove volumes" },
+        { "name": "docker compose build",    "patterns": ["docker compose build*"],                "risk": "medium", "description": "Build compose services" },
+        { "name": "docker compose restart",  "patterns": ["docker compose restart*"],              "risk": "medium", "description": "Restart compose services" },
+        { "name": "docker compose rm",       "patterns": ["docker compose rm*"],                   "risk": "high",   "description": "Remove stopped compose containers" },
+        { "name": "docker container prune",  "patterns": ["docker container prune*"],              "risk": "high",   "description": "Remove all stopped containers" },
+        { "name": "docker volume prune",     "patterns": ["docker volume prune*"],                 "risk": "high",   "description": "Remove all unused volumes" },
+        { "name": "docker network prune",    "patterns": ["docker network prune*"],                "risk": "medium", "description": "Remove all unused networks" },
+        { "name": "docker buildx build",     "patterns": ["docker buildx build*"],                 "risk": "medium", "description": "Cross-platform build" },
+        { "name": "docker buildx prune",     "patterns": ["docker buildx prune*"],                 "risk": "medium", "description": "Clean build cache" }
+      ]
+    },
+
+    "Kubernetes": {
+      "modifying_strictness": "normal",
+      "description": "Kubernetes kubectl and Helm commands",
+      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "read_only": [
+        { "name": "helm list",                "patterns": ["helm list*", "helm ls*"],              "description": "List Helm releases" },
+        { "name": "helm status",              "patterns": ["helm status*"],                        "description": "Show release status" },
+        { "name": "helm history",             "patterns": ["helm history*"],                       "description": "Show release history" },
+        { "name": "helm get",                 "patterns": ["helm get *"],                          "description": "Get release details" },
+        { "name": "helm show",                "patterns": ["helm show *"],                         "description": "Show chart info" },
+        { "name": "helm repo list",           "patterns": ["helm repo list*"],                     "description": "List Helm repos" },
+        { "name": "helm search",              "patterns": ["helm search *"],                       "description": "Search Helm repos" },
+        { "name": "helm env",                 "patterns": ["helm env*"],                           "description": "Show Helm environment" },
+        { "name": "kubectl get",              "patterns": ["kubectl get *"],                       "description": "List resources" },
+        { "name": "kubectl describe",         "patterns": ["kubectl describe *"],                  "description": "Show detailed resource info" },
+        { "name": "kubectl logs",             "patterns": ["kubectl logs *"],                      "description": "View pod logs" },
+        { "name": "kubectl top",              "patterns": ["kubectl top *"],                       "description": "Resource usage metrics" },
+        { "name": "kubectl cluster-info",     "patterns": ["kubectl cluster-info*"],               "description": "Cluster info" },
+        { "name": "kubectl api-resources",    "patterns": ["kubectl api-resources*"],              "description": "List API resources" },
+        { "name": "kubectl explain",          "patterns": ["kubectl explain *"],                   "description": "API resource documentation" },
+        { "name": "kubectl rollout status",   "patterns": ["kubectl rollout status*"],             "description": "Check rollout status" },
+        { "name": "kubectl auth can-i",       "patterns": ["kubectl auth can-i*"],                 "description": "Check authorization" },
+        { "name": "kubectl config view",      "patterns": ["kubectl config view*"],                "description": "View kubeconfig" },
+        { "name": "kubectl config current-context", "patterns": ["kubectl config current-context*"], "description": "Show current context" },
+        { "name": "kubectl config get-contexts","patterns": ["kubectl config get-contexts*"],      "description": "List contexts" },
+        { "name": "kubectl wait",             "patterns": ["kubectl wait *"],                      "description": "Wait for condition" }
+      ],
+      "strictness_gated": [
+        { "name": "kubectl config use-context","patterns": ["kubectl config use-context*"],        "risk": "low",    "description": "Switch kubeconfig context" },
+        { "name": "kubectl port-forward",    "patterns": ["kubectl port-forward *"],               "risk": "low",    "description": "Forward local port to pod" }
+      ],
+      "modifying": [
+        { "name": "kubectl delete",          "patterns": ["kubectl delete *"],                     "risk": "high",   "description": "Delete resources" },
+        { "name": "kubectl apply",           "patterns": ["kubectl apply *"],                      "risk": "medium", "description": "Apply configuration" },
+        { "name": "kubectl create",          "patterns": ["kubectl create *"],                     "risk": "medium", "description": "Create resources" },
+        { "name": "kubectl patch",           "patterns": ["kubectl patch *"],                      "risk": "medium", "description": "Patch resources" },
+        { "name": "kubectl scale",           "patterns": ["kubectl scale *"],                      "risk": "medium", "description": "Scale resources" },
+        { "name": "kubectl expose",          "patterns": ["kubectl expose *"],                     "risk": "medium", "description": "Expose resource as service" },
+        { "name": "kubectl exec",            "patterns": ["kubectl exec *"],                       "risk": "medium", "description": "Execute command in pod" },
+        { "name": "kubectl rollout undo",    "patterns": ["kubectl rollout undo*"],                "risk": "medium", "description": "Undo rollout" },
+        { "name": "kubectl rollout pause",   "patterns": ["kubectl rollout pause*"],               "risk": "medium", "description": "Pause rollout" },
+        { "name": "kubectl rollout resume",  "patterns": ["kubectl rollout resume*"],              "risk": "medium", "description": "Resume rollout" },
+        { "name": "kubectl rollout restart", "patterns": ["kubectl rollout restart*"],             "risk": "medium", "description": "Restart rollout" },
+        { "name": "kubectl drain",           "patterns": ["kubectl drain *"],                      "risk": "high",   "description": "Drain node for maintenance" },
+        { "name": "kubectl cordon",          "patterns": ["kubectl cordon *"],                     "risk": "medium", "description": "Mark node as unschedulable" },
+        { "name": "kubectl uncordon",        "patterns": ["kubectl uncordon *"],                   "risk": "medium", "description": "Mark node as schedulable" },
+        { "name": "kubectl replace",         "patterns": ["kubectl replace *"],                    "risk": "medium", "description": "Replace resources" },
+        { "name": "kubectl edit",            "patterns": ["kubectl edit *"],                       "risk": "high",   "description": "Edit resource directly" },
+        { "name": "kubectl config set",      "patterns": ["kubectl config set*"],                  "risk": "medium", "description": "Set config values" },
+        { "name": "kubectl config delete-context","patterns": ["kubectl config delete-context*"],  "risk": "medium", "description": "Delete context" },
+        { "name": "kubectl taint",           "patterns": ["kubectl taint *"],                      "risk": "high",   "description": "Taint nodes" }
+      ]
+    },
+
+    "AWS_CLI": {
+      "modifying_strictness": "normal",
+      "description": "AWS CLI commands — classified by service and operation verb",
+      "_comment_tiers": "The operation verb is matched against read_only_prefixes => allow, modifying_prefixes => ask by risk tier; unmatched operations ask. In normal strictness, --flags are stripped before classification so only service + operation decide (disabled in strict mode). Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
+      "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-"],
+      "modifying_prefixes": {
+        "high":   ["delete-", "terminate-", "remove-", "detach-", "deactivate-", "disable-", "revoke-", "deregister-", "execute-"],
+        "medium": ["create-", "put-", "update-", "modify-", "attach-", "enable-", "activate-", "register-", "import-", "copy-", "sync", "cp ", "mv ", "start-"]
+      },
+      "read_only": [
+        { "name": "aws s3 ls",                     "patterns": ["aws s3 ls*"],                      "description": "List S3 buckets/objects" },
+        { "name": "aws configure get",            "patterns": ["^aws\\s+configure\\s+get\\b"],            "description": "Read an AWS configure value" },
+        { "name": "aws configure list",           "patterns": ["^aws\\s+configure\\s+list\\b"],           "description": "List AWS configure values" },
+        { "name": "aws --version",                 "patterns": ["aws --version *","aws --version"], "description": "List version" },
+        { "name": "aws s3api head-object",         "patterns": ["aws s3api head-object*"],          "description": "Get S3 object metadata" },
+        { "name": "aws s3api list-objects",        "patterns": ["aws s3api list-objects*"],         "description": "List S3 objects via API" },
+        { "name": "aws ec2 describe-*",            "patterns": ["aws ec2 describe-*"],              "description": "Describe EC2 resources" },
+        { "name": "aws lambda list-functions",     "patterns": ["aws lambda list-functions*"],      "description": "List Lambda functions" },
+        { "name": "aws lambda get-function",       "patterns": ["aws lambda get-function*"],        "description": "Get Lambda function details" },
+        { "name": "aws cloudformation describe-stacks", "patterns": ["aws cloudformation describe-stacks*"], "description": "Describe CloudFormation stacks" },
+        { "name": "aws cloudformation list-stacks",     "patterns": ["aws cloudformation list-stacks*"], "description": "List CloudFormation stacks" },
+        { "name": "aws cloudformation get-template",    "patterns": ["aws cloudformation get-template*"], "description": "Get stack template" },
+        { "name": "aws iam list-*",                "patterns": ["aws iam list-*"],                  "description": "List IAM resources" },
+        { "name": "aws iam get-*",                 "patterns": ["aws iam get-*"],                   "description": "Get IAM resource details" },
+        { "name": "aws rds describe-*",            "patterns": ["aws rds describe-*"],              "description": "Describe RDS resources" },
+        { "name": "aws cloudwatch get-metric-data","patterns": ["aws cloudwatch get-metric-data*"], "description": "Get CloudWatch metrics" },
+        { "name": "aws cloudwatch describe-alarms","patterns": ["aws cloudwatch describe-alarms*"], "description": "Describe CloudWatch alarms" },
+        { "name": "aws eks describe-cluster",      "patterns": ["aws eks describe-cluster*"],       "description": "Describe EKS cluster" },
+        { "name": "aws eks list-clusters",         "patterns": ["aws eks list-clusters*"],          "description": "List EKS clusters" },
+        { "name": "aws sts get-caller-identity",   "patterns": ["aws sts get-caller-identity*"],    "description": "Get current AWS identity" }
+      ],
+      "strictness_gated": [
+        { "name": "aws sso login",                 "patterns": ["aws sso login*"],                  "risk": "low",    "description": "Login to AWS accounts" }
+      ],
+      "modifying": [
+        { "name": "aws sts assume-role",           "patterns": ["aws sts assume-role*"],            "risk": "medium", "description": "Generates temporary credentials" },
+        { "name": "aws ec2 terminate-instances",   "patterns": ["aws ec2 terminate-instances*"],    "risk": "high",   "description": "Terminate EC2 instances" },
+        { "name": "aws s3 rm",                     "patterns": ["aws s3 rm*"],                      "risk": "high",   "description": "Delete S3 objects" },
+        { "name": "aws s3 cp",                     "patterns": ["aws s3 cp*"],                      "risk": "medium", "description": "Copy to/from S3" },
+        { "name": "aws s3 sync",                   "patterns": ["aws s3 sync*"],                    "risk": "medium", "description": "Sync to/from S3" },
+        { "name": "aws s3 mv",                     "patterns": ["aws s3 mv*"],                      "risk": "medium", "description": "Move S3 objects" },
+        { "name": "aws cloudformation delete-stack","patterns": ["aws cloudformation delete-stack*"],"risk": "high",  "description": "Delete CloudFormation stack" },
+        { "name": "aws cloudformation create-stack","patterns": ["aws cloudformation create-stack*"],"risk": "medium","description": "Create CloudFormation stack" },
+        { "name": "aws cloudformation update-stack","patterns": ["aws cloudformation update-stack*"],"risk": "medium","description": "Update CloudFormation stack" },
+        { "name": "aws rds delete-db-instance",    "patterns": ["aws rds delete-db-instance*"],     "risk": "high",   "description": "Delete RDS instance" },
+        { "name": "aws rds modify-db-instance",    "patterns": ["aws rds modify-db-instance*"],     "risk": "medium", "description": "Modify RDS instance" },
+        { "name": "aws ec2 start-instances",       "patterns": ["aws ec2 start-instances*"],        "risk": "medium", "description": "Start EC2 instances" },
+        { "name": "aws ec2 stop-instances",        "patterns": ["aws ec2 stop-instances*"],         "risk": "medium", "description": "Stop EC2 instances" },
+        { "name": "aws lambda invoke",             "patterns": ["aws lambda invoke*"],              "risk": "medium", "description": "Invoke Lambda function" },
+        { "name": "aws lambda update-function-code","patterns": ["aws lambda update-function-code*"],"risk": "medium","description": "Update Lambda code" },
+        { "name": "aws lambda delete-function",    "patterns": ["aws lambda delete-function*"],     "risk": "high",   "description": "Delete Lambda function" }
+      ]
+    }
+  }
+}
