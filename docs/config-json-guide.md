@@ -19,7 +19,7 @@ For anything touching patterns or prefixes, run the full differential (`src/Run-
 | `version` | Config schema version. | Informational. |
 | `description` | Human-readable summary. | Informational. |
 | `log_file_path` | Directory for per-day hook logs (`C:\temp\logs\prehook\`). | Must exist / be writable. These logs are the source for "unknown command" analysis. |
-| `modifying_strictness` | `normal` or `strict`. Governs redirect-write policy and some AWS/mixed cases. | Test suites run both values (`-Strictness normal/strict`); changes here shift redirect-suite results. |
+| `global_modifying_strictness` | `normal` or `strict` (or `loose`). Global strictness — renamed from `modifying_strictness` 2026-07-28; the loader **rejects** the legacy key fail-closed. Governs redirect-write policy and some AWS/mixed cases. Per-domain `commands.<domain>.modifying_strictness` keeps the old name. | Test suites run both values (`-Strictness normal/strict`); changes here shift redirect-suite results. |
 | `risk_legend` | Text descriptions of low/medium/high. | Documentation only — not read by logic. |
 
 ## 2. `editable_paths` / `system_paths` — redirect write policy
@@ -156,9 +156,11 @@ auto-approve day-to-day (e.g. `git add`) while still prompting under strict.
 ### Per-domain `modifying_strictness` + the global guard
 
 Any domain may set its own `"modifying_strictness": "strict" | "normal" | "loose"`.
-The effective strictness for a domain is resolved by `Get-EffectiveStrictness`:
+The global key is now **`global_modifying_strictness`** (top level); the per-domain
+key keeps the old name. The effective strictness for a domain is resolved by
+`Get-EffectiveStrictness`:
 
-1. Global `modifying_strictness` is `strict` or `loose` → that value **forces every domain**.
+1. Global `global_modifying_strictness` is `strict` or `loose` → that value **forces every domain**.
 2. Global is `normal` → the domain's own value (absent → `normal`).
 
 Effective strictness drives three things: the `strictness_gated` tier, AWS CLI

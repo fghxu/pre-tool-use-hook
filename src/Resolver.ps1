@@ -23,10 +23,11 @@ function Get-EffectiveStrictness {
     .SYNOPSIS
         Resolve the effective modifying_strictness for a command domain.
     .DESCRIPTION
-        Guard rule: a global 'strict' or 'loose' forces ALL domains. Only when the
-        global value is 'normal' does a domain's own modifying_strictness apply;
-        domains without one inherit 'normal'. Used by the strictness_gated tier,
-        AWS flag-stripping, and parameter_commands unrecognized-value handling.
+        Guard rule: a global 'strict' or 'loose' (global_modifying_strictness)
+        forces ALL domains. Only when the global value is 'normal' does a domain's
+        own modifying_strictness apply; domains without one inherit 'normal'.
+        Used by the strictness_gated tier, AWS flag-stripping, and
+        parameter_commands unrecognized-value handling.
         Path policy (Parser.ps1) intentionally stays on the global value.
     #>
     param(
@@ -37,7 +38,7 @@ function Get-EffectiveStrictness {
         [string]$Domain
     )
 
-    if ($Config.modifying_strictness -ne 'normal') { return $Config.modifying_strictness }
+    if ($Config.global_modifying_strictness -ne 'normal') { return $Config.global_modifying_strictness }
 
     foreach ($key in $Config.commands.PSObject.Properties.Name) {
         if ($key.ToLowerInvariant() -eq $Domain.ToLowerInvariant()) {

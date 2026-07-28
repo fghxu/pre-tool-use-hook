@@ -1168,10 +1168,10 @@ function Resolve-PathPolicy {
         return [PSCustomObject]@{ Decision = 'allow'; Risk = 'low'; Reason = "$Verb $resolved ($writableReason)"; Target = $resolved }
     }
     # -- strictness fallbacks --
-    if ($Config -and $Config.modifying_strictness -eq 'loose') {
+    if ($Config -and $Config.global_modifying_strictness -eq 'loose') {
         return [PSCustomObject]@{ Decision = 'allow'; Risk = 'low'; Reason = "$Verb $resolved (allowed in loose mode)"; Target = $resolved }
     }
-    if ($Config -and $Config.modifying_strictness -eq 'normal' -and -not $Config._editablePathsEnabled) {
+    if ($Config -and $Config.global_modifying_strictness -eq 'normal' -and -not $Config._editablePathsEnabled) {
         return [PSCustomObject]@{ Decision = 'allow'; Risk = 'low'; Reason = "$Verb $resolved (allowed in normal mode)"; Target = $resolved }
     }
     return [PSCustomObject]@{ Decision = 'ask'; Risk = 'medium'; Reason = "$Verb $resolved (modifying)"; Target = $resolved }
