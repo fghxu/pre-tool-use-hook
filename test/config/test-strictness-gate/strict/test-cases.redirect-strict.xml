@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- ALL-GATED DUPLICATE of test/config/live/test-cases.redirect-strict.xml — runs against THIS folder's
+     config.strict.json (global strict + editable_paths.linux divergence). Unchanged:
+     redirect path policy is independent of the strictness_gated command moves. -->
 <commands>
 
   <category-group name="Redirect-Strict-Basic">

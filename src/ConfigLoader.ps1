@@ -130,13 +130,19 @@ function Test-ConfigSchema {
         $Config | Add-Member -MemberType NoteProperty -Name 'log_file_path' -Value '' -Force
     }
 
-    # Default modifying_strictness to "normal" if missing, validate value
-    if (-not (Get-Member -InputObject $Config -Name 'modifying_strictness' -MemberType NoteProperty)) {
-        $Config | Add-Member -MemberType NoteProperty -Name 'modifying_strictness' -Value 'normal' -Force
+    # Reject the legacy global key (renamed to global_modifying_strictness 2026-07-28):
+    # fail-closed rather than silently default a stale 'strict' config to 'normal' (fail-open).
+    # NOTE: the per-domain commands.<domain>.modifying_strictness key is UNCHANGED.
+    if (Get-Member -InputObject $Config -Name 'modifying_strictness' -MemberType NoteProperty) {
+        throw "Configuration validation failed: the global 'modifying_strictness' key was renamed to 'global_modifying_strictness' - please rename it (per-domain commands.<domain>.modifying_strictness keeps its name)"
+    }
+    # Default global_modifying_strictness to "normal" if missing, validate value
+    if (-not (Get-Member -InputObject $Config -Name 'global_modifying_strictness' -MemberType NoteProperty)) {
+        $Config | Add-Member -MemberType NoteProperty -Name 'global_modifying_strictness' -Value 'normal' -Force
     }
     else {
-        if ($Config.modifying_strictness -notin @('normal', 'strict', 'loose')) {
-            throw "Configuration validation failed: 'modifying_strictness' must be 'normal', 'strict', or 'loose', got '$($Config.modifying_strictness)'"
+        if ($Config.global_modifying_strictness -notin @('normal', 'strict', 'loose')) {
+            throw "Configuration validation failed: 'global_modifying_strictness' must be 'normal', 'strict', or 'loose', got '$($Config.global_modifying_strictness)'"
         }
     }
 

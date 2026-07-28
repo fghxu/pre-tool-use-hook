@@ -1,17 +1,17 @@
 {
   "version": "1.0",
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
+  "_comment_fixture": "TEST FIXTURE - copy of test-strictness-gate/normal/config.normal.json with global strictness forced to strict. Drives test-cases.redirect-strict.xml in this folder without -Strictness. DELIBERATE DIVERGENCE: editable_paths.linux omits the /home + ~ patterns - this suite's strict-mode non-system redirect cases must stay non-editable to keep asking. Regenerate from test-strictness-gate/normal/config.normal.json whenever it changes.",
 
   "_readme": "HOW CLASSIFICATION WORKS: every intercepted tool call is decided 'allow' (run without prompting) or 'ask' (prompt the user). Command-running tools (Bash, PowerShell, run_in_terminal, ...) are classified by matching the command string against the per-domain tiers in 'commands' below. File-writing tools (Write, Edit, create_file, ...) are decided by path policy: system_paths always ask; editable_paths and the current working directory subtree auto-approve. Keys starting with '_' are documentation only and are ignored by the loader.",
   "_readme_tiers": "Per-domain tiers: read_only => allow in every strictness mode | strictness_gated => allow in normal/loose, ask in strict | modifying => always ask (the 'risk' level is shown in the prompt).",
-  "_readme_strictness_guard": "modifying_strictness = strict | normal | loose. A global 'strict' or 'loose' FORCES every domain. A per-domain commands.<domain>.modifying_strictness is consulted only when the global value is 'normal'; domains without one inherit 'normal'.",
+  "_readme_strictness_guard": "global_modifying_strictness (top level) / modifying_strictness (per-domain) = strict | normal | loose. A global 'strict' or 'loose' FORCES every domain. A per-domain commands.<domain>.modifying_strictness is consulted only when the global value is 'normal'; domains without one inherit 'normal'.",
 
   "log_file_path": "c:\\temp\\logs\\prehook\\",
   "_comment_log_file_path": "Directory where the hook appends decision logs (one record per intercepted call).",
 
-  "_comment_fixture": "TEST FIXTURE - copy of config.json with global strictness forced to strict. Drives test-cases.redirect-strict.xml without -Strictness. Regenerate from config.json whenever it changes. DELIBERATE DIVERGENCE: editable_paths.linux omits config.json's /home + ~ patterns - this suite's strict-mode non-system redirect cases must stay non-editable to keep asking.",
-  "modifying_strictness": "strict",
-  "_comment_modifying_strictness": "strict: more prompts (strictness_gated entries ask; AWS flag-stripping disabled). loose: fewer prompts (unrecognized parameter_commands values auto-allow). normal: default; also the only global value that lets per-domain modifying_strictness take effect (see _readme_strictness_guard).",
+  "global_modifying_strictness": "strict",
+  "_comment_global_modifying_strictness": "strict: more prompts (strictness_gated entries ask; AWS flag-stripping disabled). loose: fewer prompts (unrecognized parameter_commands values auto-allow). normal: default; also the only global value that lets per-domain modifying_strictness take effect (see _readme_strictness_guard).",
 
   "editable_paths": {
     "description": "Parent directories where file writes (shell redirects > / >> and file tools like Write/Edit/create_file) are auto-approved when modifying_strictness is normal or loose. The current working directory and its subdirectories are always editable, in every mode.",
@@ -163,6 +163,7 @@
 		"mcp__brave-search__brave_web_search",
 
 
+
 		"Explore",
 		"AskUserQuestion",
 		"CronCreate",
@@ -249,7 +250,7 @@
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
       "read_only": [
 
-        { "name": "nvidia-smi",      "patterns": ["nvidia-smi /s *"],                        "description": "show Nvidia gpu usage" },
+	    { "name": "nvidia-smi",      "patterns": ["nvidia-smi /s *"],                        "description": "show Nvidia gpu usage" },
         { "name": "dir",      "patterns": ["dir *", "dir /s *", "dir /b *"],                        "description": "List directory contents" },
         { "name": "type",     "patterns": ["type *"],                                                "description": "Display file contents" },
         { "name": "tree",     "patterns": ["tree *", "tree /f *"],                                   "description": "Display directory tree" },
@@ -285,15 +286,18 @@
         { "name": "icacls save", "patterns": ["icacls * /save*"],                                   "description": "Export ACLs to file" },
         { "name": "wevtutil", "patterns": ["wevtutil *"],                                          "description": "Query Windows Event Logs" }
       ],
+      "strictness_gated": [
+        { "name": "move",      "patterns": ["move *"],                                              "risk": "low",    "description": "Move/rename files" },
+        { "name": "mkdir",     "patterns": ["mkdir *", "md *"],                                     "risk": "low",    "description": "Create directory" },
+        { "name": "rename",    "patterns": ["rename *", "ren *"],                                   "risk": "low",    "description": "Rename files" },
+        { "name": "setx",      "patterns": ["setx *"],                                              "risk": "low",    "description": "Set persistent environment variable" }
+      ],
       "modifying": [
         { "name": "del",       "patterns": ["del *", "erase *"],                                    "risk": "high",   "description": "Delete files" },
         { "name": "rmdir",     "patterns": ["rmdir *", "rmdir /s *", "rmdir /q *"],                "risk": "high",   "description": "Remove directories" },
         { "name": "copy",      "patterns": ["copy *"],                                              "risk": "medium", "description": "Copy files" },
         { "name": "xcopy",     "patterns": ["xcopy *"],                                             "risk": "medium", "description": "Extended copy with recursion" },
         { "name": "robocopy",  "patterns": ["robocopy *"],                                          "risk": "medium", "description": "Robust file copy" },
-        { "name": "move",      "patterns": ["move *"],                                              "risk": "low",    "description": "Move/rename files" },
-        { "name": "mkdir",     "patterns": ["mkdir *", "md *"],                                     "risk": "low",    "description": "Create directory" },
-        { "name": "rename",    "patterns": ["rename *", "ren *"],                                   "risk": "low",    "description": "Rename files" },
         { "name": "taskkill",  "patterns": ["taskkill *"],                                          "risk": "high",   "description": "Kill running processes" },
         { "name": "shutdown",  "patterns": ["shutdown *"],                                          "risk": "high",   "description": "Shutdown/restart system" },
         { "name": "net start", "patterns": ["net start *"],                                         "risk": "medium", "description": "Start a service" },
@@ -307,7 +311,7 @@
         { "name": "sc start",  "patterns": ["sc start *"],                                             "risk": "medium", "description": "Start a service" },
         { "name": "sc create", "patterns": ["sc create *"],                                            "risk": "high",   "description": "Create a service" },
         { "name": "net share create", "patterns": ["net share *=*"],                                   "risk": "high",   "description": "Create a network share" },
-        { "name": "net share delete", "patterns": ["net share*/delete*"],                             "risk": "high",   "description": "Delete a network share" },
+        { "name": "net share delete", "patterns": ["net share */delete*"],                             "risk": "high",   "description": "Delete a network share" },
         { "name": "netsh advfirewall", "patterns": ["netsh advfirewall *"],                         "risk": "high",   "description": "Modify firewall rules" },
         { "name": "format",    "patterns": ["format *"],                                             "risk": "high",   "description": "Format a disk volume" },
         { "name": "diskpart",  "patterns": ["diskpart *"],                                           "risk": "high",   "description": "Disk partition management" },
@@ -316,7 +320,6 @@
         { "name": "takeown",   "patterns": ["takeown *"],                                            "risk": "high",   "description": "Take file ownership" },
         { "name": "cacls",     "patterns": ["cacls *"],                                              "risk": "high",   "description": "Modify file ACLs (legacy)" },
         { "name": "bcdedit",   "patterns": ["bcdedit *", "bcdedit /set *"],                          "risk": "high",   "description": "Modify boot configuration" },
-        { "name": "setx",      "patterns": ["setx *"],                                               "risk": "low",    "description": "Set persistent environment variable" },
         { "name": "assoc",     "patterns": ["assoc *"],                                              "risk": "medium", "description": "Modify file associations" },
         { "name": "ftype",     "patterns": ["ftype *"],                                              "risk": "medium", "description": "Modify file type commands" }
       ]
@@ -356,13 +359,7 @@
         { "name": "Remove-PSRemoting",  "patterns": ["Remove-PSRemoting *"],                       "description": "Remove PowerShell remoting" },
         { "name": "pwsh",               "patterns": ["pwsh *", "powershell *"],                    "description": "PowerShell wrapper (inner commands classified separately)" }
       ],
-      "modifying": [
-        { "name": "Remove-Item",        "patterns": ["Remove-Item *", "rm *", "del *", "ri *"],    "risk": "high",   "description": "Delete files/directories" },
-        { "name": "Stop-Process",       "patterns": ["Stop-Process *", "kill *", "spps *"],        "risk": "high",   "description": "Kill processes" },
-        { "name": "Stop-Service",       "patterns": ["Stop-Service *"],                            "risk": "medium", "description": "Stop a service" },
-        { "name": "Start-Service",      "patterns": ["Start-Service *"],                           "risk": "medium", "description": "Start a service" },
-        { "name": "Restart-Service",    "patterns": ["Restart-Service *"],                         "risk": "medium", "description": "Restart a service" },
-        { "name": "Set-Service",        "patterns": ["Set-Service *"],                             "risk": "medium", "description": "Modify service config" },
+      "strictness_gated": [
         { "name": "New-Item",           "patterns": ["New-Item *", "ni *", "mkdir *"],             "risk": "low",    "description": "Create file/directory" },
         { "name": "Copy-Item",          "patterns": ["Copy-Item *", "cp *", "copy *", "cpi *"],    "risk": "low",    "description": "Copy files" },
         { "name": "Move-Item",          "patterns": ["Move-Item *", "mv *", "move *", "mi *"],     "risk": "low",    "description": "Move/rename files" },
@@ -370,9 +367,17 @@
         { "name": "Set-Content",        "patterns": ["Set-Content *", "sc *"],                     "risk": "low",    "description": "Write file contents" },
         { "name": "Add-Content",        "patterns": ["Add-Content *", "ac *"],                     "risk": "low",    "description": "Append file contents" },
         { "name": "Out-File",           "patterns": ["Out-File *"],                                "risk": "low",    "description": "Write output to file" },
+        { "name": "New-PSSession",      "patterns": ["New-PSSession *", "nsn *"],                  "risk": "low",    "description": "Create persistent remote session" }
+      ],
+      "modifying": [
+        { "name": "Remove-Item",        "patterns": ["Remove-Item *", "rm *", "del *", "ri *"],    "risk": "high",   "description": "Delete files/directories" },
+        { "name": "Stop-Process",       "patterns": ["Stop-Process *", "kill *", "spps *"],        "risk": "high",   "description": "Kill processes" },
+        { "name": "Stop-Service",       "patterns": ["Stop-Service *"],                            "risk": "medium", "description": "Stop a service" },
+        { "name": "Start-Service",      "patterns": ["Start-Service *"],                           "risk": "medium", "description": "Start a service" },
+        { "name": "Restart-Service",    "patterns": ["Restart-Service *"],                         "risk": "medium", "description": "Restart a service" },
+        { "name": "Set-Service",        "patterns": ["Set-Service *"],                             "risk": "medium", "description": "Modify service config" },
         { "name": "Invoke-Expression",  "patterns": ["Invoke-Expression *", "iex *"],              "risk": "high",   "description": "Execute string as command" },
         { "name": "Enter-PSSession",    "patterns": ["Enter-PSSession *", "etsn *"],               "risk": "medium", "description": "Start interactive remote session" },
-        { "name": "New-PSSession",      "patterns": ["New-PSSession *", "nsn *"],                  "risk": "low",    "description": "Create persistent remote session" },
         { "name": "Enable-PSRemoting",  "patterns": ["Enable-PSRemoting *"],                       "risk": "high",   "description": "Enable PowerShell remoting" },
         { "name": "Set-ExecutionPolicy","patterns": ["Set-ExecutionPolicy *"],                     "risk": "high",   "description": "Change script execution policy" },
         { "name": "Register-PSSessionConfiguration", "patterns": ["Register-PSSessionConfiguration *"], "risk": "high", "description": "Register session endpoint configuration" }
@@ -464,12 +469,19 @@
         { "name": "gh release view", "patterns": ["gh release view*"],   "description": "View a release" }
       ],
       "strictness_gated": [
-        { "name": "printf",   "patterns": ["printf *"],      "risk": "low",    "description": "Print Out" }
+        { "name": "printf",   "patterns": ["printf *"],      "risk": "low",    "description": "Print Out" },
+        { "name": "mkdir",    "patterns": ["mkdir *"],                         "risk": "low",    "description": "Create directory" },
+        { "name": "ln",       "patterns": ["ln *"],                            "risk": "low",    "description": "Create hard/symbolic links" },
+        { "name": "unzip",    "patterns": ["unzip *", "unzip"],                 "risk": "low", "description": "Extract archive (writes files)" },
+        { "name": "gradlew",  "patterns": ["[.][/\\\\]gradlew", "gradlew *", "gradlew"], "risk": "low", "description": "Gradle build wrapper (writes build outputs)" },
+        { "name": "adb install", "patterns": ["adb install *"],                 "risk": "low", "description": "Install APK on device" },
+        { "name": "adb push", "patterns": ["adb push *"],                       "risk": "low", "description": "Push file to device" },
+        { "name": "adb pull", "patterns": ["adb pull *"],                       "risk": "low", "description": "Pull file from device" },
+        { "name": "adb shell am start", "patterns": ["adb shell am start *"],   "risk": "low", "description": "Launch activity on device" },
+        { "name": "adb logcat -c", "patterns": ["adb logcat *-c*"],             "risk": "low", "description": "Clear device log buffer" }
       ],
       "modifying": [
 
-        { "name": "mkdir",    "patterns": ["mkdir *"],                         "risk": "low",    "description": "Create directory" },
-        { "name": "ln",       "patterns": ["ln *"],                            "risk": "low",    "description": "Create hard/symbolic links" },
         { "name": "rm",       "patterns": ["rm *"],                            "risk": "high",   "description": "Remove files/directories" },
         { "name": "mv",       "patterns": ["mv *"],                            "risk": "medium", "description": "Move/rename files" },
         { "name": "cp",       "patterns": ["cp *"],                            "risk": "medium", "description": "Copy files" },
@@ -504,13 +516,6 @@
         { "name": "wget",      "patterns": ["wget (?!.*-O-).*", "wget (?!.*-qO-).*"],             "risk": "medium", "description": "Download files from web" },
         { "name": "tee",       "patterns": ["tee *"],                          "risk": "medium", "description": "Write stdin to file(s)" },
         { "name": "chpasswd",  "patterns": ["chpasswd *", "chpasswd"],         "risk": "high",   "description": "Change user passwords in batch" },
-        { "name": "unzip",    "patterns": ["unzip *", "unzip"],                 "risk": "low", "description": "Extract archive (writes files)" },
-        { "name": "gradlew",  "patterns": ["[.][/\\\\]gradlew", "gradlew *", "gradlew"], "risk": "low", "description": "Gradle build wrapper (writes build outputs)" },
-        { "name": "adb install", "patterns": ["adb install *"],                 "risk": "low", "description": "Install APK on device" },
-        { "name": "adb push", "patterns": ["adb push *"],                       "risk": "low", "description": "Push file to device" },
-        { "name": "adb pull", "patterns": ["adb pull *"],                       "risk": "low", "description": "Pull file from device" },
-        { "name": "adb shell am start", "patterns": ["adb shell am start *"],   "risk": "low", "description": "Launch activity on device" },
-        { "name": "adb logcat -c", "patterns": ["adb logcat *-c*"],             "risk": "low", "description": "Clear device log buffer" },
         { "name": "gh pr create",      "patterns": ["gh pr create*"],      "risk": "medium", "description": "Create pull request" },
         { "name": "gh pr merge",       "patterns": ["gh pr merge*"],       "risk": "medium", "description": "Merge pull request" },
         { "name": "gh pr close",       "patterns": ["gh pr close*"],       "risk": "medium", "description": "Close pull request" },
@@ -546,7 +551,7 @@
       "modifying_strictness": "normal",
       "description": "Git version control commands",
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
-      "_comment_gated": "strictness_gated below: git add, pull, commit, switch, init, clone, tag -d, worktree add, rev-parse, stash — allow in normal/loose, ask in strict.",
+      "_comment_gated": "strictness_gated below: git add, pull, commit, switch, init, clone, tag -d, tag create, worktree add/remove/prune/move/lock/unlock, remote modify, rev-parse, stash — allow in normal/loose, ask in strict.",
       "read_only": [
         { "name": "git status",    "patterns": ["git status*", "git status *"],                  "description": "Show working tree status" },
         { "name": "git log",       "patterns": ["git log*", "git log *"],                        "description": "Show commit logs" },
@@ -571,7 +576,14 @@
         { "name": "git worktree add", "patterns": ["git worktree add*", "git worktree add *"], "risk": "low",    "description": "Add a linked worktree" },
         { "name": "git commit",    "patterns": ["git commit*", "git commit *"],                  "risk": "low",    "description": "Record changes to repository" },
         { "name": "git rev-parse",   "patterns": ["git rev-parse*", "git rev-parse *"],                "risk": "medium", "description": "rev-parse working tree files" },
-        { "name": "git stash",     "patterns": ["git stash*", "git stash *"],                    "risk": "low",    "description": "Stash changes" }
+        { "name": "git stash",     "patterns": ["git stash*", "git stash *"],                    "risk": "low",    "description": "Stash changes" },
+        { "name": "git tag create",      "patterns": ["git tag -a*", "git tag -s *", "git tag -m *"], "risk": "low", "description": "Create annotated/signed tag" },
+        { "name": "git remote modify", "patterns": ["git remote add*", "git remote remove*", "git remote set-url*", "git remote rename*"], "risk": "low", "description": "Modify remote configuration" },
+        { "name": "git worktree remove", "patterns": ["git worktree remove*", "git worktree remove *"], "risk": "low", "description": "Remove a worktree" },
+        { "name": "git worktree prune",  "patterns": ["git worktree prune*"],                        "risk": "low", "description": "Prune stale worktree metadata" },
+        { "name": "git worktree move",   "patterns": ["git worktree move*"],                         "risk": "low", "description": "Move a worktree" },
+        { "name": "git worktree lock",   "patterns": ["git worktree lock*"],                         "risk": "low", "description": "Lock a worktree" },
+        { "name": "git worktree unlock", "patterns": ["git worktree unlock*"],                       "risk": "low", "description": "Unlock a worktree" }
       ],
       "modifying": [
         { "name": "git push",      "patterns": ["git push*", "git push *"],                      "risk": "medium", "description": "Update remote refs" },
@@ -581,14 +593,7 @@
         { "name": "git clean",     "patterns": ["git clean*", "git clean *"],                    "risk": "high",   "description": "Remove untracked files" },
         { "name": "git checkout",  "patterns": ["git checkout*", "git checkout *"],              "risk": "medium", "description": "Switch branches or restore files" },
         { "name": "git restore",   "patterns": ["git restore*", "git restore *"],                "risk": "medium", "description": "Restore working tree files" },
-        { "name": "git branch -D", "patterns": ["git branch -D*", "git branch --delete*", "git branch -d*", "git branch -m*", "git branch --move*"], "risk": "medium", "description": "Delete or rename branch" },
-        { "name": "git remote modify", "patterns": ["git remote add*", "git remote remove*", "git remote set-url*", "git remote rename*"], "risk": "low", "description": "Modify remote configuration" },
-        { "name": "git worktree remove", "patterns": ["git worktree remove*", "git worktree remove *"], "risk": "low", "description": "Remove a worktree" },
-        { "name": "git worktree prune",  "patterns": ["git worktree prune*"],                        "risk": "low", "description": "Prune stale worktree metadata" },
-        { "name": "git worktree move",   "patterns": ["git worktree move*"],                         "risk": "low", "description": "Move a worktree" },
-        { "name": "git worktree lock",   "patterns": ["git worktree lock*"],                         "risk": "low", "description": "Lock a worktree" },
-        { "name": "git worktree unlock", "patterns": ["git worktree unlock*"],                       "risk": "low", "description": "Unlock a worktree" },
-        { "name": "git tag create",      "patterns": ["git tag -a*", "git tag -s *", "git tag -m *"], "risk": "low", "description": "Create annotated/signed tag" }
+        { "name": "git branch -D", "patterns": ["git branch -D*", "git branch --delete*", "git branch -d*", "git branch -m*", "git branch --move*"], "risk": "medium", "description": "Delete or rename branch" }
       ]
     },
 
@@ -612,6 +617,12 @@
         { "name": "terraform workspace list","patterns": ["terraform *workspace list*"],           "description": "List workspaces" },
         { "name": "terraform workspace show","patterns": ["terraform *workspace show*"],           "description": "Show current workspace" }
       ],
+      "strictness_gated": [
+        { "name": "terraform init",          "patterns": ["terraform *init*"],                     "risk": "low",    "description": "Initialize working directory, download providers" },
+        { "name": "terraform get",           "patterns": ["terraform get*"],                       "risk": "low",    "description": "Download and install modules" },
+        { "name": "terraform providers mirror","patterns": ["terraform *providers mirror*"],       "risk": "low",    "description": "Mirror providers to local filesystem" },
+        { "name": "terraform fmt",           "patterns": ["terraform fmt*", "terraform *fmt*"],        "risk": "low",    "description": "Reformat config files in place" }
+      ],
       "modifying": [
         { "name": "terraform apply",         "patterns": ["terraform *apply*"],                    "risk": "high",   "description": "Apply changes to infrastructure" },
         { "name": "terraform destroy",       "patterns": ["terraform *destroy*"],                  "risk": "high",   "description": "Destroy all managed resources" },
@@ -624,11 +635,7 @@
         { "name": "terraform workspace delete","patterns": ["terraform *workspace delete*"],       "risk": "high",   "description": "Delete workspace" },
         { "name": "terraform taint",         "patterns": ["terraform *taint*"],                    "risk": "medium", "description": "Mark resource for recreation" },
         { "name": "terraform untaint",       "patterns": ["terraform *untaint*"],                  "risk": "medium", "description": "Remove taint from resource" },
-        { "name": "terraform refresh",       "patterns": ["terraform *refresh*"],                  "risk": "medium", "description": "Refresh state against real resources" },
-        { "name": "terraform init",          "patterns": ["terraform *init*"],                     "risk": "low",    "description": "Initialize working directory, download providers" },
-        { "name": "terraform get",           "patterns": ["terraform get*"],                       "risk": "low",    "description": "Download and install modules" },
-        { "name": "terraform providers mirror","patterns": ["terraform *providers mirror*"],       "risk": "low",    "description": "Mirror providers to local filesystem" },
-        { "name": "terraform fmt",           "patterns": ["terraform fmt*", "terraform *fmt*"],        "risk": "low",    "description": "Reformat config files in place" }
+        { "name": "terraform refresh",       "patterns": ["terraform *refresh*"],                  "risk": "medium", "description": "Refresh state against real resources" }
       ]
     },
 
@@ -636,6 +643,7 @@
       "modifying_strictness": "normal",
       "description": "Docker and Docker Compose commands",
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
+      "_comment_gated": "strictness_gated intentionally empty: Docker has no risk:low modifying entries (all medium/high).",
       "read_only": [
 	    { "name": "docker cp",               "patterns": ["docker cp*"],                           "description": "copy files between host and containers" },
         { "name": "docker ps",               "patterns": ["docker ps*"],                           "description": "List running containers" },
@@ -658,6 +666,7 @@
         { "name": "docker compose images",   "patterns": ["docker compose *images*", "docker compose images*"], "description": "List compose images" },
         { "name": "docker buildx ls",        "patterns": ["docker buildx ls*"],                    "description": "List builder instances" }
       ],
+      "strictness_gated": [],
       "modifying": [
         { "name": "docker rm",               "patterns": ["docker rm *"],                          "risk": "high",   "description": "Remove container (data lost if no volume)" },
         { "name": "docker stop",             "patterns": ["docker stop *"],                        "risk": "medium", "description": "Stop running container" },
@@ -713,6 +722,10 @@
         { "name": "kubectl config get-contexts","patterns": ["kubectl config get-contexts*"],      "description": "List contexts" },
         { "name": "kubectl wait",             "patterns": ["kubectl wait *"],                      "description": "Wait for condition" }
       ],
+      "strictness_gated": [
+        { "name": "kubectl config use-context","patterns": ["kubectl config use-context*"],        "risk": "low",    "description": "Switch kubeconfig context" },
+        { "name": "kubectl port-forward",    "patterns": ["kubectl port-forward *"],               "risk": "low",    "description": "Forward local port to pod" }
+      ],
       "modifying": [
         { "name": "kubectl delete",          "patterns": ["kubectl delete *"],                     "risk": "high",   "description": "Delete resources" },
         { "name": "kubectl apply",           "patterns": ["kubectl apply *"],                      "risk": "medium", "description": "Apply configuration" },
@@ -730,11 +743,9 @@
         { "name": "kubectl uncordon",        "patterns": ["kubectl uncordon *"],                   "risk": "medium", "description": "Mark node as schedulable" },
         { "name": "kubectl replace",         "patterns": ["kubectl replace *"],                    "risk": "medium", "description": "Replace resources" },
         { "name": "kubectl edit",            "patterns": ["kubectl edit *"],                       "risk": "high",   "description": "Edit resource directly" },
-        { "name": "kubectl config use-context","patterns": ["kubectl config use-context*"],        "risk": "low",    "description": "Switch kubeconfig context" },
         { "name": "kubectl config set",      "patterns": ["kubectl config set*"],                  "risk": "medium", "description": "Set config values" },
         { "name": "kubectl config delete-context","patterns": ["kubectl config delete-context*"],  "risk": "medium", "description": "Delete context" },
-        { "name": "kubectl taint",           "patterns": ["kubectl taint *"],                      "risk": "high",   "description": "Taint nodes" },
-        { "name": "kubectl port-forward",    "patterns": ["kubectl port-forward *"],               "risk": "low",    "description": "Forward local port to pod" }
+        { "name": "kubectl taint",           "patterns": ["kubectl taint *"],                      "risk": "high",   "description": "Taint nodes" }
       ]
     },
 
@@ -769,8 +780,10 @@
         { "name": "aws eks list-clusters",         "patterns": ["aws eks list-clusters*"],          "description": "List EKS clusters" },
         { "name": "aws sts get-caller-identity",   "patterns": ["aws sts get-caller-identity*"],    "description": "Get current AWS identity" }
       ],
+      "strictness_gated": [
+        { "name": "aws sso login",                 "patterns": ["aws sso login*"],                  "risk": "low",    "description": "Login to AWS accounts" }
+      ],
       "modifying": [
-        { "name": "aws sso login",                 "patterns": ["aws sso login*"],                  "risk": "low",    "description": "Login to AWS accounts" },
         { "name": "aws sts assume-role",           "patterns": ["aws sts assume-role*"],            "risk": "medium", "description": "Generates temporary credentials" },
         { "name": "aws ec2 terminate-instances",   "patterns": ["aws ec2 terminate-instances*"],    "risk": "high",   "description": "Terminate EC2 instances" },
         { "name": "aws s3 rm",                     "patterns": ["aws s3 rm*"],                      "risk": "high",   "description": "Delete S3 objects" },

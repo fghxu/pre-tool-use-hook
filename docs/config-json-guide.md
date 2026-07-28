@@ -5,10 +5,10 @@
 **Golden rule before any edit:** the hook loads and validates `config.json` on *every* PreToolUse event. An invalid config (bad JSON or bad regex) makes the hook **fail-closed**: every tool call of the agent is blocked — a total session deadlock. After every config edit, immediately run at least one suite:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "src/TestRunner.ps1" -XmlPath "test/test-cases.adhoc.xml"
+powershell.exe -ExecutionPolicy Bypass -File "src/TestRunner.ps1" -XmlPath "test/config/live/test-cases.xml"
 ```
 
-For anything touching patterns or prefixes, run the full differential (all 9 suites) and compare against the baseline in `PROGRESS.md`.
+For anything touching patterns or prefixes, run the full differential (`src/Run-AllTests.ps1`, all suites under `test/config/live/`) and compare against the baseline in `PROGRESS.md`.
 
 ---
 
@@ -19,7 +19,7 @@ For anything touching patterns or prefixes, run the full differential (all 9 sui
 | `version` | Config schema version. | Informational. |
 | `description` | Human-readable summary. | Informational. |
 | `log_file_path` | Directory for per-day hook logs (`C:\temp\logs\prehook\`). | Must exist / be writable. These logs are the source for "unknown command" analysis. |
-| `modifying_strictness` | `normal` or `strict`. Governs redirect-write policy and some AWS/mixed cases. | Test suites run both values (`-Strictness normal/strict`); changes here shift redirect-suite results. |
+| `global_modifying_strictness` | `normal` or `strict` (or `loose`). Global strictness — renamed from `modifying_strictness` 2026-07-28; the loader **rejects** the legacy key fail-closed. Governs redirect-write policy and some AWS/mixed cases. Per-domain `commands.<domain>.modifying_strictness` keeps the old name. | Test suites run both values (`-Strictness normal/strict`); changes here shift redirect-suite results. |
 | `risk_legend` | Text descriptions of low/medium/high. | Documentation only — not read by logic. |
 
 ## 2. `editable_paths` / `system_paths` — redirect write policy
@@ -139,9 +139,9 @@ Domains: `DOS_CMD`, `PowerShell`, `Linux`, `Git`, `Terraform`, `Docker`, `Kubern
 - `AWS_CLI` is prefix-driven: `read_only_prefixes` (`describe-`, `list-`…) / `modifying_prefixes`.
 
 **Workflow for new commands (established by the LogGap work):**
-1. Add failing test cases to `test-cases.adhoc.xml` first (RED).
+1. Add failing test cases to `test/config/live/test-cases.xml` first (RED).
 2. Add config entries (GREEN).
-3. Run the full 9-suite differential — byte-identical except your new cases.
+3. Run the full differential (`src/Run-AllTests.ps1`) — byte-identical except your new cases.
 
 ## 10. `strictness_gated` — the strictness-dependent middle tier
 
@@ -156,9 +156,11 @@ auto-approve day-to-day (e.g. `git add`) while still prompting under strict.
 ### Per-domain `modifying_strictness` + the global guard
 
 Any domain may set its own `"modifying_strictness": "strict" | "normal" | "loose"`.
-The effective strictness for a domain is resolved by `Get-EffectiveStrictness`:
+The global key is now **`global_modifying_strictness`** (top level); the per-domain
+key keeps the old name. The effective strictness for a domain is resolved by
+`Get-EffectiveStrictness`:
 
-1. Global `modifying_strictness` is `strict` or `loose` → that value **forces every domain**.
+1. Global `global_modifying_strictness` is `strict` or `loose` → that value **forces every domain**.
 2. Global is `normal` → the domain's own value (absent → `normal`).
 
 Effective strictness drives three things: the `strictness_gated` tier, AWS CLI
@@ -169,8 +171,30 @@ uses the **global** value.
 
 Every shipped domain carries an explicit `"modifying_strictness": "normal"` (same
 effect as inheriting normal) so the knob is visible exactly where you would change
-it. To force one domain, flip that line to `"strict"` — e.g. inside `commands.Git`;
-see the fixture `test/config/config.git-strict.json` for a working example.
+it. To force one domain, flip that line to `"strict"` — e.g. inside `commands.Git`
+(note: the git-strict fixture/suite was retired 2026-07-28; per-domain strictness
+remains supported by `Get-EffectiveStrictness` but is no longer suite-covered).
+
+### All-gated is the live policy (since 2026-07-27)
+
+The live `config.json` IS the all-gated config (promoted from the former
+`test/config/test-strictness-gate/` experiment): every domain carries a
+`strictness_gated` tier and **every `"risk": "low"` command lives there** —
+allow in normal/loose, ask in strict. `modifying` holds only medium/high risk.
+Docker's gated tier is intentionally empty (it has no low-risk entries).
+All suites live in `test/config/live/` (see its README); run them with
+`src/Run-AllTests.ps1`. Behaviors the suites deliberately pin down:
+
+- **Cmdlet file-writes allow in normal** — `Set-Content`/`Out-File` etc. are
+  gated, so `Set-Content C:\Windows\x.txt ...` auto-approves in normal mode:
+  command classification never path-checks cmdlet arguments (path policy covers
+  only redirects and file tools). Strict mode still asks.
+- **read_only prefix patterns shadow gated entries** — `terraform providers mirror`
+  matches `^terraform providers` (read_only) before the gated tier, so it allows
+  in every mode. Pre-existing pattern-shadowing.
+- **DOS routing quirk** — `move` / `ren` / `setx` are not in the parser's
+  DOS-marker list, so they fall to the `linux` fallback domain and hit
+  "unknown command" (ask) regardless of the DOS_CMD gated entries. Pre-existing.
 
 ## 11. Editing checklist (any config change)
 

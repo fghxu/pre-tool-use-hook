@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
+  ALL-GATED DUPLICATE of test/config/live/test-cases.xml — runs against THIS folder's config.normal.json
+  (strictness_gated in every domain; all risk:low commands moved out of modifying).
+  Expectations flipped ask -> allow for the newly gated commands (29 cases, reason
+  strings marked "gated: ... (allow in normal)"). Run via Run-Tests.ps1 in this folder.
+
   PreToolUse Command Classification Database
   Generated: 2026-05-13
   Purpose:  Comprehensive catalog of read-only and modifying commands
@@ -229,7 +234,7 @@
       <copilot-command><![CDATA[ren *.txt *.bak]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: mkdir" category="DOS-FileModification">
+    <test-case expected="allow" reason="gated: mkdir (allow in normal)" category="DOS-FileModification">
       <description>mkdir creates new directories recursively</description>
       <copilot-command><![CDATA[mkdir C:\Projects\new-feature\src]]></copilot-command>
     </test-case>
@@ -636,17 +641,17 @@ else {
 
     <!-- ==================== MODIFYING PowerShell ==================== -->
 
-    <test-case expected="ask" reason="modifying: New-Item" category="PowerShell-FileModification">
+    <test-case expected="allow" reason="gated: New-Item (allow in normal)" category="PowerShell-FileModification">
       <description>New-Item creates a new file</description>
       <copilot-command><![CDATA[New-Item -Path "C:\temp\newfile.txt" -ItemType File -Force]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: Set-Content" category="PowerShell-FileModification">
+    <test-case expected="allow" reason="gated: Set-Content (allow in normal)" category="PowerShell-FileModification">
       <description>Set-Content overwrites file content</description>
       <copilot-command><![CDATA[Set-Content -Path "C:\temp\config.txt" -Value "new configuration data"]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: Add-Content" category="PowerShell-FileModification">
+    <test-case expected="allow" reason="gated: Add-Content (allow in normal)" category="PowerShell-FileModification">
       <description>Add-Content appends text to an existing file</description>
       <copilot-command><![CDATA[Add-Content -Path "C:\temp\log.txt" -Value $(Get-Date)]]></copilot-command>
     </test-case>
@@ -656,17 +661,17 @@ else {
       <copilot-command><![CDATA[Remove-Item -Path "C:\temp\oldfile.log" -Force]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: Copy-Item" category="PowerShell-FileModification">
+    <test-case expected="allow" reason="gated: Copy-Item (allow in normal)" category="PowerShell-FileModification">
       <description>Copy-Item copies a file to another location</description>
       <copilot-command><![CDATA[Copy-Item -Path "C:\app\config.json" -Destination "C:\backup\config.json.bak"]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: Move-Item" category="PowerShell-FileModification">
+    <test-case expected="allow" reason="gated: Move-Item (allow in normal)" category="PowerShell-FileModification">
       <description>Move-Item moves a file to another directory</description>
       <copilot-command><![CDATA[Move-Item -Path "C:\temp\report.csv" -Destination "C:\archive\"]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: Rename-Item" category="PowerShell-FileModification">
+    <test-case expected="allow" reason="gated: Rename-Item (allow in normal)" category="PowerShell-FileModification">
       <description>Rename-Item renames a file</description>
       <copilot-command><![CDATA[Rename-Item -Path "C:\data\old_name.csv" -NewName "new_name.csv"]]></copilot-command>
     </test-case>
@@ -696,7 +701,7 @@ else {
       <copilot-command><![CDATA[Set-Service -Name "Telnet" -StartupType Disabled]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: New-Item (registry)" category="PowerShell-Registry">
+    <test-case expected="allow" reason="gated: New-Item (allow in normal)" category="PowerShell-Registry">
       <description>New-Item modifies the registry by creating a key</description>
       <copilot-command><![CDATA[New-Item -Path "HKLM:\SOFTWARE\MyApp" -Force]]></copilot-command>
     </test-case>
@@ -875,7 +880,7 @@ Write-Host "Total cleaned up: $deletedCount files" -ForegroundColor Green]]></co
 }]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: Out-File" category="PowerShell-FileModification">
+    <test-case expected="allow" reason="gated: Out-File (allow in normal)" category="PowerShell-FileModification">
       <description>Out-File redirects pipeline output to a file (modifying)</description>
       <copilot-command><![CDATA[Get-Process | Select-Object Name, CPU | Out-File -FilePath C:\reports\process-report.txt]]></copilot-command>
     </test-case>
@@ -1262,7 +1267,7 @@ done]]></copilot-command>
 
     <!-- ==================== MODIFYING Linux/Bash ==================== -->
 
-    <test-case expected="ask" reason="modifying: mkdir" category="Linux-FileModification">
+    <test-case expected="allow" reason="gated: mkdir (allow in normal)" category="Linux-FileModification">
       <description>mkdir creates a new directory</description>
       <copilot-command><![CDATA[mkdir -p /opt/myapp/config]]></copilot-command>
     </test-case>
@@ -1529,7 +1534,7 @@ done]]></copilot-command>
       <copilot-command><![CDATA[docker images --format '{{.Tag}}' | grep latest | while read tag; do docker run -d "myapp:$tag"; done]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: ln" category="Linux-FileModification">
+    <test-case expected="allow" reason="gated: ln (allow in normal)" category="Linux-FileModification">
       <description>ln -s creates a symbolic link to a file</description>
       <copilot-command><![CDATA[ln -s /opt/releases/app-v2.1 /var/www/current]]></copilot-command>
     </test-case>
@@ -2011,8 +2016,8 @@ done]]></copilot-command>
       <copilot-command><![CDATA[ssh frank@serverA "rm -rf /tmp/test"]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying" category="Linux-SSH-Modifying">
-      <description>ssh -i key user@host with mkdir (modifying)</description>
+    <test-case expected="allow" reason="gated: inner mkdir (allow in normal)" category="Linux-SSH-Modifying">
+      <description>ssh -i key user@host with mkdir (gated)</description>
       <copilot-command><![CDATA[ssh -i ~/.ssh/key.pem deploy@serverA "mkdir -p /tmp/newdir"]]></copilot-command>
     </test-case>
 
@@ -2139,8 +2144,8 @@ done]]></copilot-command>
       <copilot-command><![CDATA[terraform import aws_s3_bucket.data bucket-name-12345]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="terraform fmt (modifying)" category="Terraform-Modify">
-      <description>terraform fmt -recursive . rewrites HCL files in place (modifying without -check)</description>
+    <test-case expected="allow" reason="gated: terraform fmt (allow in normal)" category="Terraform-Modify">
+      <description>terraform fmt -recursive . rewrites HCL files in place (gated without -check)</description>
       <copilot-command><![CDATA[terraform fmt -recursive .]]></copilot-command>
     </test-case>
 
@@ -2196,8 +2201,8 @@ done]]></copilot-command>
       <copilot-command><![CDATA[terraform workspace show]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="terraform init (modifying)" category="Terraform-Modify">
-      <description>terraform init -upgrade downloads new provider versions and writes .terraform directory (modifying)</description>
+    <test-case expected="allow" reason="gated: terraform init (allow in normal)" category="Terraform-Modify">
+      <description>terraform init -upgrade downloads new provider versions and writes .terraform directory (gated)</description>
       <copilot-command><![CDATA[terraform init -upgrade]]></copilot-command>
     </test-case>
 
@@ -2751,8 +2756,8 @@ done]]></copilot-command>
       <description>SSH remote sudo systemctl stop — sudo stripped, inner systemctl stop is modifying</description>
       <copilot-command><![CDATA[ssh deploy@prod "sudo systemctl stop apache2"]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="mkdir" category="Linux-SSH-Modifying">
-      <description>SSH remote mkdir (modifying)</description>
+    <test-case expected="allow" reason="gated: inner mkdir (allow in normal)" category="Linux-SSH-Modifying">
+      <description>SSH remote mkdir (gated)</description>
       <copilot-command><![CDATA[ssh user@host "sudo mkdir /opt/newapp"]]></copilot-command>
     </test-case>
     <test-case expected="ask" reason="chmod" category="Linux-SSH-Modifying">
@@ -3655,7 +3660,7 @@ $log = git log --oneline -3]]></copilot-command>
 
   <category-group name="New-Samples-Regex-Confusion">
 
-    <test-case expected="ask" reason="git tag" category="DOS-Git-Modifying">
+    <test-case expected="allow" reason="gated: git tag -a (allow in normal)" category="DOS-Git-Modifying">
       <description>git tag with multi-line message + git log + git tag list pipeline</description>
       <copilot-command><![CDATA[git tag -a v3.2.0-observability -m "V3 and graceful shutdown
 
@@ -3798,16 +3803,16 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <description>git worktree list — read-only</description>
       <copilot-command><![CDATA[git worktree list]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: git worktree remove" category="LogGap-Git">
-      <description>git worktree remove — modifying (low)</description>
+    <test-case expected="allow" reason="gated: git worktree remove (allow in normal)" category="LogGap-Git">
+      <description>git worktree remove — gated (low)</description>
       <copilot-command><![CDATA[git worktree remove mywt]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: git worktree prune" category="LogGap-Git">
-      <description>git worktree prune — modifying (low)</description>
+    <test-case expected="allow" reason="gated: git worktree prune (allow in normal)" category="LogGap-Git">
+      <description>git worktree prune — gated (low)</description>
       <copilot-command><![CDATA[git worktree prune]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: git tag -a" category="LogGap-Git">
-      <description>git tag -a with -m — annotated tag creation, modifying (low)</description>
+    <test-case expected="allow" reason="gated: git tag -a (allow in normal)" category="LogGap-Git">
+      <description>git tag -a with -m — annotated tag creation, gated (low)</description>
       <copilot-command><![CDATA[git tag -a v1.2 -m "release 1.2"]]></copilot-command>
     </test-case>
     <test-case expected="allow" reason="read-only: git tag -l (regression guard)" category="LogGap-Git">
@@ -3856,8 +3861,8 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <description>adb logcat -d — dump log, read-only</description>
       <copilot-command><![CDATA[adb logcat -d]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: adb logcat -c" category="LogGap-DevTools">
-      <description>adb logcat -c — clears log buffer, modifying (low); contrast pair with -d</description>
+    <test-case expected="allow" reason="gated: adb logcat -c (allow in normal)" category="LogGap-DevTools">
+      <description>adb logcat -c — clears log buffer, gated (low); contrast pair with -d</description>
       <copilot-command><![CDATA[adb logcat -c]]></copilot-command>
     </test-case>
     <test-case expected="allow" reason="read-only: adb shell getprop" category="LogGap-DevTools">
@@ -3868,20 +3873,20 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <description>adb shell pm list packages — read-only</description>
       <copilot-command><![CDATA[adb shell pm list packages]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: adb install" category="LogGap-DevTools">
-      <description>adb install -r — modifying (low)</description>
+    <test-case expected="allow" reason="gated: adb install (allow in normal)" category="LogGap-DevTools">
+      <description>adb install -r — gated (low)</description>
       <copilot-command><![CDATA[adb install -r app.apk]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: adb push" category="LogGap-DevTools">
-      <description>adb push — modifying (low)</description>
+    <test-case expected="allow" reason="gated: adb push (allow in normal)" category="LogGap-DevTools">
+      <description>adb push — gated (low)</description>
       <copilot-command><![CDATA[adb push file.txt /sdcard/]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: adb shell am start" category="LogGap-DevTools">
-      <description>adb shell am start — launches activity, modifying (low)</description>
+    <test-case expected="allow" reason="gated: adb shell am start (allow in normal)" category="LogGap-DevTools">
+      <description>adb shell am start — launches activity, gated (low)</description>
       <copilot-command><![CDATA[adb shell am start -n com.app/.MainActivity]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: unzip" category="LogGap-DevTools">
-      <description>unzip writes files — modifying (low)</description>
+    <test-case expected="allow" reason="gated: unzip (allow in normal)" category="LogGap-DevTools">
+      <description>unzip writes files — gated (low)</description>
       <copilot-command><![CDATA[unzip -o archive.zip -d out]]></copilot-command>
     </test-case>
   </category-group>
@@ -3891,16 +3896,16 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <description>javap disassembly — read-only</description>
       <copilot-command><![CDATA[javap -p com.example.Foo]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: ./gradlew" category="LogGap-JavaGradle">
-      <description>./gradlew assembleDebug — build writes outputs, modifying (low)</description>
+    <test-case expected="allow" reason="gated: gradlew (allow in normal)" category="LogGap-JavaGradle">
+      <description>./gradlew assembleDebug — build writes outputs, gated (low)</description>
       <copilot-command><![CDATA[./gradlew assembleDebug]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: gradlew" category="LogGap-JavaGradle">
-      <description>gradlew clean — modifying (low)</description>
+    <test-case expected="allow" reason="gated: gradlew (allow in normal)" category="LogGap-JavaGradle">
+      <description>gradlew clean — gated (low)</description>
       <copilot-command><![CDATA[gradlew clean]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying: .\gradlew" category="LogGap-JavaGradle">
-      <description>.\gradlew test (Windows form) — modifying (low)</description>
+    <test-case expected="allow" reason="gated: gradlew (allow in normal)" category="LogGap-JavaGradle">
+      <description>.\gradlew test (Windows form) — gated (low)</description>
       <copilot-command><![CDATA[.\gradlew test]]></copilot-command>
     </test-case>
   </category-group>
@@ -4049,12 +4054,12 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
   </category-group>
 
   <category-group name="Redirect-Normal-PowerShell-Cmdlets">
-    <test-case expected="ask" reason="modifying" category="Redirect-Normal-PS-Cmdlet">
-      <description>Get-Process | Out-File C:\temp\proc.txt (Out-* modifying verb, not redirect-based)</description>
+    <test-case expected="allow" reason="gated: Out-File (allow in normal)" category="Redirect-Normal-PS-Cmdlet">
+      <description>Get-Process | Out-File C:\temp\proc.txt (Out-File now strictness_gated, not redirect-based)</description>
       <copilot-command><![CDATA[Get-Process | Out-File C:\temp\proc.txt]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="modifying" category="Redirect-Normal-PS-Cmdlet">
-      <description>Set-Content -Path C:\temp\file.txt -Value hello (Set-* modifying verb)</description>
+    <test-case expected="allow" reason="gated: Set-Content (allow in normal)" category="Redirect-Normal-PS-Cmdlet">
+      <description>Set-Content -Path C:\temp\file.txt -Value hello (Set-Content now strictness_gated)</description>
       <copilot-command><![CDATA[Set-Content -Path C:\temp\file.txt -Value hello]]></copilot-command>
     </test-case>
   </category-group>

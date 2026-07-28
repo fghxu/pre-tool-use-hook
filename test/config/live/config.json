@@ -1,6 +1,7 @@
-{
+﻿{
   "version": "1.0",
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
+  "_comment_test_copy": "TEST COPY of the repo-root config.json - refresh with Sync-Fixtures.ps1 after editing the root config. Suites in this folder run against THIS file, not the root config.",
   "_comment_all_gated": "POLICY (promoted 2026-07-27 from the test-strictness-gate experiment): EVERY command domain carries a strictness_gated tier and all risk:low commands live there (allow in normal/loose, ask in strict); modifying holds only medium/high. Trade-off: gated cmdlet file-writes (Set-Content/Out-File/New-Item/...) are NOT path-checked - path policy covers only redirects and file tools. See docs/config-json-guide.md section 10.",
 
   "_readme": "HOW CLASSIFICATION WORKS: every intercepted tool call is decided 'allow' (run without prompting) or 'ask' (prompt the user). Command-running tools (Bash, PowerShell, run_in_terminal, ...) are classified by matching the command string against the per-domain tiers in 'commands' below. File-writing tools (Write, Edit, create_file, ...) are decided by path policy: system_paths always ask; editable_paths and the current working directory subtree auto-approve. Keys starting with '_' are documentation only and are ignored by the loader.",

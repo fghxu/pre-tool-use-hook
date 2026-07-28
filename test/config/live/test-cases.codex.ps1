@@ -4,12 +4,12 @@
 #   1. Detect-IDE — must identify Codex payloads via turn_id / model fields
 #   2. Format-Output — must map ask→deny for Codex (Codex doesn't support "ask")
 #
-# Usage: pwsh -NoProfile -File test/test-cases.codex.ps1
+# Usage: pwsh -NoProfile -File test/config/live/test-cases.codex.ps1
 
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-. "$scriptDir\..\src\HookAdapter.ps1"
+. "$scriptDir\..\..\..\src\HookAdapter.ps1"
 
 $total = 0
 $passed = 0

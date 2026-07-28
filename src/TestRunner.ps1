@@ -1,5 +1,5 @@
 param(
-    [string]$XmlPath = "$PSScriptRoot\..\test\test-cases.adhoc.xml",
+    [string]$XmlPath = "$PSScriptRoot\..\test\config\live\test-cases.xml",
     [string]$Filter = "",
     [string]$Strictness = "",
     [string]$Cwd = "",
@@ -26,7 +26,7 @@ if (Test-Path "$PSScriptRoot\Classifier.ps1") {
 $configFile = if ($ConfigPath) { $ConfigPath } else { "$PSScriptRoot\..\config.json" }
 $config = Load-Config -Path $configFile
 if ($Strictness) {
-    $config.modifying_strictness = $Strictness
+    $config.global_modifying_strictness = $Strictness
 }
 # Optional CWD override (re-normalize like ConfigLoader does)
 if ($Cwd) {

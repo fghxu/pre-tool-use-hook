@@ -65,7 +65,9 @@ $startTime = Get-Date
 # ----------------------------------------------------
 $config = $null
 try {
-    $configPath = "$PSScriptRoot\..\config.json"
+    # Env override exists so test runners can point the hook at a fixture copy;
+    # production always uses the repo-root config.json.
+    $configPath = if ($env:PRETOOLHOOK_CONFIG_PATH) { $env:PRETOOLHOOK_CONFIG_PATH } else { "$PSScriptRoot\..\config.json" }
     $config = Load-Config -Path $configPath
 }
 catch {
