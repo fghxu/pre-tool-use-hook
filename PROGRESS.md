@@ -35,13 +35,12 @@ Design and implement the strictness_gated config section + per-domain strictness
 - Fixtures: test/config/config.git-strict.json (Git=strict) + config.strict.json. New suites: test-cases.strictness-gated.{normal,strict,git-strict}.xml.
 
 ## Current Step
-ALL-GATED config is LIVE (repo-root config.json); suites consolidated in test/config/live/ — 928/928 + codex 17/17 green. strictness-gated branch still unmerged; awaiting explicit user approval to merge to master (note: branch now contains major live-behavior change).
+ALL-GATED config is LIVE (repo-root config.json); suites consolidated in test/config/live/ — 928/928 + codex 17/17 green. COMMITTED + PUSHED as f58021a on branch strictness-gated (origin/strictness-gated now tracks). Branch still not merged to ClaudeCode-v1.
 
 ## Next Steps
-- Confirm the promotion stays (reversal path documented above if not).
-- Merge strictness-gated → master ONLY with explicit user approval.
-- Optional follow-ups (non-blocking): config.aws-strict.json fixture for AWS-reach differentiating test; make Evaluate-ParameterRules -Domain mandatory; commit the working tree (promotion + consolidation is all uncommitted).
+- Merge strictness-gated → ClaudeCode-v1 ONLY with explicit user approval (branch now contains the major all-gated live-behavior change).
+- Optional follow-ups (non-blocking): config.aws-strict.json fixture for AWS-reach differentiating test; make Evaluate-ParameterRules -Domain mandatory.
 - Regenerate test/config/live fixtures from config.json whenever it changes.
 
 ## Blockers / Notes
-- None — Run-AllTests 928/928 green (KnownFails all 0); codex 17/17.
+- None — Run-AllTests 928/928 green (KnownFails all 0); codex 17/17. User scratch files left untracked by design: config - Copy*.json, config.json.bak, debug/*.ps1.
