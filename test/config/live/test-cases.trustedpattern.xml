@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- TRUSTED-PATTERN SUITE — runs against the repo-root config.json with -Cwd C:\git\repo.
+     NOTE (all-gated live config): Set-Content to a system path ALLOWS in normal mode
+     (gated cmdlet; cmdlet args are not path-checked) — see TP-CmdPaths. Strict mode still asks. -->
 <commands>
 
   <!-- =================================================================== -->
@@ -331,8 +334,8 @@ done]]></copilot-command>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[echo hi > C:\temp\x.txt]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="Set-Content to system path asks via verb classification" category="TP-CmdPaths">
-      <description>PowerShell Set-Content C:\Windows\x.txt — cmdlet write classified by verb, not new patterns</description>
+    <test-case expected="allow" reason="gated: Set-Content allows in normal even to system paths (cmdlet args not path-checked; strict mode still asks) - DOCUMENTED TRADE-OFF of the all-gated config" category="TP-CmdPaths">
+      <description>PowerShell Set-Content C:\Windows\x.txt — now ALLOWS in normal under all-gated config (strict still asks)</description>
       <tool-name>PowerShell</tool-name>
       <copilot-command><![CDATA[Set-Content -Path C:\Windows\x.txt -Value "x"]]></copilot-command>
     </test-case>

@@ -3,7 +3,7 @@
 # Spawns Hook.ps1 as a child process, pipes JSON to stdin, captures stdout +
 # stderr + exit code, and validates the complete output.
 #
-# Usage: pwsh -NoProfile -File test/FullPipeTestRunner.ps1
+# Usage: pwsh -NoProfile -File test/config/live/FullPipeTestRunner.ps1
 
 param(
     [string]$XmlPath = "$PSScriptRoot\test-fullpipe.xml"
@@ -16,7 +16,7 @@ $passed = 0
 $failed = 0
 $failures = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-$hookPath = "$PSScriptRoot\..\src\Hook.ps1"
+$hookPath = "$PSScriptRoot\..\..\..\src\Hook.ps1"
 
 [xml]$xml = Get-Content $XmlPath -Encoding UTF8
 $groups = @($xml.commands.'category-group')
@@ -59,7 +59,7 @@ foreach ($group in $groups) {
             $psi.RedirectStandardError = $true
             $psi.UseShellExecute = $false
             $psi.CreateNoWindow = $true
-            $psi.WorkingDirectory = "$PSScriptRoot\.."
+            $psi.WorkingDirectory = "$PSScriptRoot\..\..\.."
 
             $process = [System.Diagnostics.Process]::Start($psi)
             $process.StandardInput.Write($inputJson)

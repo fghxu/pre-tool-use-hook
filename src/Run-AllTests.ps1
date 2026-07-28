@@ -1,7 +1,7 @@
-# Run-AllTests.ps1 - one-shot runner for every test suite under test/
+# Run-AllTests.ps1 - one-shot runner for every test suite under test/config/live/
 #
-# Discovers test/*.xml automatically and runs each with its required invocation
-# (some suites need -Strictness/-Cwd/-ConfigPath or the full-pipe runner).
+# Discovers test/config/live/*.xml automatically and runs each with its required
+# invocation (some suites need -Strictness/-Cwd/-ConfigPath or the full-pipe runner).
 #
 # Documented pre-existing failures are encoded per suite (KnownFails) so the
 # overall verdict is meaningful: a suite is OK when its failures match the
@@ -26,7 +26,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path $PSScriptRoot -Parent
-$testDir  = Join-Path $repoRoot 'test'
+$testDir  = Join-Path $repoRoot 'test\config\live'
 
 # Per-suite invocation + documented failure baseline (see PROGRESS.md).
 # Any *.xml NOT listed here runs with default TestRunner args and KnownFails 0,
@@ -37,7 +37,7 @@ $suiteConfig = @{
         KnownFails = 0
     }
     'test-cases.redirect-strict.xml' = @{
-        Args       = @('-ConfigPath', (Join-Path $testDir 'config\config.strict.json'))
+        Args       = @('-ConfigPath', (Join-Path $testDir 'config.strict.json'))
         KnownFails = 0
     }
     'test-cases.trustedpattern.xml' = @{
@@ -49,7 +49,7 @@ $suiteConfig = @{
         KnownFails = 0
     }
     'test-cases.strictness-gated.git-strict.xml' = @{
-        Args       = @('-ConfigPath', (Join-Path $testDir 'config\config.git-strict.json'))
+        Args       = @('-ConfigPath', (Join-Path $testDir 'config.git-strict.json'))
         KnownFails = 0
     }
     'test-fullpipe.xml' = @{

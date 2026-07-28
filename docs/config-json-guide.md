@@ -5,10 +5,10 @@
 **Golden rule before any edit:** the hook loads and validates `config.json` on *every* PreToolUse event. An invalid config (bad JSON or bad regex) makes the hook **fail-closed**: every tool call of the agent is blocked — a total session deadlock. After every config edit, immediately run at least one suite:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "src/TestRunner.ps1" -XmlPath "test/test-cases.adhoc.xml"
+powershell.exe -ExecutionPolicy Bypass -File "src/TestRunner.ps1" -XmlPath "test/config/live/test-cases.xml"
 ```
 
-For anything touching patterns or prefixes, run the full differential (all 9 suites) and compare against the baseline in `PROGRESS.md`.
+For anything touching patterns or prefixes, run the full differential (`src/Run-AllTests.ps1`, all suites under `test/config/live/`) and compare against the baseline in `PROGRESS.md`.
 
 ---
 
@@ -139,9 +139,9 @@ Domains: `DOS_CMD`, `PowerShell`, `Linux`, `Git`, `Terraform`, `Docker`, `Kubern
 - `AWS_CLI` is prefix-driven: `read_only_prefixes` (`describe-`, `list-`…) / `modifying_prefixes`.
 
 **Workflow for new commands (established by the LogGap work):**
-1. Add failing test cases to `test-cases.adhoc.xml` first (RED).
+1. Add failing test cases to `test/config/live/test-cases.xml` first (RED).
 2. Add config entries (GREEN).
-3. Run the full 9-suite differential — byte-identical except your new cases.
+3. Run the full differential (`src/Run-AllTests.ps1`) — byte-identical except your new cases.
 
 ## 10. `strictness_gated` — the strictness-dependent middle tier
 
@@ -170,7 +170,28 @@ uses the **global** value.
 Every shipped domain carries an explicit `"modifying_strictness": "normal"` (same
 effect as inheriting normal) so the knob is visible exactly where you would change
 it. To force one domain, flip that line to `"strict"` — e.g. inside `commands.Git`;
-see the fixture `test/config/config.git-strict.json` for a working example.
+see the fixture `test/config/live/config.git-strict.json` for a working example.
+
+### All-gated is the live policy (since 2026-07-27)
+
+The live `config.json` IS the all-gated config (promoted from the former
+`test/config/test-strictness-gate/` experiment): every domain carries a
+`strictness_gated` tier and **every `"risk": "low"` command lives there** —
+allow in normal/loose, ask in strict. `modifying` holds only medium/high risk.
+Docker's gated tier is intentionally empty (it has no low-risk entries).
+All suites live in `test/config/live/` (see its README); run them with
+`src/Run-AllTests.ps1`. Behaviors the suites deliberately pin down:
+
+- **Cmdlet file-writes allow in normal** — `Set-Content`/`Out-File` etc. are
+  gated, so `Set-Content C:\Windows\x.txt ...` auto-approves in normal mode:
+  command classification never path-checks cmdlet arguments (path policy covers
+  only redirects and file tools). Strict mode still asks.
+- **read_only prefix patterns shadow gated entries** — `terraform providers mirror`
+  matches `^terraform providers` (read_only) before the gated tier, so it allows
+  in every mode. Pre-existing pattern-shadowing.
+- **DOS routing quirk** — `move` / `ren` / `setx` are not in the parser's
+  DOS-marker list, so they fall to the `linux` fallback domain and hit
+  "unknown command" (ask) regardless of the DOS_CMD gated entries. Pre-existing.
 
 ## 11. Editing checklist (any config change)
 
