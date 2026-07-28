@@ -6,7 +6,8 @@
 # Usage: pwsh -NoProfile -File test/config/live/FullPipeTestRunner.ps1
 
 param(
-    [string]$XmlPath = "$PSScriptRoot\test-fullpipe.xml"
+    [string]$XmlPath = "$PSScriptRoot\test-fullpipe.xml",
+    [string]$ConfigPath = "$PSScriptRoot\config.json"
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +18,8 @@ $failed = 0
 $failures = [System.Collections.Generic.List[PSCustomObject]]::new()
 
 $hookPath = "$PSScriptRoot\..\..\..\src\Hook.ps1"
+# Hook.ps1 reads PRETOOLHOOK_CONFIG_PATH when set; child processes inherit it.
+$env:PRETOOLHOOK_CONFIG_PATH = $ConfigPath
 
 [xml]$xml = Get-Content $XmlPath -Encoding UTF8
 $groups = @($xml.commands.'category-group')

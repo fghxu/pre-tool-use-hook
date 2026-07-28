@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- TRUSTED-PATTERN SUITE — runs against the repo-root config.json with -Cwd C:\git\repo.
+<!-- TRUSTED-PATTERN SUITE — runs against THIS folder's config.json (test copy;
+     refresh with Sync-Fixtures.ps1) with -Cwd C:\git\repo.
      NOTE (all-gated live config): Set-Content to a system path ALLOWS in normal mode
      (gated cmdlet; cmdlet args are not path-checked) — see TP-CmdPaths. Strict mode still asks. -->
 <commands>

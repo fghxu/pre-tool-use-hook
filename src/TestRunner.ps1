@@ -1,5 +1,5 @@
 param(
-    [string]$XmlPath = "$PSScriptRoot\..\test\test-cases.adhoc.xml",
+    [string]$XmlPath = "$PSScriptRoot\..\test\config\live\test-cases.xml",
     [string]$Filter = "",
     [string]$Strictness = "",
     [string]$Cwd = "",

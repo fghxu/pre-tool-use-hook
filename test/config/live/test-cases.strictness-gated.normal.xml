@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  strictness_gated suite — NORMAL mode (repo-root config.json, which is all-gated:
-  every domain has a gated tier with its risk:low commands).
+  strictness_gated suite — NORMAL mode (THIS folder's config.json, a test copy of
+  the repo-root config; refresh with Sync-Fixtures.ps1).
   Every gated entry must ALLOW; read_only and modifying controls unchanged.
   The ALL-GATED EXTENSION block at the end covers the per-domain gated commands
   (DOS excluded: DOS_CMD gated patterns are only reachable for DOS-routed commands;

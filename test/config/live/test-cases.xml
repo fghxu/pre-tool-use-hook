@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  MAIN SUITE — runs against the repo-root config.json (ALL-GATED since 2026-07-27:
-  strictness_gated in every domain; all risk:low commands live there, allow in normal).
-  Expectations for gated commands read reason "gated: ... (allow in normal)".
-  History: this file carries the all-gated flips forward from the former
-  test/config/test-strictness-gate/ experiment. Run via src/Run-AllTests.ps1.
+  MAIN SUITE — runs against THIS folder's config.json (a TEST COPY of the repo-root
+  config.json; refresh with Sync-Fixtures.ps1 after editing the root config).
+  ALL-GATED since 2026-07-27: strictness_gated in every domain; all risk:low
+  commands live there, allow in normal. Expectations for gated commands read
+  reason "gated: ... (allow in normal)". Run via src/Run-AllTests.ps1.
 
   PreToolUse Command Classification Database
   Generated: 2026-05-13

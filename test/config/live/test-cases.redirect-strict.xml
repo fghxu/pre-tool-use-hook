@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- REDIRECT-STRICT SUITE — runs against THIS folder's config.strict.json (copy of the
-     repo-root config.json with global strict + editable_paths.linux divergence). -->
+<!-- REDIRECT-STRICT SUITE — runs against THIS folder's config.strict.json (copy of this
+     folder's config.json with global strict + editable_paths.linux divergence;
+     refresh both with Sync-Fixtures.ps1). -->
 <commands>
 
   <category-group name="Redirect-Strict-Basic">

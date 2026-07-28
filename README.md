@@ -27,7 +27,7 @@ Step 4: Classification engine
     ├── Nested command detection (ssh, docker exec, kubectl exec, pwsh -Command)
     ├── Subshell extraction $(…)
     ├── Redirection target analysis (> file, >> file, editable_paths, CWD)
-    └── Per-sub-command classification against config.json
+    └── Three-tier per-domain match: read_only → strictness_gated → modifying
     │
     ▼
 Aggregate: "allow" only if every sub-command is read-only
@@ -40,7 +40,9 @@ Output JSON (stdout): { permissionDecision, permissionDecisionReason }
 `Invoke-RestMethod -Method Get`, `curl https://example.com`) pass through silently. Modifying
 commands (`rm`, `Stop-Process`, `terraform apply`, `kubectl delete`, `Invoke-RestMethod -Method Post`,
 `curl -d '{…}'`) prompt the user for confirmation with a reason showing exactly which sub-command
-triggered the block.
+triggered the block. In between sits the `strictness_gated` tier: low-risk commands (`git add`,
+`git commit`, `mkdir`, `Set-Content`, `terraform init`, …) auto-allow in `normal`/`loose` mode and
+prompt only when strictness is `strict`.
 
 ## Supported IDEs
 
@@ -78,19 +80,27 @@ pretoolhook/
 │   ├── Resolver.ps1          # Pattern matching + parameter-rule engine against config
 │   ├── ConfigLoader.ps1      # JSON config loading, validation, regex compilation
 │   ├── Logger.ps1            # Daily JSONL record files + human-readable text logs
-│   └── TestRunner.ps1        # TDD test runner for the classification suite
+│   ├── TestRunner.ps1        # Single-suite test runner (-ConfigPath/-Strictness/-Cwd)
+│   └── Run-AllTests.ps1      # One-shot runner for every suite (verdicts + baselines)
 ├── config.json               # Runtime configuration — the classification database (YOU edit this)
-├── test/
-│   ├── test-cases.xml             # Full test case database
-│   ├── test-cases.adhoc.xml       # Quick test subset (incl. parameter-rule cases)
-│   ├── test-cases.*.xml           # Domain-specific subsets (redirect, var-assignment, fullpath, …)
-│   ├── test-cases.codex.ps1       # Codex IDE detection + output mapping unit tests
-│   ├── FullPipeTestRunner.ps1     # Data-driven full-pipe integration test runner
-│   └── test-fullpipe.xml          # Per-IDE full-pipe test cases
+├── test/config/
+│   ├── live/                      # Suites validating the live policy (run via src/Run-AllTests.ps1)
+│   │   ├── config.json                # TEST COPY of repo-root config.json (sync, don't hand-edit)
+│   │   ├── config.strict.json         # strict fixture for the redirect suite (generated)
+│   │   ├── Sync-Fixtures.ps1          # refreshes both configs from repo-root config.json
+│   │   ├── test-cases.xml             # Main classification suite (701 cases)
+│   │   ├── test-cases.strictness-gated.{normal,strict}.xml
+│   │   ├── test-cases.redirect-strict.xml
+│   │   ├── test-cases.trustedpattern.xml
+│   │   ├── test-fullpipe.xml + FullPipeTestRunner.ps1  # Per-IDE full-pipe integration tests
+│   │   └── test-cases.codex.ps1       # Codex IDE detection + output mapping unit tests
+│   └── test-strictness-gate/      # Isolated normal/strict fixture sandbox (+ own Run-Tests.ps1)
 ├── debug/                    # Debug and verification scripts
 ├── README.md                 # This file
 ├── INSTALL.md                # Installation guide
+├── PROGRESS.md               # Running work log (goals, completed steps, baselines)
 └── docs/
+    ├── config-json-guide.md     # Field-by-field config editing guide (read before editing config.json)
     └── superpowers/{specs,plans}  # Design specs and TDD implementation plans
 ```
 
@@ -112,20 +122,22 @@ recipes for common tasks.
 | `version` | string | Config schema version (currently `"1.0"`). |
 | `description` | string | Free-text description. |
 | `log_file_path` | string | Directory for daily log files. Empty string → default `~/.pretoolhook/`. |
-| `modifying_strictness` | `"normal"` \| `"strict"` \| `"loose"` | How aggressive the write-policy is. See **Strictness** below. |
+| `global_modifying_strictness` | `"normal"` \| `"strict"` \| `"loose"` | How aggressive the write-policy is. See **Strictness** below. (Renamed from `modifying_strictness` 2026-07-28 — the loader rejects the legacy key fail-closed.) |
 | `editable_paths` | object (optional) | Whitelist of paths whose writes are auto-approved. See **editable_paths**. |
 | `system_paths` | object | Blacklist of paths whose writes always require approval. See **system_paths**. |
+| `safe_expressions` | object | Allowlist for the safe-expression certifier (AST arbiter for pure PowerShell expressions). |
 | `known_command_prefixes` | array | Command names used as domain-detection hints. |
 | `trusted_pattern` | array of regex | Commands that match → **allow immediately** (fast path). |
 | `untrusted_pattern` | array of regex | Commands that match → **ask immediately** (checked before `trusted_pattern`). |
 | `intercept_tool_name` | array of tool names | Tool calls to classify. |
 | `ignore_tool_name` | array of tool names | Tool calls to skip (silently allow). |
 | `tool_name_mapping` | object | Per-tool JSON field path that holds the command string. |
+| `path_tool_mapping` | object | Per-tool JSON field path that holds the target file path (for Write/Edit-type tools). |
 | `dry_run_flags` | object | Maps a command prefix to `read-only` when a dry-run form is used. |
 | `risk_legend` | object | Human-readable text for `low` / `medium` / `high` risk. |
 | `commands` | object | Per-domain classification database. See **The `commands` section**. |
 
-#### `modifying_strictness` — the write-policy knob
+#### `global_modifying_strictness` — the write-policy knob
 
 Controls how redirection targets (`>`, `>>`) and the `editable_paths` whitelist are enforced.
 `system_paths` **always** requires approval (it wins over everything else), and the **current
@@ -215,16 +227,27 @@ modifying command becomes read-only:
 ### The `commands` section — per-domain classification
 
 Each domain (`DOS_CMD`, `PowerShell`, `Linux`, `Git`, `Terraform`, `Docker`, `Kubernetes`,
-`AWS_CLI`) has:
+`AWS_CLI`) has **three tiers**, checked in order:
 
-- **`read_only`** and **`modifying`** — arrays of pattern entries:
+- **`read_only`** — allows in every strictness mode.
+- **`strictness_gated`** — allows in `normal`/`loose`, **asks in `strict`**. Since 2026-07-27
+  every domain carries this tier and all `risk: "low"` commands live there (the "all-gated"
+  policy). Note: gated cmdlet file-writes (`Set-Content`, `Out-File`, …) are **not**
+  path-checked — they allow in normal mode even to system paths; strict mode still asks.
+- **`modifying`** — always asks; the `risk` level (`low` | `medium` | `high`) shows in the prompt.
 
-  ```jsonc
-  { "name": "del", "patterns": ["del *"], "risk": "high", "description": "Delete files" }
-  ```
+Entries look like:
 
-  `patterns` are regex, auto-anchored with `^`; glob `*` is converted to `.*`. First match wins.
-  `risk` is `low` | `medium` | `high` (modifying only).
+```jsonc
+{ "name": "del", "patterns": ["del *"], "risk": "high", "description": "Delete files" }
+```
+
+`patterns` are regex, auto-anchored with `^`; glob `*` is converted to `.*`. First match wins.
+
+Each domain may also set its own **`modifying_strictness`** (`strict` | `normal` | `loose`),
+consulted only when the global `global_modifying_strictness` is `normal` (a global `strict` or
+`loose` forces every domain). The effective value drives the gated tier, AWS flag-stripping,
+and `parameter_commands` fallback — path policy always uses the global value.
 
 - **PowerShell only** — verb-based classification:
   - `read_only_verbs`: `["Get-*", "Test-*", "Write-Host", …]`
@@ -299,6 +322,8 @@ rules also work inside `Invoke-Command -ScriptBlock { … }` and `pwsh -Command 
 ```jsonc
 { "name": "mytool query", "patterns": ["mytool query *"], "description": "read-only query" }
 ```
+(Use the domain's `strictness_gated` array instead if it should auto-allow in normal but ask in
+strict mode.)
 
 **Add a parameter-aware command** (e.g. a future `Invoke-WebRequest`) — add a `parameter_commands` entry; zero code changes:
 ```jsonc
@@ -314,48 +339,66 @@ rules also work inside `Invoke-Command -ScriptBlock { … }` and `pwsh -Command 
 **Auto-allow a specific safe command** — add a regex to `trusted_pattern` (e.g. `"^mytool check$"`).
 **Always prompt for a dangerous one** — add to `untrusted_pattern`.
 
-**Lock writes to the project + a temp dir** — set `"modifying_strictness": "strict"` and add those
+**Lock writes to the project + a temp dir** — set `"global_modifying_strictness": "strict"` and add those
 paths to `editable_paths` (CWD is already always editable).
 
 **Make a normally-modifying command read-only when dry-run** — add a `"prefix": "read-only"` entry
 to `dry_run_flags`.
 
-> Whenever you change `config.json`, add corresponding cases to `test/test-cases.xml` (or
-> `test-cases.adhoc.xml`) and run the suite (see below).
+> Whenever you change `config.json`, add corresponding cases to `test/config/live/test-cases.xml`,
+> run `test/config/live/Sync-Fixtures.ps1` to refresh the test copy, then run the suites (see below).
 
 ### Files you should NOT hand-edit
 
 | File | Reason |
 |------|--------|
 | `src/*.ps1` | Source — changes should go through the test suite. |
+| `test/config/live/config*.json` | Generated test copies — refresh with `test/config/live/Sync-Fixtures.ps1`. |
 | `docs/superpowers/*` | Design documents, not runtime config. |
 
 ---
 
 ## How to Run the Tests
 
-### Layer 1: Classification tests (`TestRunner.ps1`)
+### Everything at once (`Run-AllTests.ps1`)
 
-Tests the classification engine in isolation (no process spawning). Supports optional overrides:
+Discovers every suite under `test/config/live/`, runs each with its required invocation, and
+reports REGRESSION/OK/IMPROVED against per-suite known-failure baselines (all currently 0):
 
 ```powershell
-# Full suite
-pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/test-cases.xml
+powershell.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1
+powershell.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1 -Filter strictness   # subset
+```
 
-# Quick subset (default xml is test-cases.adhoc.xml)
+**Important:** the suites run against `test/config/live/config.json` — a **test copy**, not the
+repo-root config. After editing `config.json`:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File test/config/live/Sync-Fixtures.ps1   # refresh the copy + strict fixture
+powershell.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1
+```
+
+### Layer 1: Classification tests (`TestRunner.ps1`)
+
+Tests the classification engine in isolation (no process spawning). Defaults to the main suite;
+supports overrides:
+
+```powershell
+# Main suite (default)
 pwsh -NoProfile -File src/TestRunner.ps1
 
-# Filter by category
-pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/test-cases.xml -Filter "Docker"
+# Any suite, with its config
+pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/config/live/test-cases.xml -ConfigPath test/config/live/config.json
 
-# Strict-mode suites: use a fixture config (decoupled from live config.json)...
-pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/test-cases.redirect-strict.xml -ConfigPath test/config/config.strict.json
-# ...or a strictness override against the live config (equivalent)
-pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/test-cases.redirect-strict.xml -Strictness strict
+# Filter by category
+pwsh -NoProfile -File src/TestRunner.ps1 -Filter "Docker"
+
+# Strict-mode: fixture config, or in-memory override (equivalent for command tiers)
+pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/config/live/test-cases.redirect-strict.xml -ConfigPath test/config/live/config.strict.json
+pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/config/live/test-cases.strictness-gated.strict.xml -ConfigPath test/config/live/config.json -Strictness strict
 
 # editable_paths / CWD overrides (for redirect experimentation)
-pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/test-cases.redirect-normal.xml `
-    -Strictness normal -Cwd 'C:\proj\' -EditablePaths 'c:\\temp\\.*'
+pwsh -NoProfile -File src/TestRunner.ps1 -Cwd 'C:\proj\' -EditablePaths 'c:\\temp\\.*'
 ```
 
 Only the `expected` value (`allow`/`ask`) is compared; `reason` is informational and shown on
@@ -364,10 +407,11 @@ failure along with the command and the classifier's reasoning.
 ### Layer 2: Full-pipe integration tests (`FullPipeTestRunner.ps1`)
 
 Spawns `Hook.ps1` as a child process, pipes JSON to stdin, validates stdout / stderr / exit code.
-Data-driven via XML — one `<category-group>` per IDE.
+Data-driven via XML — one `<category-group>` per IDE. Uses the in-folder `config.json` copy via
+`PRETOOLHOOK_CONFIG_PATH` (production hook always reads repo-root `config.json`).
 
 ```powershell
-pwsh -NoProfile -File test/FullPipeTestRunner.ps1
+pwsh -NoProfile -File test/config/live/FullPipeTestRunner.ps1
 ```
 
 ### Layer 2b: Codex unit tests (`test-cases.codex.ps1`)
@@ -375,11 +419,20 @@ pwsh -NoProfile -File test/FullPipeTestRunner.ps1
 Validates Codex-specific `Detect-IDE` / `Format-Output` functions in isolation.
 
 ```powershell
-pwsh -NoProfile -File test/test-cases.codex.ps1
+pwsh -NoProfile -File test/config/live/test-cases.codex.ps1
 ```
 
 **Adding a new IDE:** create a new `<category-group>` in `test-fullpipe.xml` with the IDE's payload
 format and expected decisions. No runner changes needed.
+
+### Optional: the test-strictness-gate sandbox
+
+`test/config/test-strictness-gate/` holds an isolated normal/strict fixture pair with its own
+runner, for experimenting with config changes without touching the live suites:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File test/config/test-strictness-gate/Run-Tests.ps1
+```
 
 ## How Classification Works in Detail
 
@@ -412,17 +465,11 @@ classify the inner command. AWS CLI also classifies by operation prefix (`descri
 - **Typical:** ~10 ms average across the full suite.
 - **Logging:** append-only JSONL + text files, crash-safe.
 
-## Known test debt
+## Test status
 
-Activating `editable_paths` (whitelist semantics) intentionally changed some redirect outcomes, so a
-few cases that encoded the pre-`editable_paths` behavior now expect updating:
-- `test-cases.redirect-normal.xml` `[1-4, 20]` — non-system paths (`/home/...`, `~/...`) now ask in
-  `normal` mode instead of being allowed.
-- `test-cases.redirect-strict.xml` `[22]` — `C:\temp\...` is now editable (it is listed in
-  `editable_paths`), so it is allowed in `strict` mode instead of asked.
-
-These reflect intentional policy, not regressions. (Separately: the `git add` read-only policy and
-the `comfyui` `trusted_pattern` are config/test policy items to reconcile later.)
+All suites are green with zero known-failure baselines — any new failure is a regression by
+definition (tracked in `PROGRESS.md`). Current: 916/916 across the 6 `test/config/live/` suites
++ 17/17 Codex unit tests; 897/897 in the test-strictness-gate sandbox.
 
 ## License
 

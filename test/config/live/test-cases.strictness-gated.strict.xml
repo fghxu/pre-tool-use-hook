@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  strictness_gated suite — STRICT mode (-Strictness strict, repo-root all-gated config.json).
-  TestRunner applies -Strictness strict by overriding the GLOBAL modifying_strictness in memory
-  after loading config.json; global strict then forces every domain (same effect as a
-  strict config file for command tiers — no separate strict config needed for this suite).
+  strictness_gated suite — STRICT mode (-Strictness strict, THIS folder's config.json
+  test copy). TestRunner applies -Strictness strict by overriding the GLOBAL
+  global_modifying_strictness in memory after loading the config; global strict then
+  forces every domain (same effect as a strict config file for command tiers — no
+  separate strict config needed for this suite).
   Every gated entry must ASK; read_only controls still allow; modifying controls still ask.
   ALL-GATED EXTENSION block at the end covers the per-domain gated commands.
 -->

@@ -31,9 +31,16 @@ $testDir  = Join-Path $repoRoot 'test\config\live'
 # Per-suite invocation + documented failure baseline (see PROGRESS.md).
 # Any *.xml NOT listed here runs with default TestRunner args and KnownFails 0,
 # so new suites are picked up automatically.
+# Suites run against the TEST COPY $testDir\config.json (refresh with
+# test/config/live/Sync-Fixtures.ps1 after editing the repo-root config.json),
+# NOT the repo-root config.json directly.
 $suiteConfig = @{
     'test-cases.xml' = @{
-        Args       = @()
+        Args       = @('-ConfigPath', (Join-Path $testDir 'config.json'))
+        KnownFails = 0
+    }
+    'test-cases.strictness-gated.normal.xml' = @{
+        Args       = @('-ConfigPath', (Join-Path $testDir 'config.json'))
         KnownFails = 0
     }
     'test-cases.redirect-strict.xml' = @{
@@ -41,20 +48,16 @@ $suiteConfig = @{
         KnownFails = 0
     }
     'test-cases.trustedpattern.xml' = @{
-        Args       = @('-Cwd', 'C:\git\repo')   # CWD-dependent cases (see xml header)
+        Args       = @('-ConfigPath', (Join-Path $testDir 'config.json'), '-Cwd', 'C:\git\repo')   # CWD-dependent cases (see xml header)
         KnownFails = 0
     }
     'test-cases.strictness-gated.strict.xml' = @{
-        Args       = @('-Strictness', 'strict')
-        KnownFails = 0
-    }
-    'test-cases.strictness-gated.git-strict.xml' = @{
-        Args       = @('-ConfigPath', (Join-Path $testDir 'config.git-strict.json'))
+        Args       = @('-ConfigPath', (Join-Path $testDir 'config.json'), '-Strictness', 'strict')
         KnownFails = 0
     }
     'test-fullpipe.xml' = @{
         Runner     = 'FullPipe'                 # pwsh + spawns Hook.ps1 per case
-        Args       = @()
+        Args       = @('-ConfigPath', (Join-Path $testDir 'config.json'))
         KnownFails = 0
     }
 }
@@ -89,7 +92,7 @@ foreach ($file in $xmlFiles) {
                 $runError = "pwsh not found - full-pipe suite requires PowerShell 7+"
             }
             else {
-                $output = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $testDir 'FullPipeTestRunner.ps1') -XmlPath $file.FullName 2>&1 | Out-String
+                $output = & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $testDir 'FullPipeTestRunner.ps1') -XmlPath $file.FullName @extraArgs 2>&1 | Out-String
             }
         }
         else {

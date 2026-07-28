@@ -171,8 +171,9 @@ uses the **global** value.
 
 Every shipped domain carries an explicit `"modifying_strictness": "normal"` (same
 effect as inheriting normal) so the knob is visible exactly where you would change
-it. To force one domain, flip that line to `"strict"` — e.g. inside `commands.Git`;
-see the fixture `test/config/live/config.git-strict.json` for a working example.
+it. To force one domain, flip that line to `"strict"` — e.g. inside `commands.Git`
+(note: the git-strict fixture/suite was retired 2026-07-28; per-domain strictness
+remains supported by `Get-EffectiveStrictness` but is no longer suite-covered).
 
 ### All-gated is the live policy (since 2026-07-27)
 

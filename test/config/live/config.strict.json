@@ -1,7 +1,8 @@
-{
+﻿{
   "version": "1.0",
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
-  "_comment_fixture": "TEST FIXTURE - copy of the repo-root config.json with global strictness forced to strict. Drives test-cases.redirect-strict.xml in this folder without -Strictness. DELIBERATE DIVERGENCE: editable_paths.linux omits config.json's /home + ~ patterns - this suite's strict-mode non-system redirect cases must stay non-editable to keep asking. Regenerate from config.json whenever it changes.",
+  "_comment_fixture": "TEST FIXTURE - copy of this folder's config.json with global strictness forced to strict and editable_paths.linux reduced to /tmp/ (redirect suite). Regenerate with Sync-Fixtures.ps1.",
+  "_comment_all_gated": "POLICY (promoted 2026-07-27 from the test-strictness-gate experiment): EVERY command domain carries a strictness_gated tier and all risk:low commands live there (allow in normal/loose, ask in strict); modifying holds only medium/high. Trade-off: gated cmdlet file-writes (Set-Content/Out-File/New-Item/...) are NOT path-checked - path policy covers only redirects and file tools. See docs/config-json-guide.md section 10.",
 
   "_readme": "HOW CLASSIFICATION WORKS: every intercepted tool call is decided 'allow' (run without prompting) or 'ask' (prompt the user). Command-running tools (Bash, PowerShell, run_in_terminal, ...) are classified by matching the command string against the per-domain tiers in 'commands' below. File-writing tools (Write, Edit, create_file, ...) are decided by path policy: system_paths always ask; editable_paths and the current working directory subtree auto-approve. Keys starting with '_' are documentation only and are ignored by the loader.",
   "_readme_tiers": "Per-domain tiers: read_only => allow in every strictness mode | strictness_gated => allow in normal/loose, ask in strict | modifying => always ask (the 'risk' level is shown in the prompt).",
