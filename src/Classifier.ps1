@@ -285,10 +285,15 @@ function Invoke-Classify {
             }))
         }
         $policy = Resolve-PathPolicy -Path $writePath -Config $Config -Verb 'file write to'
+        # ExitCode is ALWAYS 0 here: a decision was produced, so the IDE must parse
+        # the JSON verdict. Exit 2 is a blocking hook error (IDE shows "hook error",
+        # never prompts) — reserved for fatal failures in Hook.ps1. With exit 2 an
+        # "ask" for Write/Edit hard-blocks instead of prompting (Bash/PowerShell
+        # asks already exit 0, see STEP 4f below).
         return (Repair-ResultProperties ([PSCustomObject]@{
             Decision    = $policy.Decision
             Reason      = $policy.Reason
-            ExitCode    = if ($policy.Decision -eq "allow") { 0 } else { 2 }
+            ExitCode    = 0
             IDE         = $IDE
             ToolName    = $toolName
             Command     = $writePath
@@ -400,7 +405,9 @@ function Invoke-Classify {
         return (Repair-ResultProperties ([PSCustomObject]@{
             Decision    = $directResult.Decision
             Reason      = $directResult.Reason
-            ExitCode    = if ($directResult.Decision -eq "allow") { 0 } else { 2 }
+            # Always 0: a decision was produced (see STEP 1.5 note); exit 2 would
+            # hard-block instead of prompting.
+            ExitCode    = 0
             IDE         = $IDE
             ToolName    = $toolName
             Command     = $command

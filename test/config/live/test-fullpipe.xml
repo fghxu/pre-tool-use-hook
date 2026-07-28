@@ -26,6 +26,18 @@
       <description>ClaudeCode: Read (ignored tool, exit 0)</description>
       <hook-input><![CDATA[{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:05.123Z","tool_use_id":"call_test006","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="system path" category="CC-FullPipe-FileToolSystem">
+      <description>ClaudeCode: Write to system path (ask, exit 0 — file-tool asks must be JSON decisions the IDE can prompt on, NOT blocking hook errors from exit 2)</description>
+      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"C:\\Windows\\evil.dll","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:06.123Z","tool_use_id":"call_test007","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="editable path" category="CC-FullPipe-FileToolEditable">
+      <description>ClaudeCode: Write to editable path (allow, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"C:\\temp\\notes.txt","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:07.123Z","tool_use_id":"call_test008","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="file write to" category="CC-FullPipe-FileToolForeign">
+      <description>ClaudeCode: Edit to foreign (non-editable, non-system) path (ask, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Edit","tool_input":{"file_path":"D:\\work\\notes.txt","old_string":"a","new_string":"b"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:08.123Z","tool_use_id":"call_test009","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+    </test-case>
   </category-group>
 
   <category-group name="Copilot-FullPipe" ide="Copilot">
@@ -52,6 +64,10 @@
     <test-case expected-decision="ask" expected-exit="0" expected-reason="Stop-Process" category="CP-FullPipe-VSCode-NoTranscript">
       <description>VS Code Copilot: __vscode- in tool_use_id, no transcript_path (bug fix — was misdetected as ClaudeCode)</description>
       <hook-input><![CDATA[{"tool_name":"run_in_terminal","tool_input":{"command":"Stop-Process -Name notepad"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:00.123Z","tool_use_id":"toolu_bdrk_abc__vscode-xyz"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="system path" category="CP-FullPipe-FileToolSystem">
+      <description>Copilot: create_file to system path (ask, exit 0 — file-tool asks must not be blocking hook errors)</description>
+      <hook-input><![CDATA[{"tool_name":"create_file","tool_input":{"filePath":"C:\\Windows\\evil.dll","content":"x"},"hook_event_name":"preToolUse","timestamp":"1715568005"}]]></hook-input>
     </test-case>
   </category-group>
 
@@ -83,6 +99,10 @@
     <test-case expected-decision="deny" expected-exit="2" expected-reason="unknown tool" category="CX-FullPipe-Unknown">
       <description>Codex: unknown tool (exit 2, genuine error — Format-Output maps all ask→deny including errors)</description>
       <hook-input><![CDATA[{"tool_name":"SomeUnknownTool","tool_input":{"command":"whatever"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:06.123Z","tool_use_id":"call_cx007","turn_id":"turn_stu901"}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="deny" expected-exit="0" expected-reason="system path" category="CX-FullPipe-FileToolSystem">
+      <description>Codex: Write to system path (ask mapped to deny, exit 0 — file-tool asks must not be blocking hook errors)</description>
+      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"C:\\Windows\\evil.dll","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:07.123Z","tool_use_id":"call_cx008","turn_id":"turn_vwx234"}]]></hook-input>
     </test-case>
   </category-group>
 

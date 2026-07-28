@@ -44,6 +44,14 @@ triggered the block. In between sits the `strictness_gated` tier: low-risk comma
 `git commit`, `mkdir`, `Set-Content`, `terraform init`, …) auto-allow in `normal`/`loose` mode and
 prompt only when strictness is `strict`.
 
+**Exit-code contract**: the hook exits `0` whenever it produced a decision — the JSON on stdout is
+the verdict (`allow` / `ask`; `deny` for Codex). Exit `2` is reserved for fatal failures (empty
+stdin, unparseable JSON, config load error) where no decision exists; an IDE treats exit `2` as a
+blocking hook error and never shows a prompt. This is why file-writing tools (`Write`, `Edit`,
+`MultiEdit`, `NotebookEdit`, Copilot `create_file`, …) also exit `0` for path-policy `ask`s — an
+`ask` must reach the IDE as JSON so the user gets a confirmation prompt, exactly like a modifying
+Bash/PowerShell command. (Pinned by `test-fullpipe.xml` *-FileTool* cases.)
+
 ## Supported IDEs
 
 | IDE | Hook Event | Detection Method |
