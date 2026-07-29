@@ -122,6 +122,47 @@ function Get-InputFieldValue {
     return $null
 }
 
+function Get-InputFieldValues {
+    <# Like Get-InputFieldValue, but a mapping segment may end with [*] to
+       enumerate a JSON array and collect a leaf from each element. Example:
+       'tool_input.replacements[*].filePath' yields one filePath per replacement.
+       Scalar dot-paths (no [*]) return a single-element array. Missing segments
+       or a non-array at [*] collect nothing (caller treats empty as fail-safe). #>
+    param([PSCustomObject]$RawInput, [string]$FieldPath)
+    if ([string]::IsNullOrWhiteSpace($FieldPath) -or $null -eq $RawInput) { return }
+    $collected = [System.Collections.Generic.List[string]]::new()
+    $segments = @($FieldPath -split '\.')
+    [void](Resolve-FieldPathLeaves -Node $RawInput -Index 0 -Segments $segments -Collected $collected)
+    foreach ($s in $collected) { $s }
+}
+
+function Resolve-FieldPathLeaves {
+    <# Recursive worker for Get-InputFieldValues. Walks $Segments from $Index;
+       appends each non-empty string leaf to $Collected. A `name[*]` segment
+       enumerates an array property (any other shape collects nothing). #>
+    param($Node, [int]$Index, [string[]]$Segments, $Collected)
+    if ($null -eq $Node) { return }
+    if ($Index -ge $Segments.Count) { return }
+    $seg = $Segments[$Index]
+    if ($seg -match '^([^\[\]]+)\[\*\]$') {
+        $name = $Matches[1]
+        if (-not ($Node.PSObject.Properties.Name -contains $name)) { return }
+        $child = $Node.$name
+        if (-not ($child -is [System.Collections.IList])) { return }
+        foreach ($el in $child) {
+            Resolve-FieldPathLeaves -Node $el -Index ($Index + 1) -Segments $Segments -Collected $Collected
+        }
+        return
+    }
+    if (-not ($Node.PSObject.Properties.Name -contains $seg)) { return }
+    if ($Index -eq $Segments.Count - 1) {
+        $leaf = $Node.$seg
+        if ($leaf -is [string] -and $leaf.Trim().Length -gt 0) { $Collected.Add($leaf.Trim()) }
+        return
+    }
+    Resolve-FieldPathLeaves -Node $Node.$seg -Index ($Index + 1) -Segments $Segments -Collected $Collected
+}
+
 function Get-CommandFromInput {
     param([PSCustomObject]$RawInput, [PSCustomObject]$Config)
 
