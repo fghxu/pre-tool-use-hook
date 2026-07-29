@@ -80,8 +80,7 @@
 	  "src.TestRunner.ps1",
 	  "src.ConfigLoader.ps1",
 	  "C..git.cc.pretoolhook",
-	  "^trusted_stuff\\s+$",
-	  "docker\\s+exec\\s+(?:-\\S+\\s+)?comfyui\\b"
+	  "^trusted_stuff\\s+$"
   ],
 
   "_comment_intercept_tool_name": "Tool names the hook inspects. Each intercepted tool is classified via tool_name_mapping (command tools) or path_tool_mapping (file tools) below; an intercepted tool with no mapping asks by default. Tools in neither list also ask by default.",
@@ -210,7 +209,7 @@
 	"NotebookEdit": "tool_input.notebook_path",
 	"create_file": "tool_input.filePath",
 	"replace_string_in_file": "tool_input.filePath",
-	"multi_replace_string_in_file": "tool_input.filePath",
+	"multi_replace_string_in_file": "tool_input.replacements[*].filePath",
 	"insert_edit_into_file": "tool_input.filePath",
 	"edit_notebook_file": "tool_input.filePath",
 	"create_new_jupyter_notebook": "tool_input.filePath",

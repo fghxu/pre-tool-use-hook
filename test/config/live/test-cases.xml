@@ -1021,7 +1021,7 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
       <copilot-command><![CDATA[cd /tmp]]></copilot-command>
     </test-case>
 
-    <test-case expected="allow" reason="read-only: hostname" category="Linux-FileInspection">
+    <test-case expected="allow" reason="read-only: cat" category="Linux-FileInspection">
       <description>cat displays file contents to stdout</description>
       <copilot-command><![CDATA[cat /etc/hostname]]></copilot-command>
     </test-case>
@@ -1161,7 +1161,7 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
       <copilot-command><![CDATA[awk '{print $1}' /etc/passwd | sort -u]]></copilot-command>
     </test-case>
 
-    <test-case expected="allow" reason="read-only: cat" category="Linux-Pipeline">
+    <test-case expected="allow" reason="read-only: sed" category="Linux-Pipeline">
       <description>sed performs stream editing on text (read-only when not using -i)</description>
       <copilot-command><![CDATA[cat /etc/hosts | sed 's/#.*//g']]></copilot-command>
     </test-case>
@@ -2274,12 +2274,12 @@ done]]></copilot-command>
       <copilot-command><![CDATA[docker stop my-web-server]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: rm -f" category="Docker-Modify">
+    <test-case expected="ask" reason="modifying: docker rm" category="Docker-Modify">
       <description>docker rm removes a stopped container</description>
       <copilot-command><![CDATA[docker rm -f my-old-container]]></copilot-command>
     </test-case>
 
-    <test-case expected="ask" reason="modifying: docker rm" category="Docker-Modify">
+    <test-case expected="ask" reason="modifying: docker rmi" category="Docker-Modify">
       <description>docker rmi deletes an image from local storage</description>
       <copilot-command><![CDATA[docker rmi nginx:1.24]]></copilot-command>
     </test-case>

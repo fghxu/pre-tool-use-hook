@@ -6,44 +6,8 @@
 
   <!-- =================================================================== -->
   <!-- Trusted Pattern Gate (bypasses classification)                      -->
-  <!-- The docker-comfyui cases below require this trusted_pattern entry:   -->
-  <!--   "docker\\s+exec\\s+(?:-\\S+\\s+)?comfyui\\b"  (now shipped in config.json) -->
-  
   <!-- =================================================================== -->
   <category-group name="TrustedPattern">
-
-    <test-case expected="allow" reason="trusted pattern: docker exec comfyui" category="TrustedPattern-Gate">
-      <description>Single-line docker exec comfyui matches trusted pattern</description>
-      <copilot-command><![CDATA[docker exec comfyui nvidia-smi --query-gpu=memory.used --format=csv,noheader]]></copilot-command>
-    </test-case>
-
-    <test-case expected="allow" reason="trusted pattern: docker exec -d comfyui" category="TrustedPattern-Gate">
-      <description>Detached docker exec comfyui matches trusted pattern</description>
-      <copilot-command><![CDATA[docker exec -d comfyui bash -c "nvidia-smi && echo done"]]></copilot-command>
-    </test-case>
-
-    <test-case expected="allow" reason="trusted pattern: for i in with docker exec comfyui (single line)" category="TrustedPattern-Gate">
-      <description>Single-line for loop with docker exec comfyui matches trusted pattern</description>
-      <copilot-command><![CDATA[for i in 1 2 3; do docker exec comfyui echo $i; done]]></copilot-command>
-    </test-case>
-
-    <test-case expected="allow" reason="trusted pattern: for i in with docker exec comfyui (multi-line)" category="TrustedPattern-Gate">
-      <description>Multi-line for loop with docker exec comfyui crosses newlines and matches trusted pattern via Singleline regex option</description>
-      <copilot-command><![CDATA[for i in 1 2 3 4 5 6 7 8; do
-  echo "=== T+${i}0s ==="
-  docker exec comfyui bash -c 'nvidia-smi --query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv,noheader'
-  sleep 10
-done]]></copilot-command>
-    </test-case>
-
-    <test-case expected="allow" reason="trusted pattern: for i in with docker exec -d comfyui (multi-line)" category="TrustedPattern-Gate">
-      <description>Multi-line for loop with docker exec -d comfyui matches trusted pattern</description>
-      <copilot-command><![CDATA[for i in 1 2 3 4 5 6 7 8; do
-  echo "=== Starting container $i ==="
-  docker exec -d comfyui bash -c "nvidia-smi > /tmp/gpu_status_$i.log 2>&1"
-  sleep 10
-done]]></copilot-command>
-    </test-case>
 
     <test-case expected="ask" reason="modifying: for loop with docker run (NOT in trusted pattern)" category="TrustedPattern-Gate">
       <description>Multi-line for loop with docker run (not in trusted pattern) should still ask</description>
@@ -241,10 +205,35 @@ done]]></copilot-command>
       <tool-name>replace_string_in_file</tool-name>
       <tool-input-json>{"filePath":"C:\\git\\repo\\x.md","oldString":"a","newString":"b"}</tool-input-json>
     </test-case>
-    <test-case expected="allow" reason="multi_replace_string_in_file: temp root allows" category="TP-CopilotTools">
-      <description>multi_replace_string_in_file C:\temp\x.txt — trusted</description>
+    <test-case expected="allow" reason="multi_replace: single replacement temp root allows" category="TP-CopilotTools">
+      <description>multi_replace_string_in_file [replacements[0].filePath=C:\temp\a.txt] — real array payload, single file trusted</description>
       <tool-name>multi_replace_string_in_file</tool-name>
-      <tool-input-json>{"filePath":"C:\\temp\\x.txt","replacements":[]}</tool-input-json>
+      <tool-input-json>{"replacements":[{"filePath":"C:\\temp\\a.txt","oldString":"x","newString":"y"}]}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="multi_replace: single replacement under CWD allows" category="TP-CopilotTools">
+      <description>multi_replace_string_in_file [replacements[0].filePath=C:\git\repo\b.md] — single file under CWD trusted</description>
+      <tool-name>multi_replace_string_in_file</tool-name>
+      <tool-input-json>{"replacements":[{"filePath":"C:\\git\\repo\\b.md","oldString":"x","newString":"y"}]}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="multi_replace: two replacements both under CWD allows (worst-case-wins=all allow)" category="TP-CopilotTools">
+      <description>multi_replace_string_in_file [C:\git\repo\b.md, C:\git\repo\c.md] — every path editable => allow</description>
+      <tool-name>multi_replace_string_in_file</tool-name>
+      <tool-input-json>{"replacements":[{"filePath":"C:\\git\\repo\\b.md","oldString":"x","newString":"y"},{"filePath":"C:\\git\\repo\\c.md","oldString":"x","newString":"y"}]}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="multi_replace: worst-case-wins, one path system dir asks" category="TP-CopilotTools">
+      <description>multi_replace_string_in_file [C:\temp\a.txt, C:\Windows\system.ini] — one system path => ask (worst-case)</description>
+      <tool-name>multi_replace_string_in_file</tool-name>
+      <tool-input-json>{"replacements":[{"filePath":"C:\\temp\\a.txt","oldString":"x","newString":"y"},{"filePath":"C:\\Windows\\system.ini","oldString":"a","newString":"b"}]}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="multi_replace: worst-case-wins, one path outside roots asks" category="TP-CopilotTools">
+      <description>multi_replace_string_in_file [C:\git\repo\b.md, D:\work\z.txt] — one outside-roots path => ask (worst-case)</description>
+      <tool-name>multi_replace_string_in_file</tool-name>
+      <tool-input-json>{"replacements":[{"filePath":"C:\\git\\repo\\b.md","oldString":"x","newString":"y"},{"filePath":"D:\\work\\z.txt","oldString":"a","newString":"b"}]}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="multi_replace: empty replacements => fail-safe ask (path not extractable)" category="TP-CopilotTools">
+      <description>multi_replace_string_in_file [replacements=[]] — no path extractable => fail-safe ask</description>
+      <tool-name>multi_replace_string_in_file</tool-name>
+      <tool-input-json>{"replacements":[]}</tool-input-json>
     </test-case>
     <test-case expected="ask" reason="insert_edit_into_file: outside roots asks" category="TP-CopilotTools">
       <description>insert_edit_into_file D:\work\x.txt — gated</description>

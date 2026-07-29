@@ -1,4 +1,4 @@
-﻿{
+{
   "version": "1.0",
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
   "_comment_fixture": "TEST FIXTURE - copy of this folder's config.json with global strictness forced to strict and editable_paths.linux reduced to /tmp/ (redirect suite). Regenerate with Sync-Fixtures.ps1.",
@@ -75,14 +75,9 @@
 	  "^untrusted_stuff\\s+$",
 	  "^[A-Za-z]:[/\\\\](?!.*(?i:System32|Program Files)).*(?i:\\.(exe|bat|cmd|com|msi|scr))\\b.*$"
   ],
-  "_comment_trusted_pattern": "Regexes matched against the WHOLE command string, checked after untrusted_pattern and before all per-command tiers. Any match => allow immediately, bypassing every command rule below. Keep entries tight: anything matching is never prompted. (The src.* and C..git.cc.pretoolhook entries are local debug escape-hatches, not needed in normal use.)",
+  "_comment_trusted_pattern": "Regexes matched against the WHOLE command string, checked after untrusted_pattern and before all per-command tiers. Any match => allow immediately, bypassing every command rule below. Keep entries tight: anything matching is never prompted.",
   "trusted_pattern": [
-	"src.Parser.ps1",
-	  "src.TestRunner.ps1",
-	  "src.ConfigLoader.ps1",
-	  "C..git.cc.pretoolhook",
-	  "^trusted_stuff\\s+$",
-	  "docker\\s+exec\\s+(?:-\\S+\\s+)?comfyui\\b"
+	  "^trusted_stuff\\s+$"
   ],
 
   "_comment_intercept_tool_name": "Tool names the hook inspects. Each intercepted tool is classified via tool_name_mapping (command tools) or path_tool_mapping (file tools) below; an intercepted tool with no mapping asks by default. Tools in neither list also ask by default.",
@@ -211,7 +206,7 @@
 	"NotebookEdit": "tool_input.notebook_path",
 	"create_file": "tool_input.filePath",
 	"replace_string_in_file": "tool_input.filePath",
-	"multi_replace_string_in_file": "tool_input.filePath",
+	"multi_replace_string_in_file": "tool_input.replacements[*].filePath",
 	"insert_edit_into_file": "tool_input.filePath",
 	"edit_notebook_file": "tool_input.filePath",
 	"create_new_jupyter_notebook": "tool_input.filePath",
@@ -337,7 +332,8 @@
         "low":    ["Out-File", "Out-Printer", "Out-*", "Export-Csv", "Export-Clixml", "Tee-Object"]
       },
       "read_only": [
-        { "name": "Split-Path",        "patterns": ["Split-Path *"],                             "description": "Split-Path" },
+        { "name": "Split-Path",         "patterns": ["Split-Path *"],                              "description": "Split-Path" },
+        { "name": "Join-Path",          "patterns": ["Join-Path *"],                               "description": "Join-Path" },
         { "name": "Format-List",        "patterns": ["Format-List *"],                             "description": "Format-List" },
         { "name": "Get-Command",        "patterns": ["Get-Command *"],                             "description": "List available commands" },
         { "name": "Get-Help",           "patterns": ["Get-Help *"],                                "description": "Display help for a command" },
@@ -361,7 +357,9 @@
         { "name": "pwsh",               "patterns": ["pwsh *", "powershell *"],                    "description": "PowerShell wrapper (inner commands classified separately)" }
       ],
       "strictness_gated": [
+        { "name": "Import-Module",      "patterns": ["Import-Module *"],                           "risk": "low",    "description": "Import Module" },
         { "name": "New-Item",           "patterns": ["New-Item *", "ni *", "mkdir *"],             "risk": "low",    "description": "Create file/directory" },
+        { "name": "New-Object",         "patterns": ["New-Object *"],                              "risk": "low",    "description": "Create object" },
         { "name": "Copy-Item",          "patterns": ["Copy-Item *", "cp *", "copy *", "cpi *"],    "risk": "low",    "description": "Copy files" },
         { "name": "Move-Item",          "patterns": ["Move-Item *", "mv *", "move *", "mi *"],     "risk": "low",    "description": "Move/rename files" },
         { "name": "Rename-Item",        "patterns": ["Rename-Item *", "ren *", "rni *"],           "risk": "low",    "description": "Rename file" },

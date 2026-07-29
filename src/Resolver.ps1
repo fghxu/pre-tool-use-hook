@@ -337,6 +337,10 @@ function Resolve-Command {
     $firstToken = ($Command.Trim() -split '\s+')[0]
     if ($firstToken) {
         $ftLower = $firstToken.ToLowerInvariant()
+        # strip trailing .exe/.com so bare-basename windows binaries (curl.exe python.exe)
+        # matches parameter_commands entries keyed by their POSIX name.  Mirrors the 
+        # full-path stripping in step 6 for the no-directory case.
+        $ftLower =$firstToken.ToLowerInvariant() -replace '\.(exe|com)$', ''
         $entry = $null
         $asPowerShell = $false
         if ($paramLookup -and $paramLookup.ContainsKey($ftLower)) {

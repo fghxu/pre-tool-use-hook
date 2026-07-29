@@ -270,8 +270,11 @@ function Invoke-Classify {
     }
     if ($pathMapping -and ($pathMapping.PSObject.Properties.Name -contains $toolName)) {
         $fieldPath = $pathMapping.$toolName
-        $writePath = Get-InputFieldValue -RawInput $RawInput -FieldPath $fieldPath
-        if (-not $writePath) {
+        # Extract ALL target paths. A mapping segment may end with [*] to
+        # enumerate a JSON array (multi_replace_string_in_file ->
+        # tool_input.replacements[*].filePath); scalar dot-paths yield one path.
+        $writePaths = @(Get-InputFieldValues -RawInput $RawInput -FieldPath $fieldPath)
+        if ($writePaths.Count -eq 0) {
             return (Repair-ResultProperties ([PSCustomObject]@{
                 Decision    = "ask"
                 Reason      = "file-tool path not extractable ($toolName)"
@@ -284,19 +287,32 @@ function Invoke-Classify {
                 IsUnknown   = $false
             }))
         }
-        $policy = Resolve-PathPolicy -Path $writePath -Config $Config -Verb 'file write to'
-        # ExitCode is ALWAYS 0 here: a decision was produced, so the IDE must parse
-        # the JSON verdict. Exit 2 is a blocking hook error (IDE shows "hook error",
-        # never prompts) — reserved for fatal failures in Hook.ps1. With exit 2 an
-        # "ask" for Write/Edit hard-blocks instead of prompting (Bash/PowerShell
-        # asks already exit 0, see STEP 4f below).
+        # Worst-case-wins: resolve every path; any ask => ask (same aggregation
+        # rule as chained commands, STEP 4f). The reason joins the deciding
+        # policy reasons. ExitCode is ALWAYS 0 here: a decision was produced, so
+        # the IDE parses the JSON verdict. Exit 2 hard-blocks instead of
+        # prompting and is reserved for fatal failures in Hook.ps1.
+        $decision     = "allow"
+        $blockReasons = [System.Collections.Generic.List[string]]::new()
+        $allowReasons = [System.Collections.Generic.List[string]]::new()
+        foreach ($p in $writePaths) {
+            $policy = Resolve-PathPolicy -Path $p -Config $Config -Verb 'file write to'
+            if ($policy.Decision -eq "ask") {
+                $decision = "ask"
+                $blockReasons.Add($policy.Reason)
+            }
+            else {
+                $allowReasons.Add($policy.Reason)
+            }
+        }
+        $reason = if ($decision -eq "ask") { $blockReasons -join "; " } else { $allowReasons -join "; " }
         return (Repair-ResultProperties ([PSCustomObject]@{
-            Decision    = $policy.Decision
-            Reason      = $policy.Reason
+            Decision    = $decision
+            Reason      = $reason
             ExitCode    = 0
             IDE         = $IDE
             ToolName    = $toolName
-            Command     = $writePath
+            Command     = ($writePaths -join "; ")
             SubResults  = @()
             IsSkipped   = $false
             IsUnknown   = $false

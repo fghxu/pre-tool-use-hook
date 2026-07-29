@@ -79,7 +79,7 @@ Command tools (`Bash`, `PowerShell`, …) skip this entirely — their flow is u
   "NotebookEdit": "tool_input.notebook_path",
   "create_file": "tool_input.filePath",
   "replace_string_in_file": "tool_input.filePath",
-  "multi_replace_string_in_file": "tool_input.filePath",
+  "multi_replace_string_in_file": "tool_input.replacements[*].filePath",
   "insert_edit_into_file": "tool_input.filePath",
   "edit_notebook_file": "tool_input.filePath",
   "create_new_jupyter_notebook": "tool_input.filePath",
@@ -88,7 +88,9 @@ Command tools (`Bash`, `PowerShell`, …) skip this entirely — their flow is u
 ```
 
 - Those 11 entries are **moved out of `tool_name_mapping`** (a path is not a command).
-- `edit_files` / `apply_patch` stay in `intercept_tool_name`; their payloads carry path lists — the branch iterates all paths.
+- **List/array payloads — the `[*]` syntax.** A dot-path segment may end with `[*]` to enumerate a JSON array and collect one leaf per element. `multi_replace_string_in_file` → `tool_input.replacements[*].filePath` yields every replacement's `filePath` (in the real Copilot payload each replacement carries its own path). Scalar dot-paths (no `[*]`) yield a single path. The extractor (`Get-InputFieldValues`) emits all leaves; a missing segment or a non-array at `[*]` collects nothing (fail-safe).
+- **Aggregation is worst-case-wins** (§3.3): every extracted path runs through `Resolve-PathPolicy`; any `ask` → `ask` (same rule as chained commands, STEP 4f); only when every path is editable/CWD/temp → `allow`. An empty path list (e.g. `replacements: []`) is extraction failure → fail-safe `ask`.
+- `edit_files` / `apply_patch` stay in `intercept_tool_name`; their payloads carry path lists — but their paths are embedded in patch *text* (not a JSON field), so they need bespoke extraction rather than a bare `[*]` mapping. Resolve + worst-case aggregation once extracted.
 - **No change to `editable_paths`/`system_paths`** (D5 — no `C:\git`).
 
 **Retire (D3):**
@@ -126,7 +128,7 @@ Command tools (`Bash`, `PowerShell`, …) skip this entirely — their flow is u
 
 - **Redirect refactor blast radius** — mitigated by reusing the exact ladder and the byte-identical differential requirement.
 - **Default-ask UX change** — first write to a new location prompts; workflow is "approve once, or add the root to editable_paths." Deliberate (D1).
-- **Multi-path Copilot payloads** (`edit_files`, `apply_patch`) — real payload shapes must be captured from logs and pinned in fullpipe-style tests; mappings are best-guess until then.
+- **Multi-path Copilot payloads** — `multi_replace_string_in_file` is now resolved: its real `replacements[*].filePath` shape is mapped via `[*]` and pinned by worst-case tests (one system path → ask). `edit_files` / `apply_patch` remain best-guess: their paths live in patch *text* (not a JSON field), so they need bespoke extraction and must be captured from logs before a mapping applies.
 
 ## 5. Out of Scope
 

@@ -19,7 +19,7 @@
       <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"not_a_command":"oops"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:03.123Z","tool_use_id":"call_test004","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
     <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="CC-FullPipe-Trusted">
-      <description>ClaudeCode: git status (trusted for purpose of test, exit 0 — NOTE: git status is classified via full pipeline)</description>
+      <description>ClaudeCode: docker ps (read-only, exit 0 — classified via full pipeline)</description>
       <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"docker ps"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:04.123Z","tool_use_id":"call_test005","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
     <test-case expected-decision="allow" expected-exit="0" expected-reason="ignored tool" category="CC-FullPipe-Skip">
