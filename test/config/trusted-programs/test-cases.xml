@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- TRUSTED-PROGRAMS SUITE - isolated fixture (test/config/trusted-programs/config.json).
+     Proves the trusted_programs allowlist (Option B):
+       - a matched trusted program grants 'allow' for its sub-command,
+       - UNLESS a modifying command appears in the statement (sibling OR argument).
+     Run:
+       pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/config/trusted-programs/test-cases.xml -ConfigPath test/config/trusted-programs/config.json -->
+<commands>
+  <category-group name="TrustedPrograms">
+
+    <!-- Core matrix: identical structure, only the verb differs -->
+    <test-case expected="allow" reason="trusted program + benign args => allow" category="TP-Allow-Benign">
+      <description>&amp; c:\temp\abc.ps1 Get-ChildItem c:\temp - trusted, read-only args</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& c:\temp\abc.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="trusted program but modifying verb in ARGS => ask (Option B)" category="TP-Ask-ModifyingArg">
+      <description>&amp; c:\temp\abc.ps1 Remove-Item c:\temp - modifying arg scanned</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& c:\temp\abc.ps1 Remove-Item c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="separate modifying sibling statement => ask (worst-case-wins)" category="TP-Ask-Sibling">
+      <description>&amp; c:\temp\abc.ps1 ; Remove-Item c:\temp - sibling modifying statement</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& c:\temp\abc.ps1 ; Remove-Item c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- Edges -->
+    <test-case expected="allow" reason="trusted program, no args => allow" category="TP-Allow-NoArgs">
+      <description>&amp; c:\temp\abc.ps1 - no arguments</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& c:\temp\abc.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="case/separator-insensitive match => allow" category="TP-Allow-CaseInsensitive">
+      <description>&amp; C:\Temp\ABC.PS1 Get-ChildItem c:\temp - case-insensitive match</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& C:\Temp\ABC.PS1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="bare path (no call operator) still yields program token => allow" category="TP-Allow-BarePath">
+      <description>c:\temp\abc.ps1 Get-ChildItem c:\temp - invoked without call operator</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[c:\temp\abc.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="unknown arg ignored (no over-block on benign unknown) => allow" category="TP-Allow-UnknownArg">
+      <description>&amp; c:\temp\abc.ps1 somerandomtoken c:\temp - unknown arg not modifying</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& c:\temp\abc.ps1 somerandomtoken c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="not a trusted program => unknown => ask (baseline unchanged)" category="TP-Ask-NotTrusted">
+      <description>&amp; c:\tools\other.ps1 Get-ChildItem c:\temp - program not in trusted_programs</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& c:\tools\other.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- Matching-form coverage -->
+    <test-case expected="allow" reason="partial-path entry matches full-path token (path-suffix) => allow" category="TP-Allow-PartialPath">
+      <description>&amp; c:\proj\subdir\partial.ps1 Get-ChildItem c:\temp - matches 'subdir\partial.ps1'</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& c:\proj\subdir\partial.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="bare-name entry matches bare-name token (basename) => allow" category="TP-Allow-BareName">
+      <description>&amp; barename.ps1 Get-ChildItem c:\temp - matches 'barename.ps1'</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& barename.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

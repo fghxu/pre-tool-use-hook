@@ -274,6 +274,31 @@ function Resolve-Command {
         }
     }
 
+    # -------------------------------------------------
+    # Step 0f-trust: Trusted-program allowlist (Option B, post-decomposition)
+    #   If the program token ($firstToken, in its ORIGINAL form before the
+    #   full-path recursion below) matches a trusted_programs entry, allow THIS
+    #   sub-command unless a modifying command appears among its arguments.
+    #   Placed before the recursion (:298) so full-path program tokens are
+    #   matchable, and before the read_only/modifying tiers so a trusted program
+    #   is not reported as unknown. The Classifier's worst-case-wins aggregation
+    #   still forces 'ask' when a modifying SIBLING statement is present, so this
+    #   only decides the trusted invocation itself.
+    # -------------------------------------------------
+    if ($firstToken) {
+        $trustedProg = Test-TrustedProgram -Token $firstToken -Config $Config
+        if ($trustedProg) {
+            $modToken = Test-StatementContainsModifying -ArgsText $rest -Config $Config
+            if ($modToken) {
+                return New-ResolutionResult -Decision "ask" `
+                    -Reason "trusted program '$trustedProg' invoked with modifying arg '$modToken'" `
+                    -MatchedPattern $trustedProg -Risk "unknown"
+            }
+            return New-ResolutionResult -Decision "allow" `
+                -Reason "trusted program: $trustedProg" -MatchedPattern "trusted-program:$trustedProg" -Risk "none"
+        }
+    }
+
     $isFullPath = $false
     $programName = $null
 
@@ -724,6 +749,103 @@ function Resolve-Command {
     # -------------------------------------------------
     $truncatedCommand = $Command.Substring(0, [Math]::Min(80, $Command.Length))
     return New-ResolutionResult -Decision "ask" -Reason "unknown command: $truncatedCommand" -MatchedPattern $null -Risk "unknown"
+}
+
+# =============================================================================
+# Trusted-program helpers (Step 0f-trust)
+#
+# Test-TrustedProgram: does a program token match a trusted_programs entry?
+# Test-StatementContainsModifying: does an argument string contain a modifying
+# command? Together they implement Option B: a trusted program is allowed only
+# if no modifying command appears in its statement (including its arguments).
+# =============================================================================
+
+function Test-TrustedProgram {
+    <#
+    .SYNOPSIS
+        Returns the matched trusted_programs entry (normalized) if $Token matches,
+        else $null.
+
+    .DESCRIPTION
+        Entries are read pre-normalized (lowercased, '/' -> '\') from
+        $Config._compiled.trustedPrograms. Matching rules:
+          - Entry containing '\' (a path): token EQUALS the entry, OR token ENDS
+            WITH the entry preceded by a '\' (path-suffix). Covers full paths
+            ('c:\temp\abc.ps1') and partial paths ('subdir\abc.ps1').
+          - Bare entry (no '\'): the token's BASENAME (text after the last '\')
+            equals the entry. Covers bare names ('abc.ps1').
+        Case-insensitive; '/' and '\' are equivalent.
+    #>
+    param([string]$Token, [PSCustomObject]$Config)
+
+    if ([string]::IsNullOrWhiteSpace($Token)) { return $null }
+
+    $entries = @()
+    if ($Config._compiled -and
+        (Get-Member -InputObject $Config._compiled -Name 'trustedPrograms' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+        $entries = @($Config._compiled.trustedPrograms)
+    }
+    if ($entries.Count -eq 0) { return $null }
+
+    $tok = $Token.ToLowerInvariant() -replace '/', '\'
+    $basename = if ($tok.Contains('\')) { $tok -replace '^.*\\', '' } else { $tok }
+
+    foreach ($e in $entries) {
+        if ([string]::IsNullOrWhiteSpace($e)) { continue }
+        if ($e.Contains('\')) {
+            if ($tok -eq $e) { return $e }
+            $eLen = $e.Length
+            if ($tok.Length -gt $eLen -and $tok.EndsWith($e) -and $tok[$tok.Length - $eLen - 1] -eq '\') {
+                return $e
+            }
+        }
+        else {
+            if ($basename -eq $e) { return $e }
+        }
+    }
+    return $null
+}
+
+function Test-StatementContainsModifying {
+    <#
+    .SYNOPSIS
+        Returns the first modifying token found in $ArgsText, else $null.
+
+    .DESCRIPTION
+        Tokenizes $ArgsText on whitespace and probes each suffix
+        (tokens[i..end]) via Resolve-Command, re-detecting the domain per
+        suffix (so a modifying PowerShell cmdlet inside a linux-detected
+        invocation is still caught). A suffix is "modifying" iff Resolve-Command
+        returns Decision='ask' WITH a non-null MatchedPattern — that signal
+        covers modifying patterns/verbs/prefixes and parameter_commands
+        modifying rules, plus strictness_gated-in-strict. UNKNOWN results
+        (MatchedPattern=$null) are deliberately ignored so benign arguments
+        (arbitrary paths, unrecognized tokens) do not over-block.
+
+        Probes run full Resolve-Command (the trusted-program check inside it is
+        a cheap no-match for non-trusted tokens, and a trusted program in the
+        args correctly returns 'allow', not 'ask'). Termination is guaranteed:
+        each suffix is strictly shorter than its parent.
+    #>
+    param([string]$ArgsText, [PSCustomObject]$Config)
+
+    if ([string]::IsNullOrWhiteSpace($ArgsText)) { return $null }
+
+    $tokens = @($ArgsText.Trim() -split '\s+')
+    for ($i = 0; $i -lt $tokens.Count; $i++) {
+        $suffix = (($tokens[$i..($tokens.Count - 1)]) -join ' ').Trim()
+        if (-not $suffix) { continue }
+        $dom = Get-CommandDomain -Command $suffix
+        $r = Resolve-Command -Command $suffix -Domain $dom -Config $Config
+        # "Modifying" iff ask AND a real (non-empty) MatchedPattern. The unknown
+        # fallback carries Decision='ask' with an empty MatchedPattern; an empty
+        # string is NOT $null, so IsNullOrWhiteSpace (not `$null -ne`) is required
+        # to avoid treating benign unknown args as modifying.
+        if ($r -and $r.Decision -eq 'ask' -and -not [string]::IsNullOrWhiteSpace($r.MatchedPattern)) {
+            return $tokens[$i]
+        }
+    }
+    return $null
 }
 
 # =============================================================================

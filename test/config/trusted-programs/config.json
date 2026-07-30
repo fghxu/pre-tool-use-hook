@@ -1,0 +1,56 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for trusted_programs (decomposed-level trusted-program allowlist, Option B). Minimal config: only keys needed to classify command strings.",
+  "_comment_fixture": "Isolated TDD fixture for the trusted_programs feature. trusted_programs is matched AFTER decomposition against each sub-command's program token (the & call-target / first token). A match grants 'allow' for that sub-command ONLY IF no modifying command appears in its arguments or sibling statements (Option B: args are scanned; unknown args are ignored).",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "_comment_intercept_tool_name": "Only Bash is intercepted by this minimal fixture.",
+  "intercept_tool_name": [ "Bash" ],
+
+  "_comment_tool_name_mapping": "Bash command string lives at tool_input.command.",
+  "tool_name_mapping": {
+    "Bash": "tool_input.command"
+  },
+
+  "_comment_ignore_tool_name": "No tools ignored in this minimal fixture.",
+  "ignore_tool_name": [],
+
+  "_comment_trusted_programs": "Programs trusted to run. Matched AFTER decomposition, against the program token of each decomposed sub-command. A match grants 'allow' for that sub-command ONLY IF no modifying command also appears in its arguments or sibling statements. Entry forms: full path 'c:\\temp\\abc.ps1', partial path 'subdir\\partial.ps1' (path-suffix match), or bare name 'barename.ps1' (basename match). Case-insensitive; '/' and '\\' are equivalent.",
+  "trusted_programs": [
+    "c:\\temp\\abc.ps1",
+    "subdir\\partial.ps1",
+    "barename.ps1"
+  ],
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "description": "Minimal PowerShell domain for the trusted_programs fixture (verb-based classification).",
+      "_comment_tiers": "Get-* => read-only (allow); Remove-*/Set-*/New-*/Copy-*/Move-* => modifying (ask). Empty pattern arrays; verbs decide.",
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Format-*", "Out-GridView", "Write-Host", "Write-Output"],
+      "modifying_verbs": {
+        "high":   ["Remove-*", "Stop-*", "Disable-*", "Clear-*", "Reset-*"],
+        "medium": ["Set-*", "New-*", "Copy-*", "Move-*", "Rename-*", "Start-*", "Send-*", "Push-*"],
+        "low":    []
+      },
+      "read_only": [],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "description": "Minimal Linux domain. NOTE: commands like '& c:\\temp\\abc.ps1 ...' detect as linux (the & + path prefix masks the Verb-Noun signal), so a Linux domain must exist for Resolve-Command to reach the program-token step. Its tiers are barely exercised here because a matched trusted_program short-circuits before them; the arg-scan re-detects arg-suffix domains (e.g. 'Remove-Item c:\\temp' => powershell) independently.",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" },
+        { "name": "cat", "patterns": ["cat *"], "description": "Print file contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

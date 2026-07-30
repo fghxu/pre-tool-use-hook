@@ -86,6 +86,14 @@
 	  "^trusted_stuff\\s+$"
   ],
 
+  "_comment_trusted_programs": "Programs trusted to run. Matched AFTER decomposition, against the program token of each decomposed sub-command (the & call-target / first token). A match grants 'allow' ONLY IF no modifying command appears in its arguments or sibling statements (Option B: args scanned; unknown args ignored). Mirrors root config.json; drives the TrustedPrograms cases merged into normal/test-cases.xml. NOTE: '& <path>' detects as the linux domain, so the Linux domain must exist (it does).",
+  "trusted_programs": [
+	  "TestRunner.ps1",
+	  "src/Classifier.ps1",
+	  "test-strictness-gate/Run-Tests.ps1",
+	  "C:/git/cc/pretoolhook/src/Run-AllTests.ps1"
+  ],
+
   "_comment_intercept_tool_name": "Tool names the hook inspects. Each intercepted tool is classified via tool_name_mapping (command tools) or path_tool_mapping (file tools) below; an intercepted tool with no mapping asks by default. Tools in neither list also ask by default.",
   "intercept_tool_name": [
 		"send_to_terminal",

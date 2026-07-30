@@ -79,10 +79,15 @@
   ],
   "_comment_trusted_pattern": "Regexes matched against the WHOLE command string, checked after untrusted_pattern and before all per-command tiers. Any match => allow immediately, bypassing every command rule below. Keep entries tight: anything matching is never prompted.",
   "trusted_pattern": [
-	  "^trusted_stuff\\s+$",
-	  "src.TestRunner.ps1",
-	  "config.test-strictness-gate.Run-Tests.ps1",
-	  "pretoolhook.src.Run-AllTests.ps1"
+	  "^trusted_stuff\\s+$"
+  ],
+
+  "_comment_trusted_programs": "Programs trusted to run. Matched AFTER decomposition, against the program token of each decomposed sub-command (the & call-target / first token). A match grants 'allow' for that sub-command ONLY IF no modifying command also appears in its arguments or sibling statements (Option B: args are scanned; unknown args ignored). Entry forms: full path, partial path (path-suffix match; '/' and '\\' are equivalent), or bare name (basename match). Case-insensitive. Covers the & path / bare-path invocation forms; pwsh -File is NOT unwrapped (those invocations are already allowed by the pwsh read_only pattern).",
+  "trusted_programs": [
+	  "TestRunner.ps1",
+	  "src/Classifier.ps1",
+	  "test-strictness-gate/Run-Tests.ps1",
+	  "C:/git/cc/pretoolhook/src/Run-AllTests.ps1"
   ],
 
   "_comment_intercept_tool_name": "Tool names the hook inspects. Each intercepted tool is classified via tool_name_mapping (command tools) or path_tool_mapping (file tools) below; an intercepted tool with no mapping asks by default. Tools in neither list also ask by default.",
@@ -330,11 +335,11 @@
       "modifying_strictness": "normal",
       "description": "PowerShell cmdlets — classified primarily by approved verb",
       "_comment_tiers": "Explicit read_only/modifying pattern entries (if present) decide first; otherwise the cmdlet verb decides: read_only_verbs => allow, modifying_verbs => ask by risk tier (low/medium/high). strictness_gated covers explicit command patterns only, not verb tiers. Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
-      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Compare-*", "Group-*", "Format-*", "ForEach-*", "Out-GridView", "Write-Host", "Write-Output", "Write-Information", "Write-Verbose", "Write-Debug", "Write-Warning", "Read-Host", "Show-*", "Trace-*", "Wait-*", "Connect-*", "Disconnect-*", "Receive-*", "Start-Sleep"],
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Compare-*", "Group-*", "Format-*", "ForEach-*", "Out-GridView", "Out-Null", "Out-String", "Out-Host", "Out-Default", "Write-Host", "Write-Output", "Write-Information", "Write-Verbose", "Write-Debug", "Write-Warning", "Read-Host", "Show-*", "Trace-*", "Wait-*", "Connect-*", "Disconnect-*", "Receive-*", "Start-Sleep"],
       "modifying_verbs": {
         "high":   ["Remove-*", "Stop-*", "Restart-*", "Disable-*", "Clear-*", "Unregister-*", "Uninstall-*", "Undo-*", "Block-*", "Revoke-*", "Dismount-*", "Disconnect-*", "Suspend-*", "Reset-*"],
         "medium": ["New-*", "Set-*", "Start-*", "Copy-*", "Move-*", "Rename-*", "Enable-*", "Register-*", "Install-*", "Update-*", "Publish-*", "Mount-*", "Save-*", "Send-*", "Push-*", "Import-*", "ConvertTo-*", "Export-*", "Add-*", "Approve-*", "Assert-*", "Backup-*", "Complete-*", "Confirm-*", "Join-*", "Lock-*", "Merge-*", "Perform-*", "Redo-*", "Repair-*", "Request-*", "Resolve-*", "Resume-*", "Skip-*", "Split-*", "Step-*", "Submit-*", "Switch-*", "Sync-*", "Unblock-*", "Unlock-*", "Watch-*"],
-        "low":    ["Out-File", "Out-Printer", "Out-*", "Export-Csv", "Export-Clixml", "Tee-Object"]
+        "low":    ["Out-Printer*"]
       },
       "read_only": [
         { "name": "Split-Path",         "patterns": ["Split-Path *"],                              "description": "Split-Path" },
@@ -357,11 +362,15 @@
         { "name": "Resolve-DnsName",    "patterns": ["Resolve-DnsName *"],                         "description": "DNS lookup" },
         { "name": "Get-NetIPAddress",   "patterns": ["Get-NetIPAddress *"],                        "description": "Get IP configuration" },
         { "name": "Get-NetIPConfiguration", "patterns": ["Get-NetIPConfiguration *"],              "description": "Get IP configuration (detailed)" },
+        { "name": "Set-Location",   "patterns": ["Set-Location *"],                        "description": "Set-Location" },
+        { "name": "Set-Variable",   "patterns": ["Set-Variable *"],                        "description": "Set-Variable" },
         { "name": "Invoke-Command",     "patterns": ["Invoke-Command *", "icm *"],                 "description": "Execute commands remotely (ScriptBlock classified separately)" },
         { "name": "Remove-PSRemoting",  "patterns": ["Remove-PSRemoting *"],                       "description": "Remove PowerShell remoting" },
         { "name": "pwsh",               "patterns": ["pwsh *", "powershell *"],                    "description": "PowerShell wrapper (inner commands classified separately)" }
       ],
       "strictness_gated": [
+        { "name": "Export File",        "patterns": ["Export-Csv *","Export-Clixml *", "Tee-Object *","Out-Printer"],                                "description": "Export" },
+        { "name": "Out-File",           "patterns": ["Out-File *"],                                "description": "Out-File" },
         { "name": "Import-Module",      "patterns": ["Import-Module *"],                           "risk": "low",    "description": "Import Module" },
         { "name": "New-Item",           "patterns": ["New-Item *", "ni *", "mkdir *"],             "risk": "low",    "description": "Create file/directory" },
         { "name": "New-Object",         "patterns": ["New-Object *"],                              "risk": "low",    "description": "Create object" },
@@ -370,7 +379,7 @@
         { "name": "Rename-Item",        "patterns": ["Rename-Item *", "ren *", "rni *"],           "risk": "low",    "description": "Rename file" },
         { "name": "Set-Content",        "patterns": ["Set-Content *", "sc *"],                     "risk": "low",    "description": "Write file contents" },
         { "name": "Add-Content",        "patterns": ["Add-Content *", "ac *"],                     "risk": "low",    "description": "Append file contents" },
-        { "name": "Out-File",           "patterns": ["Out-File *"],                                "risk": "low",    "description": "Write output to file" },
+        { "name": "Out-File",           "patterns": ["Out-File *", "Out-Null"],                                "risk": "low",    "description": "Write output to file" },
         { "name": "New-PSSession",      "patterns": ["New-PSSession *", "nsn *"],                  "risk": "low",    "description": "Create persistent remote session" }
       ],
       "modifying": [
@@ -425,8 +434,19 @@
         { "name": "uniq",     "patterns": ["uniq", "uniq *"],                  "description": "Report or omit repeated lines" },
         { "name": "wc",       "patterns": ["wc *"],                            "description": "Word/line/byte count" },
         { "name": "ps",       "patterns": ["ps *"],                            "description": "List processes" },
-        { "name": "top",      "patterns": ["top -b *", "top -n *"],            "description": "System monitor (batch mode)" },
-        { "name": "df",       "patterns": ["df *"],                            "description": "Disk space usage" },
+        { "name": "top",      "patterns": ["top -b *", "top -n *", "top -bn*"],            "description": "System monitor (batch mode)" },
+        
+        { "name": "iostat",      "patterns": ["iostat", "iostat *"],            "description": "" },
+        { "name": "vmstat",      "patterns": ["vmstat", "vmstat *"],            "description": "" },
+        { "name": "mpstat",      "patterns": ["mpstat", "mpstat *"],            "description": "" },
+        { "name": "systemctl status",   "patterns": ["systemctl status *" ],    "description": "" },
+        { "name": "systemctl show",     "patterns": ["systemctl show *" ],      "description": "" },
+        { "name": "systemctl list",     "patterns": ["systemctl list-*"],       "description": "" },
+        { "name": "systemctl is-*",     "patterns": ["systemctl is-*"],         "description": "" },
+        { "name": "systemctl cat",      "patterns": ["systemctl cat *" ],       "description": "" },
+	
+		
+		{ "name": "df",       "patterns": ["df *"],                            "description": "Disk space usage" },
         { "name": "du",       "patterns": ["du *"],                            "description": "Directory space usage" },
         { "name": "free",     "patterns": ["free *"],                          "description": "Memory usage" },
         { "name": "uname",    "patterns": ["uname *"],                         "description": "System information" },
@@ -461,7 +481,9 @@
         { "name": "sleep",    "patterns": ["sleep *"],                         "description": "Delay/suspend execution" },
         { "name": "true",     "patterns": ["true"],                            "description": "Return success (shell builtin)" },
         { "name": "javap",    "patterns": ["javap *"],                          "description": "Disassemble/inspect Java class files" },
-        { "name": "adb devices",     "patterns": ["adb devices*"],              "description": "List attached Android devices" },
+        { "name": "systemctl status",  "patterns": ["systemctl status *"],      "description": "check a systemd unit" },
+        { "name": "systemctl show",  "patterns": ["systemctl show *"],          "description": "show a systemd unit" },
+		{ "name": "adb devices",     "patterns": ["adb devices*"],              "description": "List attached Android devices" },
         { "name": "adb logcat read", "patterns": ["adb logcat (?!.*-c).*"], "description": "Dump device log (excludes -c clear)" },
         { "name": "adb shell getprop", "patterns": ["adb shell getprop *"],     "description": "Read device properties" },
         { "name": "adb shell pm list", "patterns": ["adb shell pm list *"],     "description": "List installed packages" },
@@ -565,7 +587,7 @@
 		{ "name": "git check-ignore", "patterns": ["git check-ignore*", "git check-ignore *"],                      "description": "Show whether specific files or directories are ignored" },
         { "name": "git show",      "patterns": ["git show*", "git show *"],                      "description": "Show various objects" },
         { "name": "git branch",    "patterns": ["^git branch$", "git branch -a*", "git branch -l*", "git branch --list*", "git branch --show*"], "description": "List branches (no write)" },
-        { "name": "git tag",       "patterns": ["^git tag$", "git tag -l*", "git tag --list*"],  "description": "List tags (no write)" },
+        { "name": "git tag",       "patterns": ["^git tag$", "git tag -l*", "git tag --list*", "git tag --sort*", "git tag -n*"],  "description": "List tags (no write)" },
         { "name": "git remote",    "patterns": ["^git remote$", "git remote -v*", "git remote --verbose*"], "description": "List remotes (no write)" },
         { "name": "git fetch",     "patterns": ["git fetch*", "git fetch *"],                    "description": "Download objects and refs" },
         { "name": "git worktree list", "patterns": ["git worktree list*", "git worktree list *"], "description": "List worktrees (no write)" }

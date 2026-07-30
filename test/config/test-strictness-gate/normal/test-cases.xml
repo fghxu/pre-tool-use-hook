@@ -4064,4 +4064,80 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
     </test-case>
   </category-group>
 
+  <category-group name="TrustedPrograms">
+    <!-- trusted_programs (Option B): a matched program allows its sub-command UNLESS a
+         modifying command appears in the statement (sibling OR argument). Entries live in
+         config.json (root) and are mirrored in test-strictness-gate config.normal.json:
+           TestRunner.ps1 (bare), src\Classifier.ps1 (partial), test-strictness-gate\Run-Tests.ps1
+           (partial), C:\git\cc\pretoolhook\src\Run-AllTests.ps1 (full). NOTE: '& <path>' detects
+           as the linux domain; the check is domain-agnostic and arg-suffixes re-detect. -->
+
+    <test-case expected="allow" reason="trusted_programs: TestRunner.ps1 (bare-name match), benign args" category="TrustedPrograms">
+      <description>&amp; TestRunner.ps1 Get-ChildItem c:\temp - bare-name trusted program, read-only args</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& TestRunner.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted_programs: bare entry matches basename even with a path prefix" category="TrustedPrograms">
+      <description>&amp; C:\tools\TestRunner.ps1 Get-ChildItem c:\temp - basename TestRunner.ps1 matches bare entry</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& C:\tools\TestRunner.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted_programs: src\Classifier.ps1 (partial-path match), benign args" category="TrustedPrograms">
+      <description>&amp; src\Classifier.ps1 Get-ChildItem c:\temp - partial-path trusted program</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& src\Classifier.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted_programs: partial-path entry matches a full-path invocation (suffix)" category="TrustedPrograms">
+      <description>&amp; C:\git\cc\pretoolhook\src\Classifier.ps1 Get-ChildItem c:\temp - full-path invocation matches 'src\Classifier.ps1'</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& C:\git\cc\pretoolhook\src\Classifier.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted_programs: full-path entry matches exactly" category="TrustedPrograms">
+      <description>&amp; C:\git\cc\pretoolhook\src\Run-AllTests.ps1 Get-ChildItem c:\temp - full-path trusted program</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& C:\git\cc\pretoolhook\src\Run-AllTests.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted_programs: test-strictness-gate\Run-Tests.ps1 (partial-path match)" category="TrustedPrograms">
+      <description>&amp; test-strictness-gate\Run-Tests.ps1 Get-ChildItem c:\temp - partial-path trusted program</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& test-strictness-gate\Run-Tests.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="trusted program but modifying verb in ARGS => ask (Option B)" category="TrustedPrograms">
+      <description>&amp; src\Classifier.ps1 Remove-Item c:\temp - modifying arg scanned</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& src\Classifier.ps1 Remove-Item c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="separate modifying sibling statement => ask (worst-case-wins)" category="TrustedPrograms">
+      <description>&amp; src\Classifier.ps1 ; Remove-Item c:\temp - sibling modifying statement</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& src\Classifier.ps1 ; Remove-Item c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="not a trusted program => unknown => ask (baseline)" category="TrustedPrograms">
+      <description>&amp; src\other.ps1 Get-ChildItem c:\temp - program not in trusted_programs</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& src\other.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="case-insensitive match => allow" category="TrustedPrograms">
+      <description>&amp; SRC\CLASSIFIER.PS1 Get-ChildItem c:\temp - case-insensitive match</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& SRC\CLASSIFIER.PS1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="unknown arg ignored (no over-block on benign unknown) => allow" category="TrustedPrograms">
+      <description>&amp; src\Classifier.ps1 somerandomtoken c:\temp - unknown arg not modifying</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& src\Classifier.ps1 somerandomtoken c:\temp]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
 </commands>
