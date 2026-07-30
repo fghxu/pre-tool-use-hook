@@ -64,6 +64,15 @@ function Test-ConfigSchema {
         throw "Configuration validation failed: 'untrusted_pattern' must be an array"
     }
 
+    # Validate optional "trusted_programs" (decomposed-level program allowlist).
+    # Unlike trusted_pattern/untrusted_pattern this key is OPTIONAL; if absent it
+    # is treated as an empty list. If present it must be an array of strings
+    # (full path, partial path, or bare program name).
+    $hasTrustedPrograms = Get-Member -InputObject $Config -Name 'trusted_programs' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasTrustedPrograms -and $Config.trusted_programs -isnot [array]) {
+        throw "Configuration validation failed: 'trusted_programs' must be an array"
+    }
+
     # Normalize intercept_tool_name (handle typo "intecept_tool_name")
     $hasIntercept = Get-Member -InputObject $Config -Name 'intercept_tool_name' -MemberType NoteProperty
     $hasInterceptTypo = Get-Member -InputObject $Config -Name 'intecept_tool_name' -MemberType NoteProperty
@@ -399,6 +408,18 @@ function Load-Config {
         $compiledUntrusted += [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline -bor [System.Text.RegularExpressions.RegexOptions]::Compiled)
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'untrusted' -Value $compiledUntrusted -Force
+
+    # Compile trusted_programs (optional): normalized (lowercased, '/' -> '\')
+    # program path/name specs stored as a plain string array for O(n) lookup by
+    # Test-TrustedProgram. Empty array when the key is absent. These are NOT
+    # regexes (unlike trusted/untrusted above) - they are path/name specs.
+    $compiledTrustedPrograms = @()
+    if (Get-Member -InputObject $config -Name 'trusted_programs' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        foreach ($p in $config.trusted_programs) {
+            $compiledTrustedPrograms += ($p.ToString().ToLowerInvariant() -replace '/', '\')
+        }
+    }
+    $config._compiled | Add-Member -MemberType NoteProperty -Name 'trustedPrograms' -Value $compiledTrustedPrograms -Force
 
     # Compile patterns for each domain's read_only and modifying entries
     $commandKeys = $config.commands.PSObject.Properties.Name
