@@ -15,7 +15,9 @@
             per Get-EffectiveStrictness)
       2. Explicit "modifying" entries (compiled regex)
       3. Verb-based classification (PowerShell / AWS domains only)
-      4. Fallback: ask with reason "unknown command"
+      4. Fallback: ask with reason "unknown command" (or "static method not on
+         allowlist: [Type]::Method (...)" when the command is an unallowlisted
+         static .NET method call)
 #>
 
 function Get-EffectiveStrictness {
@@ -747,6 +749,17 @@ function Resolve-Command {
     # -------------------------------------------------
     # Step 3: Fallback — no pattern matched
     # -------------------------------------------------
+    # If the unknown command is a STATIC .NET method call ([Type]::Method(...)),
+    # say so precisely and point at the allowlist rather than the generic
+    # 'unknown command'. These reach the fallback when a static call leads a
+    # ;-chain or stands alone -> detected as linux -> regex-split -> unknown.
+    if ($Command -match '^\s*\[([^\]]+)\]\s*::\s*([A-Za-z_]\w*)\s*\(') {
+        $staticType = $Matches[1].Trim()
+        $staticMethod = $Matches[2]
+        return New-ResolutionResult -Decision "ask" `
+            -Reason "static method not on allowlist: [$staticType]::$staticMethod (see safe_expressions.dotnet_static_method_allowlist)" `
+            -MatchedPattern $null -Risk "unknown"
+    }
     $truncatedCommand = $Command.Substring(0, [Math]::Min(80, $Command.Length))
     return New-ResolutionResult -Decision "ask" -Reason "unknown command: $truncatedCommand" -MatchedPattern $null -Risk "unknown"
 }
