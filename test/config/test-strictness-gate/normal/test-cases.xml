@@ -4140,4 +4140,204 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
 
   </category-group>
 
+  <category-group name="SafeStaticMethods">
+    <!-- Static .NET method calls ([Type]::Method(...)) in expression position: the
+         safe-expression tier (AST arbiter + zero-command certifier) certifies them via
+         the TYPE-QUALIFIED safe_expressions.dotnet_static_method_allowlist. Positive
+         cases => allow; write/process statics (File::WriteAllText, Process::Start,
+         File::Delete) must STILL ask. Covers both paths: ';'-chain with a cmdlet
+         (arbiter) and '@()' pure-expression scripts (certifier). -->
+
+    <test-case expected="allow" reason="safe static: regex::Matches in ;-chain (arbiter path, linux-detected)" category="SafeStaticMethods">
+      <description>$null = [regex]::Matches(...) ; Get-ChildItem - static call first, cmdlet last</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [regex]::Matches("abc","a"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: regex::Matches in pure-expression script (certifier path)" category="SafeStaticMethods">
+      <description>$z = @(); $null = [regex]::Matches(...) - zero cmdlets, safe-expression certifier</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null = [regex]::Matches("abc","a")]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: PSParser::Tokenize with [ref] arg (certifier path)" category="SafeStaticMethods">
+      <description>$err = @(); $null = [PSParser]::Tokenize("ls",[ref]$err) - full type name + cast arg</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$err = @(); $null = [System.Management.Automation.PSParser]::Tokenize("ls",[ref]$err)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: System.IO.Path::Combine in ;-chain (arbiter path)" category="SafeStaticMethods">
+      <description>$null = [System.IO.Path]::Combine(...) ; Get-ChildItem</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.IO.Path]::Combine("c:\temp","x.txt"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: Convert::ToBase64String with [byte[]] cast arg (arbiter path)" category="SafeStaticMethods">
+      <description>$null = [Convert]::ToBase64String([byte[]](1,2,3)) ; Get-ChildItem</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [Convert]::ToBase64String([byte[]](1,2,3)); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="control: math::Round already allowed via name-only dotnet_method_allowlist" category="SafeStaticMethods">
+      <description>$null = [math]::Round(1.5) ; Get-ChildItem - must stay allow (no regression)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [math]::Round(1.5); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: System.IO.File::WriteAllText is NOT in the static allowlist (arbiter path)" category="SafeStaticMethods">
+      <description>$null = [System.IO.File]::WriteAllText(...) ; Get-ChildItem - must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.IO.File]::WriteAllText("c:\temp\x.txt","hi"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: File::WriteAllText in pure-expression script (certifier path)" category="SafeStaticMethods">
+      <description>$z = @(); $null = [System.IO.File]::WriteAllText(...) - must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null = [System.IO.File]::WriteAllText("c:\temp\x.txt","hi")]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: System.Diagnostics.Process::Start is NOT in the static allowlist" category="SafeStaticMethods">
+      <description>$null = [Process]::Start("cmd.exe") ; Get-ChildItem - must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.Diagnostics.Process]::Start("cmd.exe"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: System.IO.File::Delete is NOT in the static allowlist" category="SafeStaticMethods">
+      <description>$null = [System.IO.File]::Delete(...) ; Get-ChildItem - must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.IO.File]::Delete("c:\temp\x.txt"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="DotNetMethodAllowlist">
+    <!-- dotnet_method_allowlist (name-only) governs INSTANCE-style calls only: a
+         name-only match cannot distinguish 'a-b'.Replace (pure) from
+         [System.IO.File]::Replace (file overwrite), so static [Type]::Method calls
+         must use the TYPE-QUALIFIED dotnet_static_method_allowlist. Positive cases
+         => allow; mutating names (Add/Reverse/Copy/AppendAllText/GetTempFileName)
+         and unqualified statics (File.Replace, Process.Start) must STILL ask. -->
+
+    <test-case expected="allow" reason="instance Replace stays allowed (name-only gate is instance-only)" category="DotNetMethodAllowlist">
+      <description>'a-b-c'.Replace('-','+') ; ToUpper - instance methods on a string literal</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$s = 'a-b-c'.Replace('-','+'); $t = $s.ToUpper()]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="real instance method: List.Find with scriptblock predicate" category="DotNetMethodAllowlist">
+      <description>List[string].Find({...}) + instance StartsWith in predicate</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$l = [System.Collections.Generic.List[string]]@('b','a','c'); $f = $l.Find({ param($x) $x.StartsWith('b') })]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="instance TryGetValue with [ref] out-arg (ConvertExpressionAst-safe)" category="DotNetMethodAllowlist">
+      <description>hashtable.TryGetValue('a', [ref]$v)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$h = @{a=1}; $v = 0; $ok = $h.TryGetValue('a', [ref]$v)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="instance AddDays + ToShortDateString (DateTime pure)" category="DotNetMethodAllowlist">
+      <description>[datetime]::Now.AddDays(3).ToShortDateString()</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$d = [datetime]::Now.AddDays(3); $s = $d.ToShortDateString()]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="instance Encoding.GetBytes via [Encoding]::UTF8 property" category="DotNetMethodAllowlist">
+      <description>[Text.Encoding]::UTF8.GetBytes('hello')</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$e = [System.Text.Encoding]::UTF8.GetBytes('hello')]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="control: static regex::Match via type-qualified static list" category="DotNetMethodAllowlist">
+      <description>[regex]::Match('abc','b') ; .Success property</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$m = [regex]::Match('abc', 'b'); $ok = $m.Success]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="NEW static: System.Linq.Enumerable::Where + ToArray (type-qualified)" category="DotNetMethodAllowlist">
+      <description>Enumerable::Where(@(1,2,3), {param($x) $x -gt 1}) then ToArray</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$q = [System.Linq.Enumerable]::Where(@(1,2,3), { param($x) $x -gt 1 }); $a = [System.Linq.Enumerable]::ToArray($q)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="control: static guid::NewGuid via type-qualified static list" category="DotNetMethodAllowlist">
+      <description>[guid]::NewGuid().ToString()</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$g = [guid]::NewGuid(); $s = $g.ToString()]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="instance XmlDocument.SelectNodes (in-memory read)" category="DotNetMethodAllowlist">
+      <description>[xml]'<r><a>1</a></r>' ; .SelectNodes('//a')</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$x = [xml]'<r><a>1</a></r>'; $n = $x.SelectNodes('//a')]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="control: static BitConverter GetBytes/ToString via static list" category="DotNetMethodAllowlist">
+      <description>[BitConverter]::GetBytes(42) then ToString</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$b = [System.BitConverter]::GetBytes(42); $h = [System.BitConverter]::ToString($b)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="arbiter path: static Directory.GetFiles in ;-chain (static list)" category="DotNetMethodAllowlist">
+      <description>[Directory]::GetFiles('c:\temp') ; Get-ChildItem</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$files = [System.IO.Directory]::GetFiles('c:\temp'); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="instance DirectoryInfo.GetFiles (name-only)" category="DotNetMethodAllowlist">
+      <description>[DirectoryInfo]'c:\temp' ; .GetFiles()</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$di = [System.IO.DirectoryInfo]'c:\temp'; $fs = $di.GetFiles()]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="intrinsic array .Where() operator (name-only)" category="DotNetMethodAllowlist">
+      <description>@(1,2,3).Where({$_ -gt 1})</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$w = @(1,2,3).Where({$_ -gt 1}); $n = @($w).Count]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: Add is a mutator name (List.Add) - excluded from name-only" category="DotNetMethodAllowlist">
+      <description>ArrayList.Add(3) - must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$l = [System.Collections.ArrayList]@(1,2); $l.Add(3)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: Reverse mutates in place (List.Reverse) - excluded" category="DotNetMethodAllowlist">
+      <description>ArrayList.Reverse() - must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$l = [System.Collections.ArrayList]@(3,1,2); $l.Reverse()]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: [System.IO.File]::Replace overwrites a file - name-only gate must NOT cover statics" category="DotNetMethodAllowlist">
+      <description>File.Replace(a,b,bak) - the name-only/static hole, must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.IO.File]::Replace('c:\temp\a.txt','c:\temp\b.txt','c:\temp\c.bak'); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: [System.IO.File]::Copy is a write - excluded" category="DotNetMethodAllowlist">
+      <description>File.Copy(a,b) - must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.IO.File]::Copy('c:\temp\a.txt','c:\temp\b.txt'); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: [System.IO.File]::AppendAllText is a write - excluded" category="DotNetMethodAllowlist">
+      <description>File.AppendAllText(a,'x') - must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.IO.File]::AppendAllText('c:\temp\a.txt','x'); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: [System.IO.Path]::GetTempFileName CREATES a file - excluded" category="DotNetMethodAllowlist">
+      <description>Path.GetTempFileName() - must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.IO.Path]::GetTempFileName(); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="negative: [System.Diagnostics.Process]::Start launches a process - excluded" category="DotNetMethodAllowlist">
+      <description>Process.Start('cmd.exe') - must stay ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.Diagnostics.Process]::Start('cmd.exe'); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
 </commands>
