@@ -1965,6 +1965,11 @@ function Test-SafeAst {
         'VariableExpressionAst' { return $true }
         'ConstantExpressionAst' { return $true }
         'TypeExpressionAst'     { return $true }
+        'ConvertExpressionAst' {
+            # A cast is side-effect-free and the type literal is inert ([ref]$x,
+            # [byte[]](1,2,3), [int]"5"); judge solely by the child expression.
+            return Test-SafeAst -Ast $Ast.Child -AllowedCommands $AllowedCommands -Config $Config
+        }
         'MemberExpressionAst' {
             return Test-SafeAst -Ast $Ast.Expression -AllowedCommands $AllowedCommands -Config $Config
         }
@@ -1974,11 +1979,43 @@ function Test-SafeAst {
                 $methodName = $Ast.Member.Value
             }
             if (-not $methodName) { return $false }
-            $allowSet = $null
-            if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetMethodAllowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
-                $allowSet = $Config._dotnetMethodAllowlist
+
+            $isStaticCall = ($Ast.Expression -is [System.Management.Automation.Language.TypeExpressionAst])
+
+            # (1) Name-only allowlist — INSTANCE-STYLE calls ONLY. A name-only match
+            # cannot distinguish $s.Replace (pure) from [System.IO.File]::Replace
+            # (file overwrite) since both share the method name; so static calls on a
+            # type literal must instead pass the type-qualified list in (2) below.
+            $ok = $false
+            if (-not $isStaticCall) {
+                $allowSet = $null
+                if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetMethodAllowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+                    $allowSet = $Config._dotnetMethodAllowlist
+                }
+                if ($allowSet -and $allowSet.Contains($methodName)) { $ok = $true }
             }
-            if (-not $allowSet -or -not $allowSet.Contains($methodName)) { return $false }
+
+            # (2) Type-qualified STATIC allowlist ([Type]::Method(...)) — checks the
+            # entry against the type AS WRITTEN (e.g. regex::Matches) and against its
+            # reflected full name (e.g. System.Text.RegularExpressions.Regex::Matches),
+            # so either spelling matches one canonical config entry.
+            if (-not $ok -and $isStaticCall) {
+                $staticSet = $null
+                if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetStaticMethodAllowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+                    $staticSet = $Config._dotnetStaticMethodAllowlist
+                }
+                if ($staticSet -and $staticSet.Count -gt 0) {
+                    $writtenKey = "$($Ast.Expression.TypeName.FullName)::$methodName"
+                    if ($staticSet.Contains($writtenKey)) { $ok = $true }
+                    if (-not $ok) {
+                        $refl = $null
+                        try { $refl = $Ast.Expression.TypeName.GetReflectionType() } catch { $refl = $null }
+                        if ($refl -and $staticSet.Contains("$($refl.FullName)::$methodName")) { $ok = $true }
+                    }
+                }
+            }
+            if (-not $ok) { return $false }
+
             if (-not (Test-SafeAst -Ast $Ast.Expression -AllowedCommands $AllowedCommands -Config $Config)) { return $false }
             foreach ($arg in $Ast.Arguments) {
                 if (-not (Test-SafeAst -Ast $arg -AllowedCommands $AllowedCommands -Config $Config)) { return $false }

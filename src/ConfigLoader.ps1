@@ -225,6 +225,24 @@ function Test-ConfigSchema {
     foreach ($m in $methodNames) { [void]$methodSet.Add($m) }
     $Config | Add-Member -MemberType NoteProperty -Name '_dotnetMethodAllowlist' -Value $methodSet -Force
 
+    # safe_expressions: type-qualified STATIC .NET method allowlist
+    # ('TypeName::Method') for [Type]::Method(...) calls in expression position.
+    # Optional; defaults to an EMPTY set (fail-closed) when absent — unlike
+    # dotnet_method_allowlist above, there is no built-in default list.
+    $staticSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $hasStaticExprs = Get-Member -InputObject $Config -Name 'safe_expressions' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasStaticExprs -and $Config.safe_expressions -and
+        (Get-Member -InputObject $Config.safe_expressions -Name 'dotnet_static_method_allowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $Config.safe_expressions.dotnet_static_method_allowlist) {
+        if ($Config.safe_expressions.dotnet_static_method_allowlist -isnot [array]) {
+            throw "Configuration validation failed: 'safe_expressions.dotnet_static_method_allowlist' must be an array"
+        }
+        foreach ($m in $Config.safe_expressions.dotnet_static_method_allowlist) {
+            [void]$staticSet.Add(("$m").ToLowerInvariant())
+        }
+    }
+    $Config | Add-Member -MemberType NoteProperty -Name '_dotnetStaticMethodAllowlist' -Value $staticSet -Force
+
     # Validate regex patterns in trusted_pattern compile successfully
     foreach ($pattern in $Config.trusted_pattern) {
         try {
