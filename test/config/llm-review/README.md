@@ -24,6 +24,26 @@ Per-case XML attributes: `level`, `min`, `enabled`, `mock`, `in-scope`,
 Fullpipe log writes go to `c:\temp\pretoolhook-llm-review-testlogs\` (set via
 `log_file_path` in the fixture config), never your real hook logs.
 
+## `http/` — the LLM-CALL suite (real HTTP path, local mock server)
+
+The main suite above injects verdicts via the mock env var, so it never
+exercises the HTTP code in `Get-LlmReviewVerdict`. `http/` closes that gap with
+a **local mock LLM server** (`Mock-LlmServer.ps1` — a real `HttpListener`
+socket on 127.0.0.1; still zero quota, nothing leaves the machine):
+
+```powershell
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1   # from repo root
+```
+
+25 checks in two files: `test-llm-call-core.xml` (5 — happy paths, garbage,
+HTTP 500, and the headline `Core-FullPipe-HookCallsLlm` case proving the
+spawned `Hook.ps1` really emits the LLM call) and `test-llm-call-matrix.xml`
+(20 — request shape: method/path/headers/body fields/payload guard; response
+parsing variants; dead-port + timeout failure paths). The key assertion is
+`expect-hit="1"`: the server **recorded** the request — proof the call
+happened. See the runner's header comment for the attribute vocabulary
+(`server`, `expect-verdict`, `expect-hit`, `check`, …).
+
 ## Manual smoke test (live LLM — costs quota, run deliberately)
 
 1. In root `config.json` set `llm_second_opinion.enabled: true` and point

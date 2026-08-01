@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LLM-CALL CORE SUITE - 5 cases proving the REAL HTTP call path of
+     Get-LlmReviewVerdict against the local mock server (no quota, no network
+     beyond 127.0.0.1). Cases 1-4 are in-process (mode=direct); case 5 spawns
+     the REAL hook process and proves the hook itself emits the LLM call
+     (the mock server records the hit).
+     Run:
+       pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1 -XmlPath test/config/llm-review/http/test-llm-call-core.xml -->
+<commands>
+  <category-group name="LlmCallCore">
+
+    <test-case name="Core-Modifying" server="true" expect-verdict="modifying" expect-hit="1" check="method-post;path-completions;cmdblock-tags;cmd-text">
+      <description>happy path: server says 'true' => modifying; the request went out as a POST to /v1/chat/completions carrying the wrapped command</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="Core-ReadOnly" server="false" expect-verdict="read-only" expect-hit="1">
+      <description>server says 'false' => read-only verdict</description>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case name="Core-Garbage-Unusable" server="garbage" expect-verdict="unusable" expect-hit="1">
+      <description>server rambles nonsense => unusable (never treated as 'modifying')</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="Core-Http500-Down" server="http500" expect-verdict="down" expect-hit="1">
+      <description>server returns HTTP 500 => down (the request DID arrive; the failure is the status code)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="Core-FullPipe-HookCallsLlm" mode="fullpipe" server="true" expect-decision="ask" reason-contains="*** LLM-VETO ***" expect-hit="1">
+      <description>THE headline proof: the spawned Hook.ps1 (enabled, level=all) really CALLS the LLM endpoint - mock server records the hit - and the veto ask comes back on stdout with exit 0</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>
