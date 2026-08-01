@@ -95,7 +95,14 @@ from the count.)
 |---|---|
 | `all` | Every full-pipeline command result. |
 | `complex_commands` | Count of real sub-results (excluding `redirection-target`) ≥ `complex_min_subcommands`. |
-| `complex_remote` | The `complex_commands` rule AND at least one sub-result's `Command` text matches a `remote_indicators` regex. |
+| `complex_remote` | The `complex_commands` rule AND at least one `remote_indicators` regex matches any sub-result's `Command` text **or the full original command text**. |
+
+Note on wrapper commands: `Invoke-Command -ComputerName … { … }`, `ssh host "…"` and
+friends are unwrapped during classification, so `SubResults` holds the *inner*
+commands and the wrapper text survives only in the result's original `Command`.
+Matching against the original text too is what makes the
+`Invoke-Command.*-ComputerName` indicator work. This is a scope *gate* (fail toward
+checking), so a rare false positive only costs one LLM call.
 
 Sub-command count uses the engine's own decomposition (`SubResults`) — no duplicated
 split logic. AST-extracted PowerShell results count extracted cmdlets (variable
