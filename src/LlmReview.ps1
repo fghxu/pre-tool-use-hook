@@ -112,6 +112,135 @@ function Test-LlmReviewScope {
     }
 }
 
+function ConvertTo-LlmVerdict {
+    <#
+    .SYNOPSIS
+        Layered verdict parser (spec section 5.3). Layer 1 bare token; layer 2
+        JSON verdict-ish key; layer 3 last-line token (Recovered); layer 4
+        unusable. Garbage NEVER maps to a verdict.
+    #>
+    param([AllowNull()][AllowEmptyString()][string]$RawContent)
+
+    if ([string]::IsNullOrWhiteSpace($RawContent)) {
+        return [PSCustomObject]@{ Verdict = 'unusable'; Recovered = $false }
+    }
+    $norm = $RawContent.Trim().ToLowerInvariant()
+
+    # Layer 1: bare token
+    if ($norm -eq 'true')  { return [PSCustomObject]@{ Verdict = 'modifying'; Recovered = $false } }
+    if ($norm -eq 'false') { return [PSCustomObject]@{ Verdict = 'read-only'; Recovered = $false } }
+
+    # Layer 2: JSON with a verdict-ish key
+    try {
+        $obj = $RawContent | ConvertFrom-Json -ErrorAction Stop
+        foreach ($key in @('verdict', 'classification', 'decision', 'answer')) {
+            if ($obj.PSObject.Properties.Name -contains $key) {
+                $v = ("$($obj.$key)").Trim().ToLowerInvariant()
+                if ($v -in @('modifying', 'true'))     { return [PSCustomObject]@{ Verdict = 'modifying'; Recovered = $false } }
+                if ($v -in @('read-only', 'false'))   { return [PSCustomObject]@{ Verdict = 'read-only'; Recovered = $false } }
+            }
+        }
+    }
+    catch { }
+
+    # Layer 3: last non-empty line is exactly true/false (rescues "ramble...\nfalse")
+    $lines = @($RawContent -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($lines.Count -gt 0) {
+        $last = $lines[-1].ToLowerInvariant()
+        if ($last -eq 'true')  { return [PSCustomObject]@{ Verdict = 'modifying'; Recovered = $true } }
+        if ($last -eq 'false') { return [PSCustomObject]@{ Verdict = 'read-only'; Recovered = $true } }
+    }
+
+    # Layer 4: unusable (distinct state - never treated as a verdict)
+    return [PSCustomObject]@{ Verdict = 'unusable'; Recovered = $false }
+}
+
+function Get-LlmReviewVerdict {
+    <#
+    .SYNOPSIS
+        Returns the LLM verdict for a command. Checks the
+        PRETOOLHOOK_LLMREVIEW_MOCK short-circuit FIRST (test-only; mirrors the
+        PRETOOLHOOK_CONFIG_PATH precedent), then makes the OpenAI-compatible
+        chat-completions call (spec section 5.1).
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][PSCustomObject]$LlmConfig
+    )
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $result = [PSCustomObject]@{ Verdict = 'down'; Raw = ''; LatencyMs = 0; Recovered = $false; Error = $null }
+
+    # Mock short-circuit (no network). The mock supplies the RAW content and the
+    # REAL parser decides the verdict, so parser layers 1 and 4 are exercised by
+    # every classify test (layer 2/3 are covered by the runner's pre-flight
+    # parser unit checks). Only 'down' bypasses the parser (a network failure
+    # has no content to parse).
+    $mock = $env:PRETOOLHOOK_LLMREVIEW_MOCK
+    if ($mock) {
+        switch ($mock) {
+            'modifying' { $result.Raw = 'true' }
+            'read-only' { $result.Raw = 'false' }
+            'garbage'   { $result.Raw = "Let me analyze this command carefully.`nIt seems to read files, but I am not entirely sure about every part." }
+            'down'      { $result.Verdict = 'down'; $result.Error = 'mock: simulated unreachable LLM' }
+            default     { throw "Get-LlmReviewVerdict: unknown PRETOOLHOOK_LLMREVIEW_MOCK value '$mock' (expected modifying|read-only|garbage|down)" }
+        }
+        if ($mock -ne 'down') {
+            $parsed = ConvertTo-LlmVerdict -RawContent $result.Raw
+            $result.Verdict   = $parsed.Verdict
+            $result.Recovered = $parsed.Recovered
+        }
+        $sw.Stop(); $result.LatencyMs = $sw.ElapsedMilliseconds
+        return $result
+    }
+
+    # Payload guard
+    $cmdText = $Command
+    if ($cmdText.Length -gt 8000) { $cmdText = $cmdText.Substring(0, 8000) }
+
+    $userPrompt = "<command_block>`n$cmdText`n</command_block>"
+    $body = [ordered]@{
+        model       = $LlmConfig.Model
+        messages    = @(
+            @{ role = 'system'; content = $script:LlmSystemPrompt },
+            @{ role = 'user';   content = $userPrompt }
+        )
+        temperature = $LlmConfig.Temperature
+        max_tokens  = $LlmConfig.MaxTokens
+        seed        = 0
+    }
+    $bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
+    $uri = "$($LlmConfig.BaseUri)/v1/chat/completions"
+    $timeoutSec = [int][math]::Ceiling($LlmConfig.TimeoutMs / 1000.0)
+
+    try {
+        $irmParams = @{
+            Uri         = $uri
+            Method      = 'Post'
+            Body        = $bodyJson
+            ContentType = 'application/json'
+            TimeoutSec  = $timeoutSec
+            ErrorAction = 'Stop'
+        }
+        if ($LlmConfig.ApiKey) { $irmParams['Headers'] = @{ Authorization = "Bearer $($LlmConfig.ApiKey)" } }
+        $response = Invoke-RestMethod @irmParams
+
+        $raw = $null
+        if ($response.choices -and $response.choices[0].message) {
+            $raw = [string]$response.choices[0].message.content
+        }
+        $result.Raw = "$raw"
+        $parsed = ConvertTo-LlmVerdict -RawContent $raw
+        $result.Verdict  = $parsed.Verdict
+        $result.Recovered = $parsed.Recovered
+    }
+    catch {
+        $result.Verdict = 'down'
+        $result.Error   = $_.Exception.Message
+    }
+    $sw.Stop(); $result.LatencyMs = $sw.ElapsedMilliseconds
+    return $result
+}
+
 function Invoke-LlmReview {
     <#
     .SYNOPSIS
@@ -149,6 +278,47 @@ function Invoke-LlmReview {
         return [PSCustomObject]@{ Result = $ClassifyResult; Log = $log }
     }
 
-    # (Task 4 adds the verdict call + merge matrix here.)
+    $verdict = Get-LlmReviewVerdict -Command $ClassifyResult.Command -LlmConfig $llm
+    $log.verdict   = $verdict.Verdict
+    $log.recovered = $verdict.Recovered
+    $log.latency_ms = $verdict.LatencyMs
+    if ($verdict.Raw) {
+        $excerpt = ($verdict.Raw -replace '\s+', ' ').Trim()
+        if ($excerpt.Length -gt 120) { $excerpt = $excerpt.Substring(0, 120) }
+        $log.raw_excerpt = $excerpt
+    }
+    elseif ($verdict.Error) {
+        $errExcerpt = ($verdict.Error -replace '\s+', ' ').Trim()
+        if ($errExcerpt.Length -gt 120) { $errExcerpt = $errExcerpt.Substring(0, 120) }
+        $log.raw_excerpt = $errExcerpt
+    }
+
+    $localDecision = $ClassifyResult.Decision
+    $localReason   = "$($ClassifyResult.Reason)"
+
+    switch ($verdict.Verdict) {
+        'modifying' {
+            if ($localDecision -eq 'allow') {
+                $ClassifyResult.Decision = 'ask'
+                $ClassifyResult.Reason = "*** LLM-VETO *** second-opinion LLM says MODIFYING but local hook classified read-only - forced to ask. Review carefully before approving. | local reason: $localReason"
+                $log.effect = 'veto'
+            }
+            else { $log.effect = 'agree' }
+        }
+        'read-only' {
+            if ($localDecision -eq 'allow') { $log.effect = 'agree' }
+            else { $log.effect = 'disagree-kept-ask' }
+        }
+        'down' {
+            $ClassifyResult.Decision = 'ask'
+            $ClassifyResult.Reason = "*** LLM-DOWN *** llm_second_opinion is ENABLED but the LLM is unreachable or timed out ($($llm.TimeoutMs)ms) - forced to ask. Set llm_second_opinion.enabled=false in config.json to disable. | local verdict: $localDecision | local reason: $localReason"
+            $log.effect = 'forced-ask'
+        }
+        'unusable' {
+            $ClassifyResult.Decision = 'ask'
+            $ClassifyResult.Reason = "*** LLM-UNUSABLE *** LLM returned an unparseable response - forced to ask. Raw: '$($log.raw_excerpt)' | local verdict: $localDecision | local reason: $localReason"
+            $log.effect = 'forced-ask'
+        }
+    }
     return [PSCustomObject]@{ Result = $ClassifyResult; Log = $log }
 }
