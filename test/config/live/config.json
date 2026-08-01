@@ -139,10 +139,10 @@
 
   "_comment_llm_second_opinion": "Second-opinion LLM cross-check. OFF by default; when enabled, in-scope commands are ALSO classified by an LLM (OpenAI-compatible endpoint) and a disagreement in the dangerous direction (local=allow, LLM=modifying) forces ask with *** LLM-VETO *** wording. LLM unreachable/timeout/unparseable also forces ask (*** LLM-DOWN *** / *** LLM-UNUSABLE ***). Levels: all | complex_commands | complex_remote (complex_commands needs >= complex_min_subcommands decomposed sub-commands; complex_remote additionally requires a remote_indicators match: aws/kubectl/helm/terraform/ssh/scp/sftp/docker/curl/wget/Invoke-RestMethod/irm/Invoke-WebRequest/iwr/Enter-PSSession/New-PSSession/Invoke-Command+ComputerName; git is LOCAL). remote_indicators omitted -> compiled defaults. When enabled, the hook hard cap becomes timeout_ms + 2000. See docs/config-json-guide.md.",
   "llm_second_opinion": {
-    "enabled": false,
+    "enabled": true,
     "level": "complex_remote",
     "base_uri": "http://127.0.0.1:3030",
-    "model": "glm-5.2",
+    "model": "deepseek-v4-flash",
     "api_key": "",
     "timeout_ms": 12000,
     "temperature": 0.0,

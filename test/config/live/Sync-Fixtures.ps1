@@ -21,6 +21,17 @@ $src       = Join-Path $repoRoot 'config.json'
 $dstNormal = Join-Path $PSScriptRoot 'config.json'
 $dstStrict = Join-Path $PSScriptRoot 'config.strict.json'
 
+# --- 0) safety guard: refuse to sync while the root config is in the phase-I ---
+# --- LLM-test state. Test fixtures must never make network calls, and the     ---
+# --- suites' baselines assume a normal-mode root config.                      ---
+$rootObj = Get-Content $src -Raw | ConvertFrom-Json
+if ($rootObj.llm_second_opinion -and $rootObj.llm_second_opinion.enabled -eq $true) {
+    throw "Sync-Fixtures: REFUSED - root config.json has llm_second_opinion.enabled=true. The test copy must stay disabled, otherwise fullpipe suites would make REAL LLM calls (quota burn + non-deterministic verdicts). Set enabled back to false before syncing. See docs/config-json-guide.md section 10.5."
+}
+if ($rootObj.global_modifying_strictness -ne 'normal') {
+    throw "Sync-Fixtures: REFUSED - root config.json has global_modifying_strictness='$($rootObj.global_modifying_strictness)' (expected 'normal'). The live suites' baselines assume a normal-mode root; syncing now would flip hundreds of expectations. If you are in the phase-I LLM-test window (strict is recommended there), revert to normal before syncing; if the change is permanent, the suites need re-baselining first."
+}
+
 # --- 1) normal test copy: copy + insert marker after the description line -----
 Copy-Item $src $dstNormal -Force
 $lines = Get-Content $dstNormal

@@ -145,7 +145,7 @@ $engine = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershel
 #   <commands> -> <category-group> (3 groups: LlmScope, LlmMerge, LlmFullPipe)
 #   -> <test-case> elements. The @(...) forces an array even for one case.
 # ---------------------------------------------------------------------------
-[xml]$xml = Get-Content (Join-Path $fixtureDir "test-cases.xml") -Encoding UTF8
+[xml]$xml = Get-Content (Join-Path $fixtureDir "test-cases.1.xml") -Encoding UTF8
 $testCases = @($xml.commands.'category-group'.'test-case')
 
 # Counters + failure list for the end-of-run summary.
