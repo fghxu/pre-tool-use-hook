@@ -236,9 +236,9 @@ Out-of-scope results: LLM not called; `Log.effect = "none"`, `verdict = "not_cal
 - Veto:
   `*** LLM-VETO *** second-opinion LLM says MODIFYING but local hook classified read-only - forced to ask. Review carefully before approving. | local reason: {original reason}`
 - Down:
-  `*** LLM-DOWN *** llm_second_opinion is ENABLED but the LLM is unreachable or timed out ({timeout_ms}ms) - forced to ask. Set llm_second_opinion.enabled=false in config.json to disable. | local verdict: {allow|ask}`
+  `*** LLM-DOWN *** llm_second_opinion is ENABLED but the LLM is unreachable or timed out ({timeout_ms}ms) - forced to ask. Set llm_second_opinion.enabled=false in config.json to disable. | local verdict: {allow|ask} | local reason: {original reason}`
 - Unusable:
-  `*** LLM-UNUSABLE *** LLM returned an unparseable response - forced to ask. Raw: '{first 120 chars, single-lined}' | local verdict: {allow|ask}`
+  `*** LLM-UNUSABLE *** LLM returned an unparseable response - forced to ask. Raw: '{first 120 chars, single-lined}' | local verdict: {allow|ask} | local reason: {original reason}`
 
 A forced `ask` keeps `ExitCode = 0` (a decision was produced — the exit-code
 contract in README.md). All other result fields pass through unchanged.
@@ -300,7 +300,7 @@ Same pattern as `test/config/trusted-programs/`: own `config.json`
 (`enabled: true`, `level`/`complex_min_subcommands` varied per case group), own
 `test-cases.xml`, own in-process runner `Run-Tests.ps1` that dot-sources `src`,
 calls `Invoke-Classify` then `Invoke-LlmReview` with the case's `mock=` attribute
-mapped to the env var, and compares final decision + reason prefix. ~14 cases:
+mapped to the env var, and compares final decision + reason prefix. 16 cases:
 
 1. Level `all`: single command checked (veto applies).
 2. Level `complex_commands`: single command **not** checked.
