@@ -3,7 +3,7 @@
   "description": "TEST FIXTURE for llm_second_opinion (second-opinion LLM cross-check). Minimal domains; LLM verdicts come from PRETOOLHOOK_LLMREVIEW_MOCK, never the network.",
   "_comment_fixture": "Isolated fixture for llm_second_opinion. Run via test/config/llm-review/Run-Tests.ps1. Scope is decided from SubResults (engine decomposition); verdicts are injected by the mock env var.",
 
-  "global_modifying_strictness": "normal",
+  "global_modifying_strictness": "strict",
 
   "_comment_log_file_path": "Fullpipe cases spawn the real Hook.ps1 which ALWAYS logs; keep test records out of the real ~/.pretoolhook logs.",
   "log_file_path": "c:\\temp\\pretoolhook-llm-review-testlogs\\",
