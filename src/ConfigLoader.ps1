@@ -73,6 +73,62 @@ function Test-ConfigSchema {
         throw "Configuration validation failed: 'trusted_programs' must be an array"
     }
 
+    # Validate optional "llm_second_opinion" block (second-opinion LLM cross-check).
+    # OPTIONAL: absent = feature off. When present it is validated even with
+    # enabled=false so bad values surface at load time, not at first use.
+    $hasLlm = Get-Member -InputObject $Config -Name 'llm_second_opinion' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasLlm) {
+        $llm = $Config.llm_second_opinion
+        if ($llm -isnot [PSCustomObject] -and $llm -isnot [hashtable]) {
+            throw "Configuration validation failed: 'llm_second_opinion' must be an object"
+        }
+        if ((Get-Member -InputObject $llm -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $llm.enabled -isnot [bool]) {
+            throw "Configuration validation failed: 'llm_second_opinion.enabled' must be a boolean"
+        }
+        if ((Get-Member -InputObject $llm -Name 'level' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $llm.level -notin @('all', 'complex_commands', 'complex_remote')) {
+            throw "Configuration validation failed: 'llm_second_opinion.level' must be 'all', 'complex_commands', or 'complex_remote', got '$($llm.level)'"
+        }
+        $intFields = @('complex_min_subcommands', 'timeout_ms', 'max_tokens')
+        foreach ($f in $intFields) {
+            if (Get-Member -InputObject $llm -Name $f -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+                $v = 0
+                if (-not [int]::TryParse("$($llm.$f)", [ref]$v) -or $v -lt 1) {
+                    throw "Configuration validation failed: 'llm_second_opinion.$f' must be an integer >= 1, got '$($llm.$f)'"
+                }
+            }
+        }
+        if (Get-Member -InputObject $llm -Name 'temperature' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $tv = 0.0
+            if (-not [double]::TryParse("$($llm.temperature)", [ref]$tv) -or $tv -lt 0.0 -or $tv -gt 2.0) {
+                throw "Configuration validation failed: 'llm_second_opinion.temperature' must be a number between 0.0 and 2.0, got '$($llm.temperature)'"
+            }
+        }
+        if ((Get-Member -InputObject $llm -Name 'api_key' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $null -ne $llm.api_key -and $llm.api_key -isnot [string]) {
+            throw "Configuration validation failed: 'llm_second_opinion.api_key' must be a string"
+        }
+        if (Get-Member -InputObject $llm -Name 'remote_indicators' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            if ($llm.remote_indicators -isnot [array]) {
+                throw "Configuration validation failed: 'llm_second_opinion.remote_indicators' must be an array of regex strings"
+            }
+            foreach ($p in $llm.remote_indicators) {
+                try { $null = [regex]::new($p.ToString()) }
+                catch { throw "Invalid regex in llm_second_opinion.remote_indicators: $p" }
+            }
+        }
+        # base_uri and model are required only when the feature is enabled
+        if ($llm.enabled -eq $true) {
+            if (-not (Get-Member -InputObject $llm -Name 'base_uri' -MemberType NoteProperty) -or [string]::IsNullOrWhiteSpace($llm.base_uri)) {
+                throw "Configuration validation failed: 'llm_second_opinion.base_uri' is required when enabled is true"
+            }
+            if (-not (Get-Member -InputObject $llm -Name 'model' -MemberType NoteProperty) -or [string]::IsNullOrWhiteSpace($llm.model)) {
+                throw "Configuration validation failed: 'llm_second_opinion.model' is required when enabled is true"
+            }
+        }
+    }
+
     # Normalize intercept_tool_name (handle typo "intecept_tool_name")
     $hasIntercept = Get-Member -InputObject $Config -Name 'intercept_tool_name' -MemberType NoteProperty
     $hasInterceptTypo = Get-Member -InputObject $Config -Name 'intecept_tool_name' -MemberType NoteProperty
@@ -438,6 +494,62 @@ function Load-Config {
         }
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'trustedPrograms' -Value $compiledTrustedPrograms -Force
+
+    # Compile llm_second_opinion (optional): normalized runtime block.
+    # $null when the block is absent (feature off; every consumer null-checks).
+    $llmCompiled = $null
+    if (Get-Member -InputObject $config -Name 'llm_second_opinion' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $llmRaw = $config.llm_second_opinion
+        $defaultIndicators = @(
+            '\baws\b', '\bkubectl\b', '\bhelm\b', '\bterraform\b',
+            '\bssh\b', '\bscp\b', '\bsftp\b',
+            '\bdocker\b', '\bcurl\b', '\bwget\b',
+            '\bInvoke-RestMethod\b', '\birm\b',
+            '\bInvoke-WebRequest\b', '\biwr\b',
+            '\bEnter-PSSession\b', '\bNew-PSSession\b',
+            'Invoke-Command.*-ComputerName'
+        )
+        $indicatorSrc = $defaultIndicators
+        if ((Get-Member -InputObject $llmRaw -Name 'remote_indicators' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and $llmRaw.remote_indicators) {
+            $indicatorSrc = @($llmRaw.remote_indicators | ForEach-Object { $_.ToString() })
+        }
+        $indicatorRegexes = @()
+        foreach ($p in $indicatorSrc) {
+            $indicatorRegexes += [regex]::new($p, [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        }
+        # Pre-compute each field (PS 5.1-safe; hashtable values cannot hold if-statements)
+        $llmEnabled = $false
+        if (Get-Member -InputObject $llmRaw -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmEnabled = [bool]$llmRaw.enabled }
+        $llmLevel = 'complex_remote'
+        if (Get-Member -InputObject $llmRaw -Name 'level' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmLevel = "$($llmRaw.level)" }
+        $llmBaseUri = ''
+        if (Get-Member -InputObject $llmRaw -Name 'base_uri' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmBaseUri = "$($llmRaw.base_uri)" }
+        $llmModel = ''
+        if (Get-Member -InputObject $llmRaw -Name 'model' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmModel = "$($llmRaw.model)" }
+        $llmApiKey = ''
+        if (Get-Member -InputObject $llmRaw -Name 'api_key' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmApiKey = "$($llmRaw.api_key)" }
+        $llmTimeoutMs = 12000
+        if (Get-Member -InputObject $llmRaw -Name 'timeout_ms' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmTimeoutMs = [int]$llmRaw.timeout_ms }
+        $llmTemperature = 0.0
+        if (Get-Member -InputObject $llmRaw -Name 'temperature' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmTemperature = [double]$llmRaw.temperature }
+        $llmMaxTokens = 16
+        if (Get-Member -InputObject $llmRaw -Name 'max_tokens' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmMaxTokens = [int]$llmRaw.max_tokens }
+        $llmMinSubs = 2
+        if (Get-Member -InputObject $llmRaw -Name 'complex_min_subcommands' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmMinSubs = [int]$llmRaw.complex_min_subcommands }
+        $llmCompiled = [PSCustomObject]@{
+            Enabled               = $llmEnabled
+            Level                 = $llmLevel
+            BaseUri               = $llmBaseUri
+            Model                 = $llmModel
+            ApiKey                = $llmApiKey
+            TimeoutMs             = $llmTimeoutMs
+            Temperature           = $llmTemperature
+            MaxTokens             = $llmMaxTokens
+            ComplexMinSubcommands = $llmMinSubs
+            RemoteIndicators      = $indicatorRegexes
+        }
+    }
+    $config._compiled | Add-Member -MemberType NoteProperty -Name 'llmSecondOpinion' -Value $llmCompiled -Force
 
     # Compile patterns for each domain's read_only and modifying entries
     $commandKeys = $config.commands.PSObject.Properties.Name
