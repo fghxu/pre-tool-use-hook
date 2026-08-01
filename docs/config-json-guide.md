@@ -196,6 +196,78 @@ All suites live in `test/config/live/` (see its README); run them with
   DOS-marker list, so they fall to the `linux` fallback domain and hit
   "unknown command" (ask) regardless of the DOS_CMD gated entries. Pre-existing.
 
+## 10.5 `llm_second_opinion` — second-opinion LLM cross-check
+
+Optional block. **Absent or `enabled: false` = the feature is a complete no-op**
+(the hook performs one null check per invocation). When enabled, in-scope
+commands are *also* classified by an LLM (OpenAI-compatible endpoint) and the
+two verdicts are compared. The LLM can only ever **escalate** an `allow` to
+`ask` — it never downgrades a local `ask`.
+
+```jsonc
+"llm_second_opinion": {
+  "enabled": false,
+  "level": "complex_remote",
+  "base_uri": "http://127.0.0.1:3030",
+  "model": "glm-5.2",
+  "api_key": "",
+  "timeout_ms": 12000,
+  "temperature": 0.0,
+  "max_tokens": 16,
+  "complex_min_subcommands": 2
+  // "remote_indicators": [ ... ]  // optional; compiled defaults used when omitted
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `enabled` | Master switch (bool). When true, `base_uri` and `model` are required (loader throws otherwise). |
+| `level` | `all` = check every command · `complex_commands` = check only blocks with ≥ `complex_min_subcommands` decomposed sub-commands (a pipe implies 2+) · `complex_remote` = the `complex_commands` rule AND a `remote_indicators` match. Unknown value → loader throws (fail-closed). |
+| `base_uri` / `model` | OpenAI-compatible gateway; the hook POSTs to `{base_uri}/v1/chat/completions`. |
+| `api_key` | Optional; sent as `Authorization: Bearer …` only when non-empty. Empty for a local gateway. |
+| `timeout_ms` | LLM wait budget (default 12000). When the feature is enabled, the hook's hard cap becomes `timeout_ms + 2000` (3000 ms otherwise). |
+| `temperature` / `max_tokens` | Sampling parameters (defaults 0.0 / 16 — the expected answer is one token). |
+| `complex_min_subcommands` | Integer ≥ 1 (default 2). What "complex" means for the two complex levels. |
+| `remote_indicators` | Optional array of regex (case-insensitive), matched against every sub-command AND the full original command text. Defaults: `\baws\b`, `\bkubectl\b`, `\bhelm\b`, `\bterraform\b`, `\bssh\b`, `\bscp\b`, `\bsftp\b`, `\bdocker\b`, `\bcurl\b`, `\bwget\b`, `\bInvoke-RestMethod\b`, `\birm\b`, `\bInvoke-WebRequest\b`, `\biwr\b`, `\bEnter-PSSession\b`, `\bNew-PSSession\b`, `Invoke-Command.*-ComputerName`. **git is deliberately absent (local).** |
+
+**Outcome matrix** (in-scope results only; all forced asks keep exit code 0):
+
+| Local | LLM | Final | Reason prefix |
+|-------|-----|-------|---------------|
+| allow | modifying | **ask** | `*** LLM-VETO ***` |
+| allow | read-only | allow | (unchanged) |
+| ask | modifying | ask | (unchanged — agree) |
+| ask | read-only | ask | (unchanged — the LLM never downgrades) |
+| any | unreachable / timeout / HTTP error | **ask** | `*** LLM-DOWN ***` (tells you the feature is on but the LLM is down, and how to disable it) |
+| any | unparseable response | **ask** | `*** LLM-UNUSABLE ***` |
+
+**Never checked** (even at level `all`… `all` means "all full-pipeline command
+results"): ignore-listed tools, unknown tools, `trusted_pattern` /
+`untrusted_pattern` gate hits, file-tool path decisions (Write/Edit — paths, not
+commands), unextractable commands.
+
+Every check is recorded in the JSONL record's `llm` object (`in_scope`,
+`verdict`, `effect`, `latency_ms`, `model`, `raw_excerpt`, …) — use it for
+disagreement statistics before trusting the feature.
+
+**Testing the feature (phase-I guidance):** the live config is deliberately
+loose — the `strictness_gated` tier auto-allows risk:low commands in normal
+mode, which the LLM will correctly call *modifying*, producing many vetoes on
+low-risk commands. While testing against the live config, temporarily set
+`global_modifying_strictness: "strict"` so the gated tier asks locally and the
+two classifiers mostly agree; revert after testing. (Phase II will teach the
+LLM layer about the gated tier itself.)
+
+**Automated tests never call the LLM.** The `PRETOOLHOOK_LLMREVIEW_MOCK` env var
+(`modifying` | `read-only` | `garbage` | `down`) short-circuits before any HTTP
+(mirrors `PRETOOLHOOK_CONFIG_PATH`). See `test/config/llm-review/` for the
+isolated 25-check fixture — run it with
+`pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1`, not the main suites.
+
+**Recipe — enable it:** set `enabled: true`, point `base_uri`/`model` at your
+gateway, run one in-scope command (e.g. `aws s3 ls && aws s3 cp a b`), then
+check the newest `*.records.jsonl` in your log directory for the `llm` object.
+
 ## 11. Editing checklist (any config change)
 
 1. Valid JSON (no trailing commas) and valid regex in every pattern.

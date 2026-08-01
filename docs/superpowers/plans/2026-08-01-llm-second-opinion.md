@@ -364,8 +364,8 @@ $parserCases = @(
     @{ Name = 'LlmParser-Empty';         Raw = '';                                    WantVerdict = 'unusable'; WantRecovered = $false }
 )
 foreach ($pc in $parserCases) {
-    if (-not $LlmReviewLoaded) {
-        Record-Result -Ok $false -Name $pc.Name -Detail "LlmReview.ps1 not loaded (TDD red phase)"
+    if (-not (Get-Command ConvertTo-LlmVerdict -ErrorAction SilentlyContinue)) {
+        Record-Result -Ok $false -Name $pc.Name -Detail "ConvertTo-LlmVerdict not defined (TDD red phase)"
         continue
     }
     $got = ConvertTo-LlmVerdict -RawContent $pc.Raw

@@ -376,3 +376,11 @@ automated suite.
 - Parallel LLM launch (rejected — see D6).
 - LLM checks for file-tool path decisions (paths are policy, not command semantics).
 - Codex-specific work (D7).
+- **LLM awareness of the `strictness_gated` tier (phase II, user-flagged
+  2026-08-01).** The live config is deliberately loose: the gated tier
+  auto-allows risk:low commands in normal mode, which the LLM will correctly
+  call *modifying* → systematic vetoes on low-risk commands. Phase-I workaround:
+  test with `global_modifying_strictness: "strict"` (see the fixture README
+  smoke-test steps). Phase II will teach the LLM layer the gated-tier semantics
+  (e.g. a "low-risk, user-pre-approved" class in the prompt, or veto suppression
+  for gated matches) — to be designed with the user.

@@ -44,6 +44,17 @@ triggered the block. In between sits the `strictness_gated` tier: low-risk comma
 `git commit`, `mkdir`, `Set-Content`, `terraform init`, …) auto-allow in `normal`/`loose` mode and
 prompt only when strictness is `strict`.
 
+Optionally, `llm_second_opinion` adds a second pair of eyes: in-scope commands
+(off by default; levels `all` / `complex_commands` / `complex_remote`) are also
+classified by an LLM via an OpenAI-compatible endpoint. If the LLM disagrees in
+the dangerous direction (local allow, LLM modifying) the decision is forced to a
+prompt with a `*** LLM-VETO ***` reason; an unreachable or incoherent LLM also
+forces a prompt (`*** LLM-DOWN ***` / `*** LLM-UNUSABLE ***`) so the feature
+fails closed and you notice. The LLM never downgrades a local prompt to an
+auto-allow. Every check is recorded in the log's `llm` field for disagreement
+statistics, and the automated tests inject verdicts via a mock env var — no
+suite ever calls the LLM. See `docs/config-json-guide.md` §10.5.
+
 **Exit-code contract**: the hook exits `0` whenever it produced a decision — the JSON on stdout is
 the verdict (`allow` / `ask`; `deny` for Codex). Exit `2` is reserved for fatal failures (empty
 stdin, unparseable JSON, config load error) where no decision exists; an IDE treats exit `2` as a
@@ -87,6 +98,7 @@ pretoolhook/
 │   ├── Parser.ps1            # Domain detection, command splitting, AST + redirect analysis
 │   ├── Resolver.ps1          # Pattern matching + parameter-rule engine against config
 │   ├── ConfigLoader.ps1      # JSON config loading, validation, regex compilation
+│   ├── LlmReview.ps1         # Second-opinion LLM: scope engine, verdict client, merge
 │   ├── Logger.ps1            # Daily JSONL record files + human-readable text logs
 │   ├── TestRunner.ps1        # Single-suite test runner (-ConfigPath/-Strictness/-Cwd)
 │   └── Run-AllTests.ps1      # One-shot runner for every suite (verdicts + baselines)
@@ -103,6 +115,7 @@ pretoolhook/
 │   │   ├── test-fullpipe.xml + FullPipeTestRunner.ps1  # Per-IDE full-pipe integration tests
 │   │   └── test-cases.codex.ps1       # Codex IDE detection + output mapping unit tests
 │   └── test-strictness-gate/      # Isolated normal/strict fixture sandbox (+ own Run-Tests.ps1)
+├── test/config/llm-review/     # Isolated llm_second_opinion fixture (mocked verdicts, no network)
 ├── debug/                    # Debug and verification scripts
 ├── README.md                 # This file
 ├── INSTALL.md                # Installation guide
