@@ -44,6 +44,37 @@ parsing variants; dead-port + timeout failure paths). The key assertion is
 happened. See the runner's header comment for the attribute vocabulary
 (`server`, `expect-verdict`, `expect-hit`, `check`, …).
 
+## `http/Run-LlmLiveTests.ps1` — LIVE end-to-end test (real gateway, small quota)
+
+The true end-to-end proof: calls the **real** gateway (default `glm-5.2` @
+`http://127.0.0.1:3030`) through the production verdict client, plus one case
+through the real spawned `Hook.ps1`. **OPT-IN — costs ~1.5k tokens per run**
+(5 calls × ~300 tokens, `max_tokens=16`); commands are only classified as text,
+never executed.
+
+```powershell
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1   # offline, mock server (default for code changes)
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1   # LIVE, real gateway - run deliberately
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1 -BaseUri http://host:port -Model some-model
+```
+
+What it does:
+
+1. Probes `GET {BaseUri}/v1/models` first — gateway down = loud failure, no
+   quota spent, exit 1 (a live test that can't run is a failure, not a skip).
+2. Runs 5 cases (`test-llm-live.xml`): 4 direct verdict assertions
+   (local/remote × read-only/modifying) + 1 fullpipe `Get-Date` through the
+   real hook expecting `allow`.
+3. Prints **every** verdict as it arrives (`LIVE [name] verdict=... latency=...
+   raw='...'`) so you can watch what the model actually answered.
+4. Retry policy: retries once **only** on transient outcomes (`down` /
+   `unusable`). A wrong verdict is never retried — that's the model-quality
+   signal you're looking for. The offline suites pin the code; this suite
+   samples the model.
+
+Last verified 2026-08-01 against glm-5.2: **5/5**, clean bare-token answers on
+all direct calls (latencies ~5–12 s each).
+
 ## Manual smoke test (live LLM — costs quota, run deliberately)
 
 1. In root `config.json` set `llm_second_opinion.enabled: true` and point

@@ -455,6 +455,20 @@ runner, for experimenting with config changes without touching the live suites:
 powershell.exe -ExecutionPolicy Bypass -File test/config/test-strictness-gate/Run-Tests.ps1
 ```
 
+### Optional: the llm_second_opinion suites
+
+The LLM feature has its own isolated suites under `test/config/llm-review/`
+(details in its README): the scope/merge suite (mocked verdicts, no network),
+the `http/` LLM-call suite (real HTTP against a local mock server), and a small
+**opt-in live end-to-end test** against a real gateway (`http/Run-LlmLiveTests.ps1`
+— costs ~1.5k tokens, run deliberately):
+
+```powershell
+pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1   # live, costs quota
+```
+
 ## How Classification Works in Detail
 
 ### PowerShell
