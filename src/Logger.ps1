@@ -57,7 +57,8 @@ function Write-RecordEntry {
         [PSCustomObject]$RawInput,
         [PSCustomObject]$ClassifyResult,
         [string]$LogDir,
-        [string]$IDE
+        [string]$IDE,
+        [PSCustomObject]$LlmLog = $null
     )
 
     $utcNow = (Get-Date).ToUniversalTime()
@@ -88,6 +89,11 @@ function Write-RecordEntry {
             received_at = $receivedAt
             raw         = $deepCopy
         }
+    }
+
+    # Optional second-opinion LLM record (spec section 8)
+    if ($LlmLog) {
+        $record | Add-Member -MemberType NoteProperty -Name 'llm' -Value $LlmLog -Force
     }
 
     $jsonLine = $record | ConvertTo-Json -Compress -Depth 10
@@ -144,7 +150,8 @@ function Write-LogEntry {
         [PSCustomObject]$ClassifyResult,
         [TimeSpan]$Elapsed,
         [string]$LogDir,
-        [string]$IDE
+        [string]$IDE,
+        [PSCustomObject]$LlmLog = $null
     )
 
     # Defensive: ensure log directory exists before writing
@@ -244,6 +251,11 @@ function Write-LogEntry {
             $commandText = $commandText.Substring(0, 10240) + "..."
         }
         $body = "${reasonLine}  Command: ___ [${commandText}] ___`n"
+    }
+
+    # Optional second-opinion LLM summary line
+    if ($LlmLog) {
+        $body += "  LLM: in_scope=$($LlmLog.in_scope) verdict=$($LlmLog.verdict) effect=$($LlmLog.effect) latency_ms=$($LlmLog.latency_ms)`n"
     }
 
     $logEntry = $header + $body + "`n"
