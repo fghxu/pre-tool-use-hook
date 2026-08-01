@@ -57,7 +57,7 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 - Fixtures: test/config/config.git-strict.json (Git=strict) + config.strict.json. New suites: test-cases.strictness-gated.{normal,strict,git-strict}.xml.
 
 ## Current Step
-llm_second_opinion FULLY IMPLEMENTED on strictness-gated (commits through 5be292e + this docs commit). All suites green: llm-review fixture 25/25 (mocked, zero quota), Run-AllTests 962/962, sandbox 938/938, codex 17/17. Feature is live-inert: root config.json has the block with enabled:false. AWAITING user acceptance: manual smoke test against the real gateway (VS Code Copilot first; set enabled:true + global_modifying_strictness=strict per the fixture README steps, your quota, your call).
+llm_second_opinion FULLY IMPLEMENTED — work MOVED to branch llm-second-opinion (2026-08-01, branched from strictness-gated @ b3d12e2; strictness-gated untouched, still holds the strictness_gated line). All suites green: llm-review fixture 25/25 (mocked, zero quota), Run-AllTests 962/962, sandbox 938/938, codex 17/17. Feature is live-inert: root config.json has the block with enabled:false. AWAITING user acceptance: manual smoke test against the real gateway (VS Code Copilot first; set enabled:true + global_modifying_strictness=strict per the fixture README steps, your quota, your call).
 
 ## Next Steps
 - Manual smoke test (user-run): enable llm_second_opinion + strict mode, exercise an in-scope command in VS Code Copilot, check the records.jsonl llm object; then review disagreement stats over some days of use.
