@@ -12,6 +12,20 @@
 
   "global_modifying_strictness": "normal",
   "_comment_global_modifying_strictness": "strict: more prompts (strictness_gated entries ask; AWS flag-stripping disabled). loose: fewer prompts (unrecognized parameter_commands values auto-allow). normal: default; also the only global value that lets per-domain modifying_strictness take effect (see _readme_strictness_guard).",
+  
+  "_comment_llm_second_opinion": "Second-opinion LLM cross-check. OFF by default; when enabled, in-scope commands are ALSO classified by an LLM (OpenAI-compatible endpoint) and a disagreement in the dangerous direction (local=allow, LLM=modifying) forces ask with *** LLM-VETO *** wording. LLM unreachable/timeout/unparseable also forces ask (*** LLM-DOWN *** / *** LLM-UNUSABLE ***). attributed_verdicts (phase II, default true): the LLM also receives the numbered sub-command list and answers a JSON modifying-index list; flags on strictness_gated sub-commands are then SUPPRESSED as policy (effect=veto-suppressed-policy) instead of vetoing, while flags on read_only/unknown sub-commands or index 0 still veto; bare true/false answers keep the phase-I full-veto behavior. Levels: all | complex_commands | complex_remote (complex_commands needs >= complex_min_subcommands decomposed sub-commands; complex_remote additionally requires a remote_indicators match: aws/kubectl/helm/terraform/ssh/scp/sftp/docker/curl/wget/Invoke-RestMethod/irm/Invoke-WebRequest/iwr/Enter-PSSession/New-PSSession/Invoke-Command+ComputerName; git is LOCAL). remote_indicators omitted -> compiled defaults. When enabled, the hook hard cap becomes timeout_ms + 2000. See docs/config-json-guide.md.",
+  "llm_second_opinion": {
+    "enabled": false,
+    "level": "complex_remote",
+    "base_uri": "http://127.0.0.1:3030",
+    "model": "deepseek-v4-flash",
+    "api_key": "",
+    "timeout_ms": 30000,
+    "temperature": 0.0,
+    "max_tokens": 16,
+    "complex_min_subcommands": 2,
+    "attributed_verdicts": true
+  },
 
   "editable_paths": {
     "description": "Parent directories where file writes (shell redirects > / >> and file tools like Write/Edit/create_file) are auto-approved when modifying_strictness is normal or loose. The current working directory and its subdirectories are always editable, in every mode.",
@@ -76,7 +90,7 @@
     "_comment_dotnet_static_method_allowlist": "Type-qualified allowlist for STATIC .NET method calls ([Type]::Method(...)) in expression position, used by the safe-expression certifier + AST arbiter (Test-SafeAst InvokeMemberExpressionAst). Entry form 'TypeName::Method' matched case-insensitively against the type AS WRITTEN (e.g. regex::Matches) AND its reflected full name (e.g. System.Text.RegularExpressions.Regex::Matches). 183 entries, ALL verified via .NET reflection (public static, 2026-07-31, temp/verify-static-list.ps1). Only provably read-only statics: pure computations, conversions, parses, searches, and filesystem READS. Deliberately EXCLUDED (still ask): writers/mutators (File::Write*/Append*/Delete/Copy/Move/Create/SetAttributes, Directory::Create/Delete/Move, Array::Sort/Reverse/Clear/Copy, Environment::SetEnvironmentVariable, Path::GetTempFileName [creates a file], String::Intern, Process::Start). Distinct from dotnet_method_allowlist above (name-only, covers instance-style calls).",
     "dotnet_static_method_allowlist": [
       "regex::Matches", "regex::Match", "regex::IsMatch", "regex::Replace", "regex::Split", "regex::Escape", "regex::Unescape",
-      "System.Management.Automation.PSParser::Tokenize", "System.Management.Automation.Language.Parser::ParseInput",
+      "System.Management.Automation.PSParser::Tokenize", "System.Management.Automation.Language.Parser::ParseInput","System.Management.Automation.Language.Parser::ParseFile",
       "System.IO.Path::Combine", "System.IO.Path::Join", "System.IO.Path::GetFileName", "System.IO.Path::GetFileNameWithoutExtension", "System.IO.Path::GetExtension", "System.IO.Path::GetDirectoryName", "System.IO.Path::GetFullPath", "System.IO.Path::ChangeExtension", "System.IO.Path::HasExtension", "System.IO.Path::IsPathRooted", "System.IO.Path::GetPathRoot", "System.IO.Path::GetRandomFileName", "System.IO.Path::GetRelativePath", "System.IO.Path::TrimEndingDirectorySeparator", "System.IO.Path::GetInvalidPathChars", "System.IO.Path::GetInvalidFileNameChars", "System.IO.Path::GetTempPath",
       "System.IO.File::ReadAllText", "System.IO.File::ReadAllBytes", "System.IO.File::ReadAllLines", "System.IO.File::ReadLines", "System.IO.File::OpenRead", "System.IO.File::Exists", "System.IO.File::GetAttributes", "System.IO.File::GetCreationTime", "System.IO.File::GetCreationTimeUtc", "System.IO.File::GetLastAccessTime", "System.IO.File::GetLastAccessTimeUtc", "System.IO.File::GetLastWriteTime", "System.IO.File::GetLastWriteTimeUtc",
       "System.IO.Directory::Exists", "System.IO.Directory::GetFiles", "System.IO.Directory::GetDirectories", "System.IO.Directory::GetFileSystemEntries", "System.IO.Directory::EnumerateFiles", "System.IO.Directory::EnumerateDirectories", "System.IO.Directory::EnumerateFileSystemEntries", "System.IO.Directory::GetCurrentDirectory", "System.IO.Directory::GetDirectoryRoot", "System.IO.Directory::GetLogicalDrives", "System.IO.Directory::GetParent", "System.IO.Directory::GetCreationTime", "System.IO.Directory::GetLastWriteTime", "System.IO.Directory::GetLastAccessTime",
@@ -122,7 +136,7 @@
   ],
   "_comment_trusted_pattern": "Regexes matched against the WHOLE command string, checked after untrusted_pattern and before all per-command tiers. Any match => allow immediately, bypassing every command rule below. Keep entries tight: anything matching is never prompted.",
   "trusted_pattern": [
-	"Co-Authored-By: Kimi K3",
+	
 	  "^trusted_stuff\\s+$"
   ],
 
@@ -136,19 +150,7 @@
 	  "src\\ConfigLoader.ps1"
   ],
 
-  "_comment_llm_second_opinion": "Second-opinion LLM cross-check. OFF by default; when enabled, in-scope commands are ALSO classified by an LLM (OpenAI-compatible endpoint) and a disagreement in the dangerous direction (local=allow, LLM=modifying) forces ask with *** LLM-VETO *** wording. LLM unreachable/timeout/unparseable also forces ask (*** LLM-DOWN *** / *** LLM-UNUSABLE ***). attributed_verdicts (phase II, default true): the LLM also receives the numbered sub-command list and answers a JSON modifying-index list; flags on strictness_gated sub-commands are then SUPPRESSED as policy (effect=veto-suppressed-policy) instead of vetoing, while flags on read_only/unknown sub-commands or index 0 still veto; bare true/false answers keep the phase-I full-veto behavior. Levels: all | complex_commands | complex_remote (complex_commands needs >= complex_min_subcommands decomposed sub-commands; complex_remote additionally requires a remote_indicators match: aws/kubectl/helm/terraform/ssh/scp/sftp/docker/curl/wget/Invoke-RestMethod/irm/Invoke-WebRequest/iwr/Enter-PSSession/New-PSSession/Invoke-Command+ComputerName; git is LOCAL). remote_indicators omitted -> compiled defaults. When enabled, the hook hard cap becomes timeout_ms + 2000. See docs/config-json-guide.md.",
-  "llm_second_opinion": {
-    "enabled": false,
-    "level": "complex_remote",
-    "base_uri": "http://127.0.0.1:3030",
-    "model": "deepseek-v4-flash",
-    "api_key": "",
-    "timeout_ms": 30000,
-    "temperature": 0.0,
-    "max_tokens": 16,
-    "complex_min_subcommands": 2,
-    "attributed_verdicts": true
-  },
+  
 
   "_comment_intercept_tool_name": "Tool names the hook inspects. Each intercepted tool is classified via tool_name_mapping (command tools) or path_tool_mapping (file tools) below; an intercepted tool with no mapping asks by default. Tools in neither list also ask by default.",
   "intercept_tool_name": [
@@ -650,6 +652,7 @@
         { "name": "git tag",       "patterns": ["^git tag$", "git tag -l*", "git tag --list*", "git tag --sort*", "git tag -n*"],  "description": "List tags (no write)" },
         { "name": "git remote",    "patterns": ["^git remote$", "git remote -v*", "git remote --verbose*"], "description": "List remotes (no write)" },
         { "name": "git fetch",     "patterns": ["git fetch*", "git fetch *"],                    "description": "Download objects and refs" },
+        { "name": "git rev-parse",   "patterns": ["git rev-parse*", "git rev-parse *"],                "risk": "medium", "description": "rev-parse working tree files" },
         { "name": "git worktree list", "patterns": ["git worktree list*", "git worktree list *"], "description": "List worktrees (no write)" }
       ],
       "strictness_gated": [
@@ -661,7 +664,6 @@
         { "name": "git add",       "patterns": ["git add*", "git add *"],                        "risk": "low",    "description": "Stage file changes" },
         { "name": "git worktree add", "patterns": ["git worktree add*", "git worktree add *"], "risk": "low",    "description": "Add a linked worktree" },
         { "name": "git commit",    "patterns": ["git commit*", "git commit *"],                  "risk": "low",    "description": "Record changes to repository" },
-        { "name": "git rev-parse",   "patterns": ["git rev-parse*", "git rev-parse *"],                "risk": "medium", "description": "rev-parse working tree files" },
         { "name": "git stash",     "patterns": ["git stash*", "git stash *"],                    "risk": "low",    "description": "Stash changes" },
         { "name": "git tag create",      "patterns": ["git tag -a*", "git tag -s *", "git tag -m *"], "risk": "low", "description": "Create annotated/signed tag" },
         { "name": "git remote modify", "patterns": ["git remote add*", "git remote remove*", "git remote set-url*", "git remote rename*"], "risk": "low", "description": "Modify remote configuration" },
