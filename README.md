@@ -51,9 +51,14 @@ the dangerous direction (local allow, LLM modifying) the decision is forced to a
 prompt with a `*** LLM-VETO ***` reason; an unreachable or incoherent LLM also
 forces a prompt (`*** LLM-DOWN ***` / `*** LLM-UNUSABLE ***`) so the feature
 fails closed and you notice. The LLM never downgrades a local prompt to an
-auto-allow. Every check is recorded in the log's `llm` field for disagreement
-statistics, and the automated tests inject verdicts via a mock env var — no
-suite ever calls the LLM. See `docs/config-json-guide.md` §10.5.
+auto-allow. With `attributed_verdicts` (phase II, default on) the LLM answers
+*which* numbered sub-commands are modifying, and flags on `strictness_gated`
+sub-commands are suppressed as policy instead of vetoing — so normal mode
+stays usable; every in-scope check leaves a four-line reconciliation block
+(`LLM-SENT` / `LLM-RECV` / `LLM-LOCAL` / `LLM-RECONCILE`) in the `.log`. Every
+check is recorded in the log's `llm` field for disagreement statistics, and
+the automated tests inject verdicts via a mock env var — no suite ever calls
+the LLM. See `docs/config-json-guide.md` §10.5.
 
 **Exit-code contract**: the hook exits `0` whenever it produced a decision — the JSON on stdout is
 the verdict (`allow` / `ask`; `deny` for Codex). Exit `2` is reserved for fatal failures (empty
@@ -458,13 +463,16 @@ powershell.exe -ExecutionPolicy Bypass -File test/config/test-strictness-gate/Ru
 ### Optional: the llm_second_opinion suites
 
 The LLM feature has its own isolated suites under `test/config/llm-review/`
-(details in its README): the scope/merge suite (mocked verdicts, no network),
+(details in its README): the scope/merge suite (mocked verdicts, no network —
+a 10-case default file plus a 50-case opt-in matrix via `-XmlPath`),
 the `http/` LLM-call suite (real HTTP against a local mock server), and a small
 **opt-in live end-to-end test** against a real gateway (`http/Run-LlmLiveTests.ps1`
-— costs ~1.5k tokens, run deliberately):
+— costs ~2k tokens, run deliberately; its `Live-Attr-*` cases probe attributed
+verdicts):
 
 ```powershell
 pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1
+pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.p2.large.xml
 pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1
 pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1   # live, costs quota
 ```

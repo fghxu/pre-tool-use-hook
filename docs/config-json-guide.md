@@ -214,7 +214,8 @@ two verdicts are compared. The LLM can only ever **escalate** an `allow` to
   "timeout_ms": 12000,
   "temperature": 0.0,
   "max_tokens": 16,
-  "complex_min_subcommands": 2
+  "complex_min_subcommands": 2,
+  "attributed_verdicts": true
   // "remote_indicators": [ ... ]  // optional; compiled defaults used when omitted
 }
 ```
@@ -228,6 +229,7 @@ two verdicts are compared. The LLM can only ever **escalate** an `allow` to
 | `timeout_ms` | LLM wait budget (default 12000). When the feature is enabled, the hook's hard cap becomes `timeout_ms + 2000` (3000 ms otherwise). |
 | `temperature` / `max_tokens` | Sampling parameters (defaults 0.0 / 16 — the expected answer is one token). |
 | `complex_min_subcommands` | Integer ≥ 1 (default 2). What "complex" means for the two complex levels. |
+| `attributed_verdicts` | Bool (default true; non-bool → loader throws). Phase II: the LLM also receives the numbered sub-command list and answers `{"modifying":[indices]}`; see the suppression table below. `false` restores the phase-I binary prompt/veto. |
 | `remote_indicators` | Optional array of regex (case-insensitive), matched against every sub-command AND the full original command text. Defaults: `\baws\b`, `\bkubectl\b`, `\bhelm\b`, `\bterraform\b`, `\bssh\b`, `\bscp\b`, `\bsftp\b`, `\bdocker\b`, `\bcurl\b`, `\bwget\b`, `\bInvoke-RestMethod\b`, `\birm\b`, `\bInvoke-WebRequest\b`, `\biwr\b`, `\bEnter-PSSession\b`, `\bNew-PSSession\b`, `Invoke-Command.*-ComputerName`. **git is deliberately absent (local).** |
 
 **Outcome matrix** (in-scope results only; all forced asks keep exit code 0):
@@ -241,6 +243,28 @@ two verdicts are compared. The LLM can only ever **escalate** an `allow` to
 | any | unreachable / timeout / HTTP error | **ask** | `*** LLM-DOWN ***` (tells you the feature is on but the LLM is down, and how to disable it) |
 | any | unparseable response | **ask** | `*** LLM-UNUSABLE ***` |
 
+**Attributed verdicts (phase II, `attributed_verdicts: true`).** The LLM
+receives the raw block *plus* the engine's own numbered sub-command list and
+answers `{"modifying":[indices]}`. Each flagged index is then reconciled
+against the tier the local engine recorded for that sub-command:
+
+| Flagged sub-command's local tier | Result |
+|----------------------------------|--------|
+| `strictness_gated` (risk:low, allows in normal mode) | **suppressed as policy** — no veto; if every flag suppresses, the final decision stays the local one (`effect=veto-suppressed-policy`) |
+| `read_only` | **veto** → ask, reason names the offender with its index |
+| unknown / untiered | **veto** (never suppressible) |
+| index `0` ("something modifying not in the list") | **veto** (never suppressible) |
+
+A bare `true`/`false` answer is the *unattributed fallback* (P5): it vetoes
+exactly like phase I, even on a gated block. Out-of-range, non-integer, or
+negative indices make the response **unusable** (fail-closed ask). Veto
+reasons list both the offenders and the suppressed
+(`*** LLM-VETO *** ... [sub-command N] ... | suppressed as policy: ...`).
+Every in-scope check writes a four-line reconciliation block to the `.log`
+(`LLM-SENT` numbered list → `LLM-RECV` raw response → `LLM-LOCAL` decision +
+tiers → `LLM-RECONCILE` flagged/suppressed/veto → FINAL), and the JSONL `llm`
+object gains `indices`, `flagged`, `suppressed`, `tiers`, `local_decision`.
+
 **Never checked** (even at level `all`… `all` means "all full-pipeline command
 results"): ignore-listed tools, unknown tools, `trusted_pattern` /
 `untrusted_pattern` gate hits, file-tool path decisions (Write/Edit — paths, not
@@ -250,19 +274,25 @@ Every check is recorded in the JSONL record's `llm` object (`in_scope`,
 `verdict`, `effect`, `latency_ms`, `model`, `raw_excerpt`, …) — use it for
 disagreement statistics before trusting the feature.
 
-**Testing the feature (phase-I guidance):** the live config is deliberately
-loose — the `strictness_gated` tier auto-allows risk:low commands in normal
-mode, which the LLM will correctly call *modifying*, producing many vetoes on
-low-risk commands. While testing against the live config, temporarily set
+**Testing the feature:** with `attributed_verdicts: true` (the default),
+`normal` strictness is fully usable — gated-tier flags are suppressed as
+policy instead of vetoing, so the two classifiers no longer fight over
+risk:low commands. If you set `attributed_verdicts: false` (phase-I binary
+mode), expect many vetoes on gated commands in normal mode; temporarily set
 `global_modifying_strictness: "strict"` so the gated tier asks locally and the
-two classifiers mostly agree; revert after testing. (Phase II will teach the
-LLM layer about the gated tier itself.)
+classifiers mostly agree.
 
 **Automated tests never call the LLM.** The `PRETOOLHOOK_LLMREVIEW_MOCK` env var
-(`modifying` | `read-only` | `garbage` | `down`) short-circuits before any HTTP
-(mirrors `PRETOOLHOOK_CONFIG_PATH`). See `test/config/llm-review/` for the
-isolated 25-check fixture — run it with
-`pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1`, not the main suites.
+(`modifying` | `read-only` | `garbage` | `down` | `idx:2` | `idx:1,2` | `idx:0`
+| `idx:`) short-circuits before any HTTP — the `idx:` forms inject attributed
+JSON through the REAL parser (mirrors `PRETOOLHOOK_CONFIG_PATH`). See
+`test/config/llm-review/` for the isolated fixture — a 10-case default suite
+(`Run-Tests.ps1`, 24 checks incl. pre-flights) and a 50-case opt-in matrix
+(`-XmlPath test/config/llm-review/test-cases.p2.large.xml`, 64 checks), plus
+the mock-HTTP suite (`http/Run-LlmCallTests.ps1`) and the opt-in LIVE suite
+(`http/Run-LlmLiveTests.ps1`, real gateway, costs ~2k tokens — user-run only;
+its two `Live-Attr-*` cases decide whether a model complies with the
+attributed JSON contract). Never run these against the ~1000-case main suites.
 
 **Recipe — enable it:** set `enabled: true`, point `base_uri`/`model` at your
 gateway, run one in-scope command (e.g. `aws s3 ls && aws s3 cp a b`), then

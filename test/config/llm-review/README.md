@@ -1,28 +1,46 @@
 # llm_second_opinion test fixture
 
-Isolated fixture for the second-opinion LLM feature (spec:
-`docs/superpowers/specs/2026-08-01-llm-second-opinion-design.md`).
+Isolated fixture for the second-opinion LLM feature (phase-I spec:
+`docs/superpowers/specs/2026-08-01-llm-second-opinion-design.md`; phase-II spec:
+`docs/superpowers/specs/2026-08-02-llm-second-opinion-phase2-design.md` —
+attributed verdicts + gated-tier suppression + reconciliation logging).
 
 ## Run
 
 ```powershell
-pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1   # from repo root
+pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1                 # default: phase-II small file (from repo root)
+pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.p2.large.xml   # opt-in 50-case matrix
+pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.xml            # phase-I file (regression)
 ```
 
-25 checks: 16 in-process classify+merge cases, 1 config negative test
-(`config.badlevel.json` must be rejected), 6 `ConvertTo-LlmVerdict` parser unit
-checks, 2 fullpipe cases that spawn the real `src/Hook.ps1`. LLM verdicts are
-injected via `PRETOOLHOOK_LLMREVIEW_MOCK` (`modifying|read-only|garbage|down`) —
-no test ever touches the network. This suite is deliberately **separate** from
-the main suites (`src/Run-AllTests.ps1`): it runs in seconds and burns zero LLM
-quota.
+- **Default (small)**: 24 checks — 10 phase-II cases (`test-cases.p2.small.xml`)
+  plus 14 shared pre-flights (config rejection ×2, 12 `ConvertTo-LlmVerdict`
+  parser units).
+- **Large (opt-in)**: 64 checks — 50 cases (`test-cases.p2.large.xml`) in six
+  groups: suppression matrix, levels, fallback/malformed indices,
+  effects/log/reason, scope numbering, `attributed_verdicts=false` regression.
+- **Phase-I file**: 32 checks — the original 16 scope/merge cases + 2 fullpipe
+  + the same pre-flights.
+
+LLM verdicts are injected via `PRETOOLHOOK_LLMREVIEW_MOCK`
+(`modifying|read-only|garbage|down|idx:2|idx:1,2|idx:0|idx:`) — the `idx:`
+forms route attributed JSON through the REAL parser. No test ever touches the
+network. These suites are deliberately **separate** from the main suites
+(`src/Run-AllTests.ps1`): they run in seconds and burn zero LLM quota.
 
 Per-case XML attributes: `level`, `min`, `enabled`, `mock`, `in-scope`,
-`verdict`, `effect`, `reason-contains`, `mode` (see the header comment in
-`Run-Tests.ps1`).
+`verdict`, `effect`, `strictness`, `attributed`, `flagged`, `suppressed`,
+`reason-contains`, `reason-not-contains`, `log-contains`, `mode` (see the
+header comment in `Run-Tests.ps1`).
 
-Fullpipe log writes go to `c:\temp\pretoolhook-llm-review-testlogs\` (set via
-`log_file_path` in the fixture config), never your real hook logs.
+**Per-run reconciliation logs**: every run writes
+`c:\temp\pretoolhook-llm-review-testlogs\llm-review-run-<timestamp>.log` with
+one block per case — what was SENT (numbered sub-command list), what was RECV'd
+(raw response, latency, mock mark, indices), the LOCAL decision + tiers, and
+the RECONCILE line (flagged/suppressed/veto → FINAL). Same formatter as the
+production `.log` (`Format-LlmLogBlock`). Fullpipe child-hook writes also go to
+that directory (set via `log_file_path` in the fixture config), never your
+real hook logs.
 
 ## `http/` — the LLM-CALL suite (real HTTP path, local mock server)
 
@@ -35,21 +53,22 @@ socket on 127.0.0.1; still zero quota, nothing leaves the machine):
 pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1   # from repo root
 ```
 
-25 checks in two files: `test-llm-call-core.xml` (5 — happy paths, garbage,
+27 checks in two files: `test-llm-call-core.xml` (5 — happy paths, garbage,
 HTTP 500, and the headline `Core-FullPipe-HookCallsLlm` case proving the
 spawned `Hook.ps1` really emits the LLM call) and `test-llm-call-matrix.xml`
-(20 — request shape: method/path/headers/body fields/payload guard; response
-parsing variants; dead-port + timeout failure paths). The key assertion is
-`expect-hit="1"`: the server **recorded** the request — proof the call
-happened. See the runner's header comment for the attribute vocabulary
-(`server`, `expect-verdict`, `expect-hit`, `check`, …).
+(22 — request shape: method/path/headers/body fields/payload guard; response
+parsing variants; attributed `<sub_commands>` block present/absent; dead-port +
+timeout failure paths). The key assertion is `expect-hit="1"`: the server
+**recorded** the request — proof the call happened. See the runner's header
+comment for the attribute vocabulary (`server`, `expect-verdict`, `expect-hit`,
+`check`, `attributed`, `subcommands`, …).
 
 ## `http/Run-LlmLiveTests.ps1` — LIVE end-to-end test (real gateway, small quota)
 
 The true end-to-end proof: calls the **real** gateway (default `glm-5.2` @
 `http://127.0.0.1:3030`) through the production verdict client, plus one case
-through the real spawned `Hook.ps1`. **OPT-IN — costs ~1.5k tokens per run**
-(5 calls × ~300 tokens, `max_tokens=16`); commands are only classified as text,
+through the real spawned `Hook.ps1`. **OPT-IN — costs ~2k tokens per run**
+(7 calls × ~300 tokens, `max_tokens=16`); commands are only classified as text,
 never executed.
 
 ```powershell
@@ -62,34 +81,41 @@ What it does:
 
 1. Probes `GET {BaseUri}/v1/models` first — gateway down = loud failure, no
    quota spent, exit 1 (a live test that can't run is a failure, not a skip).
-2. Runs 5 cases (`test-llm-live.xml`): 4 direct verdict assertions
-   (local/remote × read-only/modifying) + 1 fullpipe `Get-Date` through the
-   real hook expecting `allow`.
-3. Prints **every** verdict as it arrives (`LIVE [name] verdict=... latency=...
-   raw='...'`) so you can watch what the model actually answered.
+2. Runs 7 cases (`test-llm-live.xml`): 4 phase-I direct verdict assertions
+   (local/remote × read-only/modifying), 1 fullpipe `Get-Date` through the real
+   hook expecting `allow`, and 2 **attributed** cases (`Live-Attr-*`) that send
+   the V2 prompt with a numbered sub-command list and assert the returned
+   indices exactly (empty list for all-read-only; `[2]` when only the second
+   mutates). The `Live-Attr-*` outcome is the model-compliance signal that
+   decides whether production ships `attributed_verdicts: true` for a given
+   model.
+3. Prints **every** verdict as it arrives (`LIVE [name] verdict=... indices=[...]
+   latency=... raw='...'`) so you can watch what the model actually answered.
 4. Retry policy: retries once **only** on transient outcomes (`down` /
    `unusable`). A wrong verdict is never retried — that's the model-quality
    signal you're looking for. The offline suites pin the code; this suite
    samples the model.
 
-Last verified 2026-08-01 against glm-5.2: **5/5**, clean bare-token answers on
-all direct calls (latencies ~5–12 s each).
+Last verified 2026-08-01 against glm-5.2 (phase-I cases): **5/5**, clean
+bare-token answers on all direct calls (latencies ~5–12 s each). The two
+`Live-Attr-*` cases were added 2026-08-02 and have not been run live yet.
 
 ## Manual smoke test (live LLM — costs quota, run deliberately)
 
 1. In root `config.json` set `llm_second_opinion.enabled: true` and point
    `base_uri`/`model` at your gateway.
-2. **Set `global_modifying_strictness: "strict"` for the test session.** The
-   live config is loose: the `strictness_gated` tier auto-allows risk:low
-   commands in normal mode, which the LLM will correctly call *modifying* —
-   strict mode makes the local classifier ask on the gated tier too, so the two
-   classifiers mostly agree and you don't drown in low-risk vetoes. Revert both
-   settings after testing (phase II will teach the LLM about the gated tier).
+2. With `attributed_verdicts: true` (the default), `normal` strictness is
+   usable as-is: gated-tier flags are suppressed as policy instead of vetoing.
+   If you set `attributed_verdicts: false` (phase-I binary mode), also set
+   `global_modifying_strictness: "strict"` for the test session — otherwise the
+   loose gated tier and the LLM disagree on every risk:low command.
 3. Trigger any in-scope command through the hook (e.g. in VS Code Copilot:
    `aws s3 ls && aws s3 cp a b` — expect a prompt with LLM wording; a read-only
    remote block with an agreeing LLM passes silently and records an `llm` log
    entry).
-4. Check `%USERPROFILE%\.pretoolhook\*.records.jsonl` (or your configured
-   `log_file_path`) for the `llm` object.
-5. Set `enabled` back to `false` and `global_modifying_strictness` back to
-   `"normal"` (or leave them, deliberately).
+4. Check the `.log` for the four-line reconciliation block
+   (`LLM-SENT`/`LLM-RECV`/`LLM-LOCAL`/`LLM-RECONCILE`) and the
+   `*.records.jsonl` for the `llm` object (in `%USERPROFILE%\.pretoolhook\` or
+   your configured `log_file_path`).
+5. Set `enabled` back to `false` (and strictness back to `"normal"` if you
+   changed it) — or leave them, deliberately.
