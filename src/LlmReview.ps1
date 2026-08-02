@@ -95,7 +95,7 @@ function Test-LlmReviewScope {
         [Parameter(Mandatory = $true)][PSCustomObject]$ClassifyResult,
         [Parameter(Mandatory = $true)][PSCustomObject]$Config
     )
-    $scope = [PSCustomObject]@{ InScope = $false; Reason = ''; SubCommandCount = 0; RemoteMatch = $null }
+    $scope = [PSCustomObject]@{ InScope = $false; Reason = ''; SubCommandCount = 0; RemoteMatch = $null; SubCommands = @() }
     $llm = $Config._compiled.llmSecondOpinion
     if (-not $llm) { $scope.Reason = 'llm_second_opinion not configured'; return $scope }
 
@@ -110,6 +110,7 @@ function Test-LlmReviewScope {
     }
     if ($subs.Count -eq 0) { $scope.Reason = 'no sub-commands (fast-path gate or path branch)'; return $scope }
     $scope.SubCommandCount = $subs.Count
+    $scope.SubCommands = $subs
 
     switch ($llm.Level) {
         'all' {
@@ -349,6 +350,18 @@ function Get-LlmReviewVerdict {
     return $result
 }
 
+function Test-GatedInvocationSafe {
+    <#
+    .SYNOPSIS
+        Stage-2 extension point (spec P4): decides whether a strictness_gated
+        invocation is safe to suppress. Stage 1: always safe (tier-only
+        suppression). Stage 2 will path-check writable gated cmdlets;
+        unknown argument shapes must fail safe ($false = do not suppress).
+    #>
+    param([string]$Command, [PSCustomObject]$Config)
+    return $true
+}
+
 function Invoke-LlmReview {
     <#
     .SYNOPSIS
@@ -375,6 +388,16 @@ function Invoke-LlmReview {
         model             = $llm.Model
         effect            = 'none'
         raw_excerpt       = $null
+        indices           = $null
+        flagged           = @()
+        suppressed        = @()
+        error             = $null
+        mocked            = $false
+        sent              = @()
+        tiers             = @()
+        local_decision    = ''
+        local_reason      = ''
+        timeout_ms        = $llm.TimeoutMs
     }
 
     $scope = Test-LlmReviewScope -ClassifyResult $ClassifyResult -Config $Config
@@ -382,14 +405,24 @@ function Invoke-LlmReview {
     $log.sub_command_count = $scope.SubCommandCount
     $log.remote_match = $scope.RemoteMatch
 
+    # Numbered list for the prompt AND the index lookup (spec P2: same list).
+    $subTexts = @($scope.SubCommands | ForEach-Object { "$($_.Command)" })
+    $log.sent  = $subTexts
+    $log.tiers = @($scope.SubCommands | ForEach-Object { "$($_.Tier)" })
+    $log.local_decision = $ClassifyResult.Decision
+    $log.local_reason   = "$($ClassifyResult.Reason)"
+
     if (-not $scope.InScope) {
         return [PSCustomObject]@{ Result = $ClassifyResult; Log = $log }
     }
 
-    $verdict = Get-LlmReviewVerdict -Command $ClassifyResult.Command -LlmConfig $llm
+    $verdict = Get-LlmReviewVerdict -Command $ClassifyResult.Command -LlmConfig $llm -SubCommands $subTexts
     $log.verdict   = $verdict.Verdict
     $log.recovered = $verdict.Recovered
     $log.latency_ms = $verdict.LatencyMs
+    $log.indices = $verdict.Indices
+    $log.mocked  = $verdict.Mocked
+    if ($verdict.Error) { $log.error = $verdict.Error }
     if ($verdict.Raw) {
         $excerpt = ($verdict.Raw -replace '\s+', ' ').Trim()
         if ($excerpt.Length -gt 120) { $excerpt = $excerpt.Substring(0, 120) }
@@ -406,12 +439,58 @@ function Invoke-LlmReview {
 
     switch ($verdict.Verdict) {
         'modifying' {
-            if ($localDecision -eq 'allow') {
+            if ($localDecision -ne 'allow') { $log.effect = 'agree' }
+            elseif (-not $llm.AttributedVerdicts -or $null -eq $verdict.Indices) {
+                # Phase-I path: unattributed -> full veto, nothing suppressible (spec P5)
                 $ClassifyResult.Decision = 'ask'
                 $ClassifyResult.Reason = "*** LLM-VETO *** second-opinion LLM says MODIFYING but local hook classified read-only - forced to ask. Review carefully before approving. | local reason: $localReason"
                 $log.effect = 'veto'
             }
-            else { $log.effect = 'agree' }
+            else {
+                # Attributed merge (spec section 6): map each flagged index to its tier
+                $log.flagged = @($verdict.Indices)
+                $vetoIdx = @()
+                $suppIdx = @()
+                foreach ($ix in $verdict.Indices) {
+                    if ($ix -eq 0) { $vetoIdx += 0; continue }   # unlisted danger: never suppressible (P3)
+                    $sub = $scope.SubCommands[$ix - 1]
+                    if ($sub -and $sub.Tier -eq 'strictness_gated' -and
+                        (Test-GatedInvocationSafe -Command $sub.Command -Config $Config)) {
+                        $suppIdx += $ix
+                    }
+                    else { $vetoIdx += $ix }
+                }
+                $log.suppressed = @($suppIdx)
+                if ($vetoIdx.Count -eq 0) {
+                    # Every flag was accepted policy (the flood-killer)
+                    $log.effect = 'veto-suppressed-policy'
+                }
+                else {
+                    $first = $vetoIdx[0]
+                    if ($first -eq 0) {
+                        $firstText = "(unlisted part of the block) [index 0]"
+                    }
+                    else {
+                        $ft = "$($scope.SubCommands[$first - 1].Command)"
+                        if ($ft.Length -gt 120) { $ft = $ft.Substring(0, 120) }
+                        $firstText = "'$ft' [sub-command $first]"
+                    }
+                    $reason = "*** LLM-VETO *** second-opinion LLM says MODIFYING: $firstText - forced to ask."
+                    if ($suppIdx.Count -gt 0) {
+                        $suppTexts = @()
+                        foreach ($sx in $suppIdx) {
+                            $st = "$($scope.SubCommands[$sx - 1].Command)"
+                            if ($st.Length -gt 60) { $st = $st.Substring(0, 60) }
+                            $suppTexts += "'$st' [$sx]"
+                        }
+                        $reason += " | suppressed as policy: " + ($suppTexts -join ', ')
+                    }
+                    $reason += " | local reason: $localReason"
+                    $ClassifyResult.Decision = 'ask'
+                    $ClassifyResult.Reason = $reason
+                    $log.effect = 'veto'
+                }
+            }
         }
         'read-only' {
             if ($localDecision -eq 'allow') { $log.effect = 'agree' }

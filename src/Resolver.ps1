@@ -105,13 +105,14 @@ function Resolve-Command {
     # Helper: build the standard return object
     # -------------------------------------------------
     function New-ResolutionResult {
-        param([string]$Decision, [string]$Reason, [string]$MatchedPattern, [string]$Risk)
+        param([string]$Decision, [string]$Reason, [string]$MatchedPattern, [string]$Risk, [string]$Tier = '')
         return [PSCustomObject]@{
             Command        = $Command
             Decision       = $Decision
             Reason         = $Reason
             MatchedPattern = $MatchedPattern
             Risk           = $Risk
+            Tier           = $Tier
         }
     }
 
@@ -404,7 +405,7 @@ function Resolve-Command {
             if (Get-Member -InputObject $entry -Name '_compiledPatterns' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
                 foreach ($regex in $entry._compiledPatterns) {
                     if ($regex.IsMatch($Command)) {
-                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (read-only)" -MatchedPattern $entry.name -Risk "none"
+                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (read-only)" -MatchedPattern $entry.name -Risk "none" -Tier "read_only"
                     }
                 }
             }
@@ -428,9 +429,9 @@ function Resolve-Command {
                             if (Get-Member -InputObject $entry -Name 'risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
                                 $risk = $entry.risk
                             }
-                            return New-ResolutionResult -Decision "ask" -Reason "$($entry.name)" -MatchedPattern $entry.name -Risk $risk
+                            return New-ResolutionResult -Decision "ask" -Reason "$($entry.name)" -MatchedPattern $entry.name -Risk $risk -Tier "strictness_gated"
                         }
-                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (strictness-gated)" -MatchedPattern $entry.name -Risk "none"
+                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (strictness-gated)" -MatchedPattern $entry.name -Risk "none" -Tier "strictness_gated"
                     }
                 }
             }
@@ -450,7 +451,7 @@ function Resolve-Command {
                         if (Get-Member -InputObject $entry -Name 'risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
                             $risk = $entry.risk
                         }
-                        return New-ResolutionResult -Decision "ask" -Reason "$($entry.name)" -MatchedPattern $entry.name -Risk $risk
+                        return New-ResolutionResult -Decision "ask" -Reason "$($entry.name)" -MatchedPattern $entry.name -Risk $risk -Tier "modifying"
                     }
                 }
             }
@@ -511,11 +512,11 @@ function Resolve-Command {
 
         # -- Two-word check (exact cmdlet name match) --
         if ($roExact.ContainsKey($cmdlet)) {
-            return New-ResolutionResult -Decision "allow" -Reason "$cmdlet (read-only verb)" -MatchedPattern $cmdlet -Risk "none"
+            return New-ResolutionResult -Decision "allow" -Reason "$cmdlet (read-only verb)" -MatchedPattern $cmdlet -Risk "none" -Tier "read_only"
         }
         if ($modExact.ContainsKey($cmdlet)) {
             $risk = $modExact[$cmdlet]
-            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (modifying verb)" -MatchedPattern $cmdlet -Risk $risk
+            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (modifying verb)" -MatchedPattern $cmdlet -Risk $risk -Tier "modifying"
         }
 
         # -- Single-word verb prefix check --
@@ -528,11 +529,11 @@ function Resolve-Command {
         }
 
         if ($roPrefix.ContainsKey($verbPrefix)) {
-            return New-ResolutionResult -Decision "allow" -Reason "$cmdlet (read-only verb: $verbPrefix)" -MatchedPattern $verbPrefix -Risk "none"
+            return New-ResolutionResult -Decision "allow" -Reason "$cmdlet (read-only verb: $verbPrefix)" -MatchedPattern $verbPrefix -Risk "none" -Tier "read_only"
         }
         if ($modPrefix.ContainsKey($verbPrefix)) {
             $risk = $modPrefix[$verbPrefix]
-            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (modifying verb: $verbPrefix)" -MatchedPattern $verbPrefix -Risk $risk
+            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (modifying verb: $verbPrefix)" -MatchedPattern $verbPrefix -Risk $risk -Tier "modifying"
         }
     }
 
@@ -589,7 +590,7 @@ function Resolve-Command {
             # Check read-only prefixes
             foreach ($readPrefix in $roPrefixLookup.Keys) {
                 if ($verb -like "$readPrefix*") {
-                    return New-ResolutionResult -Decision "allow" -Reason "aws $service $verb (read-only verb: $readPrefix)" -MatchedPattern $readPrefix -Risk "none"
+                    return New-ResolutionResult -Decision "allow" -Reason "aws $service $verb (read-only verb: $readPrefix)" -MatchedPattern $readPrefix -Risk "none" -Tier "read_only"
                 }
             }
 
@@ -597,7 +598,7 @@ function Resolve-Command {
             foreach ($modPrefix in $modPrefixLookup.Keys) {
                 if ($verb -like "$modPrefix*") {
                     $risk = $modPrefixLookup[$modPrefix]
-                    return New-ResolutionResult -Decision "ask" -Reason "aws $service $verb (modifying verb: $modPrefix)" -MatchedPattern $modPrefix -Risk $risk
+                    return New-ResolutionResult -Decision "ask" -Reason "aws $service $verb (modifying verb: $modPrefix)" -MatchedPattern $modPrefix -Risk $risk -Tier "modifying"
                 }
             }
         }
