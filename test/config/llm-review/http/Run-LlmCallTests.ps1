@@ -195,6 +195,8 @@ function Invoke-RequestChecks {
             'auth-present'     { $ok = ($State.LastAuth -eq "Bearer $ApiKey");                             $why = "Authorization=$($State.LastAuth)" }
             'auth-absent'      { $ok = [string]::IsNullOrEmpty($State.LastAuth);                           $why = "Authorization=$($State.LastAuth)" }
             'truncated-8000'   { $len = ($bodyObj.messages[1].content).Length; $ok = ($bodyObj -and $len -le 8033); $why = "user content length=$len (>8033)" }
+            'subcmds-tags'   { $c = $bodyObj.messages[1].content; $ok = ($bodyObj -and $c.Contains('<sub_commands>') -and $c.Contains('</sub_commands>') -and $c.Contains('1. ')); $why = "user content missing numbered <sub_commands> block" }
+            'nosubcmds-tags' { $c = $bodyObj.messages[1].content; $ok = ($bodyObj -and -not $c.Contains('<sub_commands>')); $why = "user content unexpectedly contains <sub_commands>" }
             default            { $ok = $false;                                                             $why = "unknown check token '$t'" }
         }
         if (-not $ok) { return @($false, "check '$t' failed: $why") }
@@ -235,6 +237,9 @@ try {
         $timeoutMs       = if ($tc.HasAttribute('timeout-ms'))       { [int]$tc.GetAttribute('timeout-ms') }  else { 5000 }
         $apiKey          = if ($tc.HasAttribute('api-key'))          { $tc.GetAttribute('api-key') }          else { '' }
         $checkSpec       = if ($tc.HasAttribute('check'))            { $tc.GetAttribute('check') }            else { '' }
+        $attrVerdicts    = if ($tc.HasAttribute('attributed'))       { [bool]::Parse($tc.GetAttribute('attributed')) } else { $true }
+        $subCmds         = @()
+        if ($tc.HasAttribute('subcommands')) { $subCmds = @($tc.GetAttribute('subcommands') -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 
         # ----- Resolve the command text (CDATA child; {{X9000}} expansion) -----
         $cmdNode = $tc.'copilot-command'
@@ -270,6 +275,7 @@ try {
             Temperature           = 0.0
             MaxTokens             = 16
             ComplexMinSubcommands = 2
+            AttributedVerdicts    = $attrVerdicts
             RemoteIndicators      = @()
         }
 
@@ -327,7 +333,7 @@ try {
         # ==================================================================
         $verdict = $null
         try {
-            $verdict = Get-LlmReviewVerdict -Command $command -LlmConfig $llmCfg
+            $verdict = Get-LlmReviewVerdict -Command $command -LlmConfig $llmCfg -SubCommands $subCmds
         }
         catch {
             Record-Result -Ok $false -Name $name -Detail "threw: $($_.Exception.Message)"

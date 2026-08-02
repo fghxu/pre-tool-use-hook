@@ -289,7 +289,7 @@ foreach ($pc in $parserCases) {
         Record-Result -Ok $false -Name $pc.Name -Detail "threw: $($_.Exception.Message)"
         continue
     }
-    $idxGot = if ($got.Indices) { ($got.Indices -join ',') } else { '' }
+    $idxGot = if ($null -ne $got.Indices -and $got.Indices.Count -gt 0) { ($got.Indices -join ',') } else { '' }
     $ok = ($got.Verdict -eq $pc.WantVerdict) -and ($got.Recovered -eq $pc.WantRecovered) -and ($idxGot -eq $wantIdx)
     Record-Result -Ok $ok -Name $pc.Name -Detail "raw='$($pc.Raw)' => verdict=$($got.Verdict) recovered=$($got.Recovered) indices='$idxGot' (wanted $($pc.WantVerdict)/$($pc.WantRecovered)/'$wantIdx')"
 }
@@ -503,12 +503,12 @@ foreach ($tc in $testCases) {
         if (-not $ok) { $detail += " | effect expected $($tc.GetAttribute('effect')) got $got" }
     }
     if ($ok -and $tc.HasAttribute('flagged')) {
-        $got = if ($llmLog -and $llmLog.flagged) { ($llmLog.flagged -join ',') } else { '' }
+        $got = if ($llmLog -and $null -ne $llmLog.flagged -and $llmLog.flagged.Count -gt 0) { ($llmLog.flagged -join ',') } else { '' }
         $ok = ($got -eq $tc.GetAttribute('flagged'))
         if (-not $ok) { $detail += " | flagged expected '$($tc.GetAttribute('flagged'))' got '$got'" }
     }
     if ($ok -and $tc.HasAttribute('suppressed')) {
-        $got = if ($llmLog -and $llmLog.suppressed) { ($llmLog.suppressed -join ',') } else { '' }
+        $got = if ($llmLog -and $null -ne $llmLog.suppressed -and $llmLog.suppressed.Count -gt 0) { ($llmLog.suppressed -join ',') } else { '' }
         $ok = ($got -eq $tc.GetAttribute('suppressed'))
         if (-not $ok) { $detail += " | suppressed expected '$($tc.GetAttribute('suppressed'))' got '$got'" }
     }

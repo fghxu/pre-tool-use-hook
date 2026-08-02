@@ -47,6 +47,44 @@ fences. No leading or trailing whitespace. Any other output is a critical failur
 Emit the single token immediately.
 '@
 
+# --- V2 system prompt (attributed verdicts; used when AttributedVerdicts is on) ---
+$script:LlmSystemPromptV2 = @'
+You are a binary command-safety classifier protecting a production environment.
+You receive one command block (it may mix AWS CLI, PowerShell, CMD, bash, ssh,
+docker, kubectl, terraform, git, etc.) plus a numbered list of its sub-commands,
+and you report WHICH numbered sub-commands are modifying.
+
+DEFINITIONS
+- MODIFYING: creates, updates, deletes, moves, copies, renames, sends,
+  installs, starts, stops, or otherwise changes the state of any file,
+  directory, system, service, process, configuration, cloud resource, or data
+  store; or performs an HTTP/API call that mutates (POST, PUT, PATCH, DELETE,
+  or data-upload flags such as curl -d/--data/-F/-T, wget --post-data).
+- READ-ONLY: only inspects, queries, lists, prints, or downloads. This
+  includes HTTP GET/HEAD/OPTIONS (curl/wget/Invoke-RestMethod with no data
+  flags), aws ... describe-*/list-*/get-*, kubectl get/describe,
+  docker ps/images/logs/inspect, git status/diff/log/show, Get-*/dir/ls/cat/type.
+
+EXAMPLES
+block: aws s3 ls && aws s3 cp f s3://b/k
+sub_commands: 1. aws s3 ls / 2. aws s3 cp f s3://b/k
+answer: {"modifying":[2]}
+
+block: Get-ChildItem C:\logs | Select-Object -First 5
+sub_commands: 1. Get-ChildItem C:\logs / 2. Select-Object -First 5
+answer: {"modifying":[]}
+
+OUTPUT CONTRACT - CRITICAL
+Your ENTIRE response must be one JSON object, nothing else:
+  {"modifying": []}        - every numbered sub-command is read-only
+  {"modifying": [2]}       - sub-command 2 is modifying
+  {"modifying": [1, 2]}    - several are modifying
+Use index 0 for anything modifying that is NOT in the numbered list
+(for example a redirect target or an unlisted nested command).
+No reasoning. No explanation. No markdown. No code fences. Emit the JSON
+object immediately.
+'@
+
 function Test-LlmReviewScope {
     <#
     .SYNOPSIS
@@ -115,79 +153,137 @@ function Test-LlmReviewScope {
 function ConvertTo-LlmVerdict {
     <#
     .SYNOPSIS
-        Layered verdict parser (spec section 5.3). Layer 1 bare token; layer 2
-        JSON verdict-ish key; layer 3 last-line token (Recovered); layer 4
-        unusable. Garbage NEVER maps to a verdict.
+        Layered verdict parser (phase-II spec section 4). Returns a
+        PSCustomObject @{ Verdict; Recovered; Indices } where Indices is an
+        int array for attributed JSON answers and $null when unattributed
+        (bare token / phase-I JSON keys). Layers: 1 bare token; 2 JSON
+        {"modifying":[...]} (strictly validated against -SubCommandCount) or
+        phase-I verdict-ish JSON keys; 3 last-line rescue (bare token or the
+        modifying JSON); 4 unusable. Garbage NEVER maps to a verdict.
     #>
-    param([AllowNull()][AllowEmptyString()][string]$RawContent)
+    param(
+        [AllowNull()][AllowEmptyString()][string]$RawContent,
+        [int]$SubCommandCount = 0
+    )
 
-    if ([string]::IsNullOrWhiteSpace($RawContent)) {
-        return [PSCustomObject]@{ Verdict = 'unusable'; Recovered = $false }
+    # Local helper: uniform result shape.
+    function New-Verdict([string]$V, [bool]$R, $Idx) {
+        return [PSCustomObject]@{ Verdict = $V; Recovered = $R; Indices = $Idx }
     }
+    # Local helper: validate a parsed {"modifying": <value>} property.
+    # Returns an int array (empty = read-only) or $null on any violation.
+    function Test-ModifyingArray($M, [int]$Max) {
+        if ($null -eq $M) { return @() }                      # {"modifying":null} ~ empty
+        if ($M -isnot [System.Collections.IList]) { return $null }
+        $list = @()
+        foreach ($el in $M) {
+            $n = 0
+            if (-not [int]::TryParse("$el", [ref]$n)) { return $null }
+            if ($n -lt 0 -or $n -gt $Max) { return $null }
+            $list += $n
+        }
+        return ,$list
+    }
+
+    if ([string]::IsNullOrWhiteSpace($RawContent)) { return (New-Verdict 'unusable' $false $null) }
     $norm = $RawContent.Trim().ToLowerInvariant()
 
-    # Layer 1: bare token
-    if ($norm -eq 'true')  { return [PSCustomObject]@{ Verdict = 'modifying'; Recovered = $false } }
-    if ($norm -eq 'false') { return [PSCustomObject]@{ Verdict = 'read-only'; Recovered = $false } }
+    # Layer 1: bare token (unattributed)
+    if ($norm -eq 'true')  { return (New-Verdict 'modifying' $false $null) }
+    if ($norm -eq 'false') { return (New-Verdict 'read-only' $false $null) }
 
-    # Layer 2: JSON with a verdict-ish key
-    try {
-        $obj = $RawContent | ConvertFrom-Json -ErrorAction Stop
+    # Layer 2: JSON forms (whole response)
+    $parsedObj = $null
+    try { $parsedObj = $RawContent | ConvertFrom-Json -ErrorAction Stop } catch { }
+    if ($parsedObj) {
+        if ($parsedObj.PSObject.Properties.Name -contains 'modifying') {
+            $idxs = Test-ModifyingArray $parsedObj.modifying $SubCommandCount
+            if ($null -eq $idxs) { return (New-Verdict 'unusable' $false $null) }
+            if ($idxs.Count -eq 0) { return (New-Verdict 'read-only' $false @()) }
+            return (New-Verdict 'modifying' $false $idxs)
+        }
+        # Phase-I JSON verdict-ish keys (back-compat)
         foreach ($key in @('verdict', 'classification', 'decision', 'answer')) {
-            if ($obj.PSObject.Properties.Name -contains $key) {
-                $v = ("$($obj.$key)").Trim().ToLowerInvariant()
-                if ($v -in @('modifying', 'true'))     { return [PSCustomObject]@{ Verdict = 'modifying'; Recovered = $false } }
-                if ($v -in @('read-only', 'false'))   { return [PSCustomObject]@{ Verdict = 'read-only'; Recovered = $false } }
+            if ($parsedObj.PSObject.Properties.Name -contains $key) {
+                $v = ("$($parsedObj.$key)").Trim().ToLowerInvariant()
+                if ($v -in @('modifying', 'true'))  { return (New-Verdict 'modifying' $false $null) }
+                if ($v -in @('read-only', 'false')) { return (New-Verdict 'read-only' $false $null) }
             }
         }
     }
-    catch { }
 
-    # Layer 3: last non-empty line is exactly true/false (rescues "ramble...\nfalse")
+    # Layer 3: last non-empty line is a bare token or the modifying JSON (recovered)
     $lines = @($RawContent -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($lines.Count -gt 0) {
-        $last = $lines[-1].ToLowerInvariant()
-        if ($last -eq 'true')  { return [PSCustomObject]@{ Verdict = 'modifying'; Recovered = $true } }
-        if ($last -eq 'false') { return [PSCustomObject]@{ Verdict = 'read-only'; Recovered = $true } }
+        $last = $lines[-1]
+        $lastNorm = $last.ToLowerInvariant()
+        if ($lastNorm -eq 'true')  { return (New-Verdict 'modifying' $true $null) }
+        if ($lastNorm -eq 'false') { return (New-Verdict 'read-only' $true $null) }
+        if ($last.StartsWith('{')) {
+            $lastObj = $null
+            try { $lastObj = $last | ConvertFrom-Json -ErrorAction Stop } catch { }
+            if ($lastObj -and ($lastObj.PSObject.Properties.Name -contains 'modifying')) {
+                $idxs = Test-ModifyingArray $lastObj.modifying $SubCommandCount
+                if ($null -ne $idxs) {
+                    if ($idxs.Count -eq 0) { return (New-Verdict 'read-only' $true @()) }
+                    return (New-Verdict 'modifying' $true $idxs)
+                }
+            }
+        }
     }
 
     # Layer 4: unusable (distinct state - never treated as a verdict)
-    return [PSCustomObject]@{ Verdict = 'unusable'; Recovered = $false }
+    return (New-Verdict 'unusable' $false $null)
 }
 
 function Get-LlmReviewVerdict {
     <#
     .SYNOPSIS
         Returns the LLM verdict for a command. Checks the
-        PRETOOLHOOK_LLMREVIEW_MOCK short-circuit FIRST (test-only; mirrors the
-        PRETOOLHOOK_CONFIG_PATH precedent), then makes the OpenAI-compatible
-        chat-completions call (spec section 5.1).
+        PRETOOLHOOK_LLMREVIEW_MOCK short-circuit FIRST (test-only), then makes
+        the OpenAI-compatible chat-completions call. When
+        $LlmConfig.AttributedVerdicts is on, the V2 prompt is used and the
+        numbered -SubCommands are appended as <sub_commands>; the parser
+        returns Indices with the verdict. Result fields: Verdict, Raw,
+        LatencyMs, Recovered, Error, Indices, Mocked.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$Command,
-        [Parameter(Mandatory = $true)][PSCustomObject]$LlmConfig
+        [Parameter(Mandatory = $true)][PSCustomObject]$LlmConfig,
+        [string[]]$SubCommands = @()
     )
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $result = [PSCustomObject]@{ Verdict = 'down'; Raw = ''; LatencyMs = 0; Recovered = $false; Error = $null }
+    $result = [PSCustomObject]@{ Verdict = 'down'; Raw = ''; LatencyMs = 0; Recovered = $false; Error = $null; Indices = $null; Mocked = $false }
+    $subCount = $SubCommands.Count
 
     # Mock short-circuit (no network). The mock supplies the RAW content and the
-    # REAL parser decides the verdict, so parser layers 1 and 4 are exercised by
-    # every classify test (layer 2/3 are covered by the runner's pre-flight
-    # parser unit checks). Only 'down' bypasses the parser (a network failure
-    # has no content to parse).
+    # REAL parser decides the verdict. 'idx:...' injects the attributed JSON
+    # form; the 4 phase-I values inject bare/garbage/down as before.
     $mock = $env:PRETOOLHOOK_LLMREVIEW_MOCK
     if ($mock) {
-        switch ($mock) {
-            'modifying' { $result.Raw = 'true' }
-            'read-only' { $result.Raw = 'false' }
-            'garbage'   { $result.Raw = "Let me analyze this command carefully.`nIt seems to read files, but I am not entirely sure about every part." }
-            'down'      { $result.Verdict = 'down'; $result.Error = 'mock: simulated unreachable LLM' }
-            default     { throw "Get-LlmReviewVerdict: unknown PRETOOLHOOK_LLMREVIEW_MOCK value '$mock' (expected modifying|read-only|garbage|down)" }
+        $result.Mocked = $true
+        if ($mock -like 'idx:*') {
+            $list = $mock.Substring(4)
+            if ($list.Trim() -eq '') { $result.Raw = '{"modifying":[]}' }
+            else {
+                $items = @($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+                $result.Raw = '{"modifying":[' + ($items -join ',') + ']}'
+            }
+        }
+        else {
+            switch ($mock) {
+                'modifying' { $result.Raw = 'true' }
+                'read-only' { $result.Raw = 'false' }
+                'garbage'   { $result.Raw = "Let me analyze this command carefully.`nIt seems to read files, but I am not entirely sure about every part." }
+                'down'      { $result.Verdict = 'down'; $result.Error = 'mock: simulated unreachable LLM' }
+                default     { throw "Get-LlmReviewVerdict: unknown PRETOOLHOOK_LLMREVIEW_MOCK value '$mock' (expected modifying|read-only|garbage|down|idx:...)" }
+            }
         }
         if ($mock -ne 'down') {
-            $parsed = ConvertTo-LlmVerdict -RawContent $result.Raw
+            $parsed = ConvertTo-LlmVerdict -RawContent $result.Raw -SubCommandCount $subCount
             $result.Verdict   = $parsed.Verdict
             $result.Recovered = $parsed.Recovered
+            $result.Indices   = $parsed.Indices
         }
         $sw.Stop(); $result.LatencyMs = $sw.ElapsedMilliseconds
         return $result
@@ -197,11 +293,22 @@ function Get-LlmReviewVerdict {
     $cmdText = $Command
     if ($cmdText.Length -gt 8000) { $cmdText = $cmdText.Substring(0, 8000) }
 
+    # User message: raw block, plus the numbered sub-command list in V2 mode
     $userPrompt = "<command_block>`n$cmdText`n</command_block>"
+    $sysPrompt = $script:LlmSystemPrompt
+    if ($LlmConfig.AttributedVerdicts) {
+        $sysPrompt = $script:LlmSystemPromptV2
+        if ($SubCommands.Count -gt 0) {
+            $numbered = @()
+            for ($i = 0; $i -lt $SubCommands.Count; $i++) { $numbered += "{0}. {1}" -f ($i + 1), $SubCommands[$i] }
+            $userPrompt += "`n<sub_commands>`n" + ($numbered -join "`n") + "`n</sub_commands>"
+        }
+    }
+
     $body = [ordered]@{
         model       = $LlmConfig.Model
         messages    = @(
-            @{ role = 'system'; content = $script:LlmSystemPrompt },
+            @{ role = 'system'; content = $sysPrompt },
             @{ role = 'user';   content = $userPrompt }
         )
         temperature = $LlmConfig.Temperature
@@ -229,9 +336,10 @@ function Get-LlmReviewVerdict {
             $raw = [string]$response.choices[0].message.content
         }
         $result.Raw = "$raw"
-        $parsed = ConvertTo-LlmVerdict -RawContent $raw
-        $result.Verdict  = $parsed.Verdict
+        $parsed = ConvertTo-LlmVerdict -RawContent $raw -SubCommandCount $subCount
+        $result.Verdict   = $parsed.Verdict
         $result.Recovered = $parsed.Recovered
+        $result.Indices   = $parsed.Indices
     }
     catch {
         $result.Verdict = 'down'

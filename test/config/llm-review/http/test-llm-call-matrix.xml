@@ -115,5 +115,15 @@
       <copilot-command><![CDATA[Get-Date]]></copilot-command>
     </test-case>
 
+    <test-case name="M-Attr-SubCommandsPresent" server="true" subcommands="Get-Date;Get-ChildItem c:\temp" expect-verdict="modifying" check="subcmds-tags">
+      <description>attributed mode: user message carries the numbered sub_commands block</description>
+      <copilot-command><![CDATA[Get-Date ; Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-AttrOff-NoSubCommands" server="true" attributed="false" subcommands="Get-Date" expect-verdict="modifying" check="nosubcmds-tags">
+      <description>attributed=false: user message stays phase-I shape (no sub_commands block)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
   </category-group>
 </commands>
