@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PHASE-II LARGE SUITE (50 cases, opt-in matrix).
+     Run:  pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.p2.large.xml
+     Every case sets level explicitly (the runner default is complex_remote);
+     most use complex_commands. strictness="normal" makes the gated tier allow
+     (the fixture file's global default is strict). -->
+<commands>
+  <category-group name="P2G1-SuppressionMatrix">
+
+    <test-case expected="allow" category="G1-Flag1" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="flag 1 = gated => suppressed">
+      <description>G1: flag [1] only</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G1-Flag2" level="complex_commands" strictness="normal" mock="idx:2" verdict="modifying" effect="veto-suppressed-policy" flagged="2" suppressed="2" reason="flag 2 = gated => suppressed">
+      <description>G1: flag [2] only</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G1-Flag12" level="complex_commands" strictness="normal" mock="idx:1,2" verdict="modifying" effect="veto-suppressed-policy" flagged="1,2" suppressed="1,2" reason="both gated flags suppressed">
+      <description>G1: flags [1,2]</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G1-Flag3" level="complex_commands" strictness="normal" mock="idx:3" verdict="modifying" effect="veto" flagged="3" suppressed="" reason-contains="git status" reason="flag 3 = read_only => veto">
+      <description>G1: flag [3] read_only => veto</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G1-Flag13" level="complex_commands" strictness="normal" mock="idx:1,3" verdict="modifying" effect="veto" flagged="1,3" suppressed="1" reason="mixed: 1 suppressed, 3 vetoes">
+      <description>G1: flags [1,3]</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G1-Flag23" level="complex_commands" strictness="normal" mock="idx:2,3" verdict="modifying" effect="veto" flagged="2,3" suppressed="2" reason="mixed: 2 suppressed, 3 vetoes">
+      <description>G1: flags [2,3]</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G1-Flag123" level="complex_commands" strictness="normal" mock="idx:1,2,3" verdict="modifying" effect="veto" flagged="1,2,3" suppressed="1,2" reason-contains="suppressed as policy" reason="all flagged: gated two suppressed, read_only vetoes">
+      <description>G1: flags [1,2,3]</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G1-Flag0" level="complex_commands" strictness="normal" mock="idx:0" verdict="modifying" effect="veto" flagged="0" suppressed="" reason="index 0 = unlisted danger => veto (P3)">
+      <description>G1: flag [0]</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G1-Flag01" level="complex_commands" strictness="normal" mock="idx:0,1" verdict="modifying" effect="veto" flagged="0,1" suppressed="1" reason="0 vetoes, 1 suppressed">
+      <description>G1: flags [0,1]</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G1-EmptyIdx" level="complex_commands" strictness="normal" mock="idx:" verdict="read-only" effect="agree" reason="empty array = all read-only => agree">
+      <description>G1: empty indices</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G1-BareTrue" level="complex_commands" strictness="normal" mock="modifying" verdict="modifying" effect="veto" flagged="" suppressed="" reason="bare true = unattributed => full veto (P5)">
+      <description>G1: bare true fallback</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G1-BareFalse" level="complex_commands" strictness="normal" mock="read-only" verdict="read-only" effect="agree" reason="bare false => agree">
+      <description>G1: bare false</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G1-SetContentGated" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="Set-Content is gated; stage-1 suppresses on tier alone (P4, known path gap)">
+      <description>G1: PS-domain gated (Set-Content) suppressed</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Set-Content c:\temp\a.txt x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G1-SetContentGated2" level="complex_commands" strictness="normal" mock="idx:2" verdict="modifying" effect="veto-suppressed-policy" flagged="2" suppressed="2" reason="gated write at index 2 suppressed">
+      <description>G1: Set-Content at [2]</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; Set-Content c:\temp\a.txt x]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="P2G2-Levels">
+
+    <test-case expected="allow" category="G2-AllSingleGated" level="all" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="level all checks a single gated command; suppressed">
+      <description>G2: level=all single gated</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add .]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G2-ComplexSingleGated" level="complex_commands" strictness="normal" mock="idx:1" in-scope="false" verdict="not_called" effect="none" reason="single sub-command below min => not checked">
+      <description>G2: complex_commands single gated skipped</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add .]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G2-Min1SingleGated" level="complex_commands" min="1" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="min=1 makes even a single command complex">
+      <description>G2: min=1 single gated checked</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add .]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G2-RemoteGatedMix" level="complex_remote" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="complex_remote: curl makes it remote; gated flag suppressed">
+      <description>G2: complex_remote gated+remote mix</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; curl -s http://h]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G2-RemoteNoRemote" level="complex_remote" strictness="normal" mock="idx:1,2" in-scope="false" verdict="not_called" effect="none" reason="gated block with no remote indicator => not checked">
+      <description>G2: complex_remote skips local-only gated</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G2-Min3TwoGated" level="complex_commands" min="3" strictness="normal" mock="idx:1,2" in-scope="false" verdict="not_called" effect="none" reason="2 sub-commands &lt; min=3 => not checked">
+      <description>G2: min=3 skips 2-command gated block</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G2-AllReadOnly" level="all" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason="level=all: read_only Get-Date flagged => veto">
+      <description>G2: level=all read_only veto</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G2-StrictGatedAgree" level="complex_commands" strictness="strict" mock="idx:1,2" verdict="modifying" effect="agree" reason="strict mode: gated already asks locally => LLM modifying agrees; suppression moot">
+      <description>G2: strict mode gated asks, LLM agrees</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="P2G3-FallbackMalformed">
+
+    <test-case expected="ask" category="G3-BareTrueGated" level="complex_commands" strictness="normal" mock="modifying" verdict="modifying" effect="veto" flagged="" suppressed="" reason="bare true on gated block => unattributed full veto">
+      <description>G3: bare true on gated</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G3-BareFalseGated" level="complex_commands" strictness="normal" mock="read-only" verdict="read-only" effect="agree" reason="bare false on gated block => agree">
+      <description>G3: bare false on gated</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G3-Idx0" level="complex_commands" strictness="normal" mock="idx:0" verdict="modifying" effect="veto" flagged="0" reason="idx:0 => veto">
+      <description>G3: idx:0</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G3-OorIdx" level="complex_commands" strictness="normal" mock="idx:3" verdict="unusable" effect="forced-ask" reason-contains="*** LLM-UNUSABLE ***" reason="index 3 out of range for 2 sub-commands => unusable">
+      <description>G3: out-of-range index</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G3-AlphaIdx" level="complex_commands" strictness="normal" mock="idx:abc" verdict="unusable" effect="forced-ask" reason-contains="*** LLM-UNUSABLE ***" reason="non-JSON idx mock => invalid JSON => unusable">
+      <description>G3: alpha index</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G3-DecimalIdx" level="complex_commands" strictness="normal" mock="idx:1.5" verdict="unusable" effect="forced-ask" reason-contains="*** LLM-UNUSABLE ***" reason="non-integer index => unusable">
+      <description>G3: decimal index</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G3-NegativeIdx" level="complex_commands" strictness="normal" mock="idx:-1" verdict="unusable" effect="forced-ask" reason-contains="*** LLM-UNUSABLE ***" reason="negative index => unusable">
+      <description>G3: negative index</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G3-Garbage" level="complex_commands" strictness="normal" mock="garbage" verdict="unusable" effect="forced-ask" reason-contains="*** LLM-UNUSABLE ***" reason="ramble with no final token => unusable">
+      <description>G3: garbage ramble</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G3-BareTrueReadOnly" level="complex_commands" mock="modifying" verdict="modifying" effect="veto" reason="bare true on a read_only block => veto (phase-I path preserved)">
+      <description>G3: bare true on read_only block</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G3-DisagreeKeptAsk" level="complex_commands" mock="read-only" verdict="read-only" effect="disagree-kept-ask" reason-contains="Remove-" reason="local ask (Remove-Item) + LLM read-only => stays ask">
+      <description>G3: disagree-kept-ask</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; Remove-Item c:\temp\x.txt]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="P2G4-EffectsLogReason">
+
+    <test-case expected="allow" category="G4-SuppressedReasonAbsent" level="complex_commands" strictness="normal" mock="idx:1,2" verdict="modifying" effect="veto-suppressed-policy" reason-not-contains="suppressed" reason="fully-suppressed allow keeps the original local reason (no suppression wording leaks into the prompt)">
+      <description>G4: suppressed allow reason unchanged</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G4-VetoReasonAttribution" level="complex_commands" strictness="normal" mock="idx:1,2" verdict="modifying" effect="veto" reason-contains="curl -o;sub-command 2;suppressed as policy" reason="veto reason names the offender with its index AND lists the suppressed">
+      <description>G4: attributed veto reason format</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; curl -o c:\temp\x http://h/y]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G4-LogFieldsMixed" level="complex_commands" strictness="normal" mock="idx:1,3" verdict="modifying" effect="veto" flagged="1,3" suppressed="1" reason="flagged/suppressed log fields on a mixed block">
+      <description>G4: flagged/suppressed fields</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G4-FallbackNoFlagged" level="complex_commands" strictness="normal" mock="modifying" verdict="modifying" effect="veto" flagged="" suppressed="" reason="unattributed veto leaves flagged/suppressed empty">
+      <description>G4: fallback empty fields</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G4-FullPipeSuppressed" mode="fullpipe" strictness="normal" mock="idx:1,2" log-contains="LLM-SENT;LLM-RECV;LLM-RECONCILE;all suppressed (strictness_gated policy)" reason="fullpipe: suppressed allow + the child hook's .log carries the reconciliation block (curl keeps the block in scope at the fixture config's own level - fullpipe ignores the level attr)">
+      <description>G4: fullpipe suppressed + .log block</description><tool-name>run_in_terminal</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; curl -s http://h]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G4-FullPipeVeto" mode="fullpipe" strictness="normal" mock="idx:1,2" log-contains="LLM-SENT;LLM-RECONCILE;suppressed=[1](strictness_gated);veto=[2]" reason="fullpipe: attributed veto + suppression clause in the child hook's .log reconcile line (curl puts it in scope; fullpipe ignores the level attr)">
+      <description>G4: fullpipe veto + .log clause</description><tool-name>run_in_terminal</tool-name>
+      <copilot-command><![CDATA[git add . ; curl -o c:\temp\x http://h/y]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="P2G5-ScopeNumbering">
+
+    <test-case expected="allow" category="G5-RedirectExcluded" level="complex_commands" strictness="normal" mock="idx:1" in-scope="false" verdict="not_called" effect="none" reason="redirect pseudo-entry is excluded from numbering: 1 real sub-command &lt; min=2 => out of scope">
+      <description>G5: redirect not numbered</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . > c:\temp\gitout.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G5-NumberingMaps" level="complex_commands" strictness="normal" mock="idx:3" verdict="modifying" effect="veto" reason-contains="git status;sub-command 3" reason="index 3 maps to the third sub-command (git status)">
+      <description>G5: index-to-command mapping</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G5-AstUnwrapNumbering" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason-contains="Invoke-Command;sub-command 1" reason="AST-wrapped gated command carries the arbitration branch's read_only tier (NOT strictness_gated), so a flag vetoes - and the veto names the WRAPPER text, proving index 1 maps correctly through AST unwrap">
+      <description>G5: AST-unwrapped numbering (wrapper veto)</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { git add . } ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G5-UnknownTierAgree" level="complex_commands" strictness="normal" mock="idx:2" verdict="modifying" effect="agree" reason="unknown commands already ask locally, so an LLM flag on one can only agree - the unknown-tier veto path is unreachable when the unknown command itself forces ask">
+      <description>G5: unknown tier agrees (local already asks)</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; somerandomtool --x]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="P2G6-AttributedOff">
+
+    <test-case expected="ask" category="G6-VetoGated" level="complex_commands" attributed="false" strictness="normal" mock="modifying" verdict="modifying" effect="veto" reason="switch off: gated block vetoes (phase-I)">
+      <description>G6: veto gated</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G6-AgreeGated" level="complex_commands" attributed="false" strictness="normal" mock="read-only" verdict="read-only" effect="agree" reason="switch off: agree allow">
+      <description>G6: agree gated</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G6-VetoReadOnly" level="complex_commands" attributed="false" mock="modifying" verdict="modifying" effect="veto" reason="switch off: read_only block vetoes">
+      <description>G6: veto read_only</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G6-AgreeAsk" level="complex_commands" attributed="false" mock="modifying" verdict="modifying" effect="agree" reason="switch off: local ask agrees">
+      <description>G6: agree ask</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; Remove-Item c:\temp\x.txt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G6-Down" level="complex_commands" attributed="false" mock="down" verdict="down" effect="forced-ask" reason-contains="*** LLM-DOWN ***" reason="switch off: down forces ask">
+      <description>G6: down</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G6-Unusable" level="complex_commands" attributed="false" mock="garbage" verdict="unusable" effect="forced-ask" reason-contains="*** LLM-UNUSABLE ***" reason="switch off: garbage forces ask">
+      <description>G6: unusable</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G6-IdxIgnoredWhenOff" level="complex_commands" attributed="false" strictness="normal" mock="idx:1,2" verdict="modifying" effect="veto" flagged="" suppressed="" reason="CRITICAL: even with indices returned, attributed_verdicts=false means NO suppression - full veto">
+      <description>G6: indices ignored when off</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G6-OutOfScope" level="complex_commands" attributed="false" mock="modifying" in-scope="false" verdict="not_called" effect="none" reason="switch off: out of scope unchanged">
+      <description>G6: out of scope</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>
