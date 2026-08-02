@@ -187,9 +187,17 @@
       <description>G5: index-to-command mapping</description><tool-name>Bash</tool-name>
       <copilot-command><![CDATA[git add . ; git commit -m x ; git status]]></copilot-command>
     </test-case>
-    <test-case expected="ask" category="G5-AstUnwrapNumbering" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason-contains="Invoke-Command;sub-command 1" reason="AST-wrapped gated command carries the arbitration branch's read_only tier (NOT strictness_gated), so a flag vetoes - and the veto names the WRAPPER text, proving index 1 maps correctly through AST unwrap">
-      <description>G5: AST-unwrapped numbering (wrapper veto)</description><tool-name>Bash</tool-name>
+    <test-case expected="allow" category="G5-AstUnwrapNumbering" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="tier stamp-back: arbitration resolved the wrapper's inner git add as strictness_gated, so the wrapper sub-result carries gated tier and a flag on it suppresses as policy (was: veto on the empty unknown tier)">
+      <description>G5: AST-wrapped gated wrapper suppressed</description><tool-name>Bash</tool-name>
       <copilot-command><![CDATA[Invoke-Command -ScriptBlock { git add . } ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G5-WrapperReadOnlyInner" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason-contains="Invoke-Command;sub-command 1" reason="wrapper over a READ-ONLY inner stamps read_only tier - the flag still vetoes (only gated suppresses)">
+      <description>G5: wrapper over read-only inner vetoes</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { git status } ; git add .]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G5-WrapperMixedInner" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="wrapper over multi-statement inner (gated + read-only) stamps worst-tier strictness_gated - suppressed as policy">
+      <description>G5: wrapper over mixed inner suppresses</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { git add . ; git status }]]></copilot-command>
     </test-case>
     <test-case expected="ask" category="G5-UnknownTierAgree" level="complex_commands" strictness="normal" mock="idx:2" verdict="modifying" effect="agree" reason="unknown commands already ask locally, so an LLM flag on one can only agree - the unknown-tier veto path is unreachable when the unknown command itself forces ask">
       <description>G5: unknown tier agrees (local already asks)</description><tool-name>Bash</tool-name>
