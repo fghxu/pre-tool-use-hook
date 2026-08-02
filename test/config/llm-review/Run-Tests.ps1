@@ -66,6 +66,12 @@
 # Run from repo root:  pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1
 # Wait-Debugger
 
+param(
+    # Default = the phase-II small file (fast typical pass). Point at
+    # test-cases.xml (phase-I) or test-cases.p2.large.xml (opt-in matrix).
+    [string]$XmlPath = "$PSScriptRoot\test-cases.p2.small.xml"
+)
+
 # Stop on any unexpected error - a broken runner must not masquerade as green.
 $ErrorActionPreference = "Stop"
 
@@ -111,6 +117,17 @@ if (Test-Path (Join-Path $srcDir "LlmReview.ps1")) {
 # ---------------------------------------------------------------------------
 $config = Load-Config -Path $configPath
 
+# Baseline global strictness from the fixture file; each case may override it
+# via its strictness= attribute and is reset to this afterwards.
+$fileStrictness = $config.global_modifying_strictness
+
+# Per-run reconciliation log (spec P9): every case appends its outcome plus
+# the shared LLM reconciliation block here, so a run leaves the same evidence
+# a production call would. Lives beside the fullpipe hook logs (c:\temp).
+$runLogDir = if ($config.log_file_path) { $config.log_file_path } else { 'c:\temp\pretoolhook-llm-review-testlogs\' }
+if (-not (Test-Path $runLogDir)) { New-Item -ItemType Directory -Path $runLogDir -Force | Out-Null }
+$runLogPath = Join-Path $runLogDir ('llm-review-run-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
+
 # ---------------------------------------------------------------------------
 # TDD scaffold: if the loader does not yet compile the block (red phase),
 # create a stub so the per-case override lines in the loop below have a
@@ -145,7 +162,7 @@ $engine = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershel
 #   <commands> -> <category-group> (3 groups: LlmScope, LlmMerge, LlmFullPipe)
 #   -> <test-case> elements. The @(...) forces an array even for one case.
 # ---------------------------------------------------------------------------
-[xml]$xml = Get-Content (Join-Path $fixtureDir "test-cases.1.xml") -Encoding UTF8
+[xml]$xml = Get-Content $XmlPath -Encoding UTF8
 $testCases = @($xml.commands.'category-group'.'test-case')
 
 # Counters + failure list for the end-of-run summary.
@@ -170,6 +187,28 @@ function Record-Result {
     }
 }
 
+# Write-CaseLog - append one case's reconciliation evidence to the run log.
+# Uses the shared Format-LlmLogBlock when available (Task 5); until then a
+# one-line fallback keeps the run log useful during TDD red phases.
+function Write-CaseLog {
+    param([string]$Name, [bool]$Ok, $Result, $LlmLog, [string]$Mode)
+    $verdictText = if ($Ok) { 'PASS' } else { 'FAIL' }
+    $block = "=== [$Name] $verdictText ($Mode) ===`n"
+    if ($Mode -eq 'fullpipe') {
+        $block += "  (spawned hook; see the hook .log in $runLogDir for LLM-SENT/RECV/RECONCILE)`n"
+    }
+    elseif ($null -eq $LlmLog) {
+        $block += "  (no LLM call - feature disabled or out of scope)`n"
+    }
+    elseif (Get-Command Format-LlmLogBlock -ErrorAction SilentlyContinue) {
+        $block += (Format-LlmLogBlock -Result $Result -LlmLog $LlmLog)
+    }
+    else {
+        $block += "  decision=$($Result.Decision) reason=$($Result.Reason) verdict=$($LlmLog.verdict) effect=$($LlmLog.effect)`n"
+    }
+    Add-Content -Path $runLogPath -Value $block -Encoding UTF8
+}
+
 # =============================================================================
 # PRE-FLIGHT CHECK 1 of 7 - LlmConfig-BadLevel
 # config.badlevel.json is identical to config.json EXCEPT level="bogus".
@@ -185,6 +224,16 @@ try {
 catch {
     $ok = $_.Exception.Message -match 'llm_second_opinion\.level'
     Record-Result -Ok $ok -Name "LlmConfig-BadLevel" -Detail "threw but unexpected message: $($_.Exception.Message)"
+}
+
+# ---- Pre-flight: bad attributed_verdicts type must be rejected (Task 2) ----
+try {
+    $null = Load-Config -Path (Join-Path $fixtureDir "config.badtype.json")
+    Record-Result -Ok $false -Name "LlmConfig-BadType" -Detail "Load-Config did NOT throw for attributed_verdicts='yes'"
+}
+catch {
+    $ok = $_.Exception.Message -match 'llm_second_opinion\.attributed_verdicts'
+    Record-Result -Ok $ok -Name "LlmConfig-BadType" -Detail "threw but unexpected message: $($_.Exception.Message)"
 }
 
 # =============================================================================
@@ -212,16 +261,37 @@ $parserCases = @(
     # Layer 4: pure ramble with no final token -> unusable, NOT "modifying".
     @{ Name = 'LlmParser-Garbage';       Raw = 'I think this is safe but I am unsure'; WantVerdict = 'unusable';  WantRecovered = $false },
     # Layer 4 edge: empty response -> unusable.
-    @{ Name = 'LlmParser-Empty';         Raw = '';                                     WantVerdict = 'unusable';  WantRecovered = $false }
+    @{ Name = 'LlmParser-Empty';         Raw = '';                                     WantVerdict = 'unusable';  WantRecovered = $false },
+    # JSON attributed layer (phase II): valid index list -> attributed modifying
+    @{ Name = 'LlmParser-AttrIdx';        Raw = '{"modifying":[2]}';        Count = 2; WantVerdict = 'modifying'; WantRecovered = $false; WantIndices = '2' },
+    # empty array = all read-only
+    @{ Name = 'LlmParser-AttrEmpty';      Raw = '{"modifying":[]}';        Count = 2; WantVerdict = 'read-only'; WantRecovered = $false; WantIndices = '' },
+    # index 0 = "something not listed" (spec P3) - a valid flag
+    @{ Name = 'LlmParser-AttrZero';       Raw = '{"modifying":[0]}';       Count = 2; WantVerdict = 'modifying'; WantRecovered = $false; WantIndices = '0' },
+    # out of range (3 > Count=2) -> unusable
+    @{ Name = 'LlmParser-AttrOutOfRange'; Raw = '{"modifying":[3]}';       Count = 2; WantVerdict = 'unusable';  WantRecovered = $false; WantIndices = '' },
+    # wrong type (string, not array) -> unusable
+    @{ Name = 'LlmParser-AttrWrongType';  Raw = '{"modifying":"yes"}';     Count = 2; WantVerdict = 'unusable';  WantRecovered = $false; WantIndices = '' },
+    # ramble then JSON on the last line -> rescued (Recovered)
+    @{ Name = 'LlmParser-AttrLastLine';   Raw = "reasoning`n{`"modifying`":[1]}"; Count = 2; WantVerdict = 'modifying'; WantRecovered = $true; WantIndices = '1' }
 )
 foreach ($pc in $parserCases) {
     if (-not (Get-Command ConvertTo-LlmVerdict -ErrorAction SilentlyContinue)) {
         Record-Result -Ok $false -Name $pc.Name -Detail "ConvertTo-LlmVerdict not defined (TDD red phase)"
         continue
     }
-    $got = ConvertTo-LlmVerdict -RawContent $pc.Raw
-    $ok = ($got.Verdict -eq $pc.WantVerdict) -and ($got.Recovered -eq $pc.WantRecovered)
-    Record-Result -Ok $ok -Name $pc.Name -Detail "raw='$($pc.Raw)' => verdict=$($got.Verdict) recovered=$($got.Recovered) (wanted $($pc.WantVerdict)/$($pc.WantRecovered))"
+    $cnt = if ($pc.ContainsKey('Count')) { $pc.Count } else { 0 }
+    $wantIdx = if ($pc.ContainsKey('WantIndices')) { $pc.WantIndices } else { '' }
+    try {
+        $got = ConvertTo-LlmVerdict -RawContent $pc.Raw -SubCommandCount $cnt
+    }
+    catch {
+        Record-Result -Ok $false -Name $pc.Name -Detail "threw: $($_.Exception.Message)"
+        continue
+    }
+    $idxGot = if ($got.Indices) { ($got.Indices -join ',') } else { '' }
+    $ok = ($got.Verdict -eq $pc.WantVerdict) -and ($got.Recovered -eq $pc.WantRecovered) -and ($idxGot -eq $wantIdx)
+    Record-Result -Ok $ok -Name $pc.Name -Detail "raw='$($pc.Raw)' => verdict=$($got.Verdict) recovered=$($got.Recovered) indices='$idxGot' (wanted $($pc.WantVerdict)/$($pc.WantRecovered)/'$wantIdx')"
 }
 
 # =============================================================================
@@ -283,7 +353,16 @@ foreach ($tc in $testCases) {
 
         # Point the child at the fixture config (production default is the
         # repo-root config.json) and hand it the mock verdict via inheritance.
-        $env:PRETOOLHOOK_CONFIG_PATH = $configPath
+        # Fullpipe config: the fixture file as-is, OR a strictness-overridden
+        # temp copy when the case asks for one (the file default is strict).
+        $fpConfigPath = $configPath
+        if ($tc.HasAttribute('strictness')) {
+            $fpCfg = Get-Content $configPath -Raw
+            $fpCfg = $fpCfg -replace '"global_modifying_strictness": "\w+"', ('"global_modifying_strictness": "' + $tc.GetAttribute('strictness') + '"')
+            $fpConfigPath = 'c:\temp\llm-review-fp-config.json'
+            Set-Content $fpConfigPath $fpCfg -Encoding UTF8
+        }
+        $env:PRETOOLHOOK_CONFIG_PATH = $fpConfigPath
 
         # Pipe the payload to the child's stdin; capture stdout (the decision
         # JSON). stderr is discarded (the hook only writes warnings there).
@@ -302,8 +381,23 @@ foreach ($tc in $testCases) {
             $decision = $out.hookSpecificOutput.permissionDecision
             $reason   = "$($out.hookSpecificOutput.permissionDecisionReason)"
             $ok = ($decision -eq $tc.expected) -and ($exitCode -eq 0)
-            if ($ok -and $reasonContains) { $ok = $reason.Contains($reasonContains) }
-            Record-Result -Ok $ok -Name $name -Detail "cmd: $command | expected $($tc.expected)+exit0 got $decision+exit$exitCode | reason: $reason"
+            $detail = "cmd: $command | expected $($tc.expected)+exit0 got $decision+exit$exitCode | reason: $reason"
+            if ($ok -and $reasonContains) {
+                foreach ($want in ($reasonContains -split ';')) {
+                    if (-not $reason.Contains($want.Trim())) { $ok = $false; $detail += " | reason missing '$($want.Trim())'" }
+                }
+            }
+            if ($ok -and $tc.HasAttribute('log-contains')) {
+                # Read the child hook's .log (fixture log_file_path dir) and
+                # require every semicolon-separated marker in the newest entry.
+                $latestLog = Get-ChildItem (Join-Path $runLogDir '*.log') | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                $tail = (Get-Content $latestLog.FullName -Tail 40) -join "`n"
+                foreach ($marker in ($tc.GetAttribute('log-contains') -split ';')) {
+                    if (-not $tail.Contains($marker.Trim())) { $ok = $false; $detail += " | log missing '$($marker.Trim())'" }
+                }
+            }
+            Record-Result -Ok $ok -Name $name -Detail $detail
+            Write-CaseLog -Name $name -Ok $ok -Result $null -LlmLog $null -Mode 'fullpipe'
         }
         catch {
             Record-Result -Ok $false -Name $name -Detail "cmd: $command | stdout not JSON: $stdout"
@@ -325,6 +419,14 @@ foreach ($tc in $testCases) {
     $llmCfg.Enabled               = if ($tc.HasAttribute('enabled')) { [bool]::Parse($tc.GetAttribute('enabled')) } else { $true }
     $llmCfg.Level                 = if ($tc.HasAttribute('level')) { $tc.GetAttribute('level') } else { 'complex_remote' }
     $llmCfg.ComplexMinSubcommands = if ($tc.HasAttribute('min')) { [int]$tc.GetAttribute('min') } else { 2 }
+    # attributed_verdicts (phase II, default true). Add-Member -Force so this
+    # works on the TDD stub and on the real compiled block alike.
+    $attrWant = $true
+    if ($tc.HasAttribute('attributed')) { $attrWant = [bool]::Parse($tc.GetAttribute('attributed')) }
+    $llmCfg | Add-Member -MemberType NoteProperty -Name 'AttributedVerdicts' -Value $attrWant -Force
+    # strictness override (suppression cases need normal so gated allows).
+    if ($tc.HasAttribute('strictness')) { $config.global_modifying_strictness = $tc.GetAttribute('strictness') }
+    else { $config.global_modifying_strictness = $fileStrictness }
 
     # Build the minimal fake IDE input: the shape HookAdapter expects after
     # tool_name_mapping ("Bash" -> tool_input.command in the fixture config).
@@ -375,8 +477,14 @@ foreach ($tc in $testCases) {
     $detail = "cmd: $command | expected $($tc.expected) got $($result.Decision) | reason: $($result.Reason)"
 
     if ($ok -and $reasonContains) {
-        $ok = ("$($result.Reason)").Contains($reasonContains)
-        if (-not $ok) { $detail += " | reason missing '$reasonContains'" }
+        foreach ($want in ($reasonContains -split ';')) {
+            if (-not ("$($result.Reason)").Contains($want.Trim())) { $ok = $false; $detail += " | reason missing '$($want.Trim())'" }
+        }
+    }
+    if ($ok -and $tc.HasAttribute('reason-not-contains')) {
+        foreach ($bad in ($tc.GetAttribute('reason-not-contains') -split ';')) {
+            if (("$($result.Reason)").Contains($bad.Trim())) { $ok = $false; $detail += " | reason unexpectedly contains '$($bad.Trim())'" }
+        }
     }
     if ($ok -and $tc.HasAttribute('in-scope')) {
         $wantScope = [bool]::Parse($tc.GetAttribute('in-scope'))
@@ -394,7 +502,18 @@ foreach ($tc in $testCases) {
         $ok = ($got -eq $tc.GetAttribute('effect'))
         if (-not $ok) { $detail += " | effect expected $($tc.GetAttribute('effect')) got $got" }
     }
+    if ($ok -and $tc.HasAttribute('flagged')) {
+        $got = if ($llmLog -and $llmLog.flagged) { ($llmLog.flagged -join ',') } else { '' }
+        $ok = ($got -eq $tc.GetAttribute('flagged'))
+        if (-not $ok) { $detail += " | flagged expected '$($tc.GetAttribute('flagged'))' got '$got'" }
+    }
+    if ($ok -and $tc.HasAttribute('suppressed')) {
+        $got = if ($llmLog -and $llmLog.suppressed) { ($llmLog.suppressed -join ',') } else { '' }
+        $ok = ($got -eq $tc.GetAttribute('suppressed'))
+        if (-not $ok) { $detail += " | suppressed expected '$($tc.GetAttribute('suppressed'))' got '$got'" }
+    }
     Record-Result -Ok $ok -Name $name -Detail $detail
+    Write-CaseLog -Name $name -Ok $ok -Result $result -LlmLog $llmLog -Mode 'classify'
 }
 
 # Final cleanup: never leave the mock armed in the caller's environment.
@@ -408,6 +527,7 @@ Write-Host ""
 Write-Host "========================================"
 Write-Host "LLM-Review Fixture Run Complete"
 Write-Host "Total: $total  Passed: $passed  Failed: $failed"
+Write-Host "Run log: $runLogPath"
 if ($failures.Count -gt 0) {
     Write-Host "Failed:" -ForegroundColor Red
     foreach ($f in $failures) { Write-Host "  $($f.Name)" -ForegroundColor Red }

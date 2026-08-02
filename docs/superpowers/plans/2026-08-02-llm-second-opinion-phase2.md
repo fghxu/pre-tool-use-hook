@@ -382,10 +382,10 @@ foreach ($pc in $parserCases) {
 - [ ] **Step 10: Run RED baselines**
 
 Run: `pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1`
-Expected: FAIL — `Total: 24  Passed: 9  Failed: 15`. Passing: LlmConfig-BadLevel, the 6 phase-I parser checks, P2-BareTrueFallback, P2-AttributedOffVeto. Failing: LlmConfig-BadType (loader ignores the key today), 6 new parser checks (`-SubCommandCount` unknown parameter), 8 classify cases (all `idx:` mocks throw "unknown PRETOOLHOOK_LLMREVIEW_MOCK value").
+Expected: FAIL — `Total: 24  Passed: 12  Failed: 12`. Failing: LlmConfig-BadType, 4 JSON parser checks (AttrIdx/AttrEmpty/AttrZero/AttrLastLine — `-SubCommandCount` unknown), 7 classify cases (`idx:` mocks unknown to the phase-I verdict fn). Passing early (legitimately, not accidentally green): LlmConfig-BadLevel + 6 phase-I parser checks; LlmParser-AttrOutOfRange + AttrWrongType (the phase-I parser already maps those two to layer-4 `unusable` — the right answer for the wrong reason, tightened by Task 3); P2-BareTrueFallback + P2-AttributedOffVeto (phase-I veto paths); P2-SingleGatedOutOfScope (mock never consulted — out of scope).
 
 Run the phase-I file as regression: `pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.xml`
-Expected: FAIL — `Total: 32  Passed: 25  Failed: 7` (the 25 phase-I checks still green; the 7 failures are the new T2/T3 pre-flight targets: LlmConfig-BadType + 6 JSON parser checks).
+Expected: FAIL — `Total: 32  Passed: 27  Failed: 5` (all 25 phase-I checks green; failures are the T2/T3 pre-flight targets: LlmConfig-BadType + the 4 JSON parser checks).
 
 - [ ] **Step 11: Commit**
 
