@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- LLM-LIVE SUITE - 5 cases against the REAL gateway (default glm-5.2 @
+<!-- LLM-LIVE SUITE - 7 cases against the REAL gateway (default glm-5.2 @
      http://127.0.0.1:3030). This is the true end-to-end proof: the real
      request shape is accepted by the real model, real answers are parsed, and
      the real hook process classifies through it.
-     COSTS QUOTA (~1.5k tokens per run: 5 calls x ~300 tokens, max_tokens=16).
+     COSTS QUOTA (~2k tokens per run: 7 calls x ~300 tokens, max_tokens=16).
      OPT-IN ONLY - never part of any automated suite.
      Commands are ONLY classified by the LLM, never executed. They deliberately
      overlap the system prompt's few-shot anchors so outcomes are stable; a
      wrong verdict here is a genuine model-quality signal, not test flake.
+     The two Live-Attr-* cases run the phase-II ATTRIBUTED prompt (V2) with a
+     numbered sub-command list and assert the returned indices exactly - their
+     outcome decides whether production ships attributed_verdicts true or false
+     for the current model.
      Run:
        pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1 -->
 <commands>
@@ -36,6 +40,16 @@
     <test-case name="Live-FullPipe-Agree" mode="fullpipe" expect-decision="allow">
       <description>end-to-end through the REAL Hook.ps1: Get-Date (local allow) + LLM read-only => allow, exit 0 - the whole chain works against the live gateway</description>
       <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="Live-Attr-EmptyIdx" expect-verdict="read-only" subcommands="aws s3 ls;kubectl get pods" expect-indices="">
+      <description>attributed V2: both sub-commands are read-only =&gt; model should answer {"modifying":[]} =&gt; read-only with an explicitly EMPTY index list (contract compliance signal)</description>
+      <copilot-command><![CDATA[aws s3 ls && kubectl get pods]]></copilot-command>
+    </test-case>
+
+    <test-case name="Live-Attr-MixedIdx" expect-verdict="modifying" subcommands="aws s3 ls;aws s3 cp file.txt s3://bucket/key" expect-indices="2">
+      <description>attributed V2: only sub-command 2 mutates (classified, never executed) =&gt; model should answer {"modifying":[2]} =&gt; modifying with indices=[2] (exact-attribution signal for production attributed_verdicts)</description>
+      <copilot-command><![CDATA[aws s3 ls && aws s3 cp file.txt s3://bucket/key]]></copilot-command>
     </test-case>
 
   </category-group>

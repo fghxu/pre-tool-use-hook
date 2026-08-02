@@ -12,7 +12,7 @@
 #   verdicts sensible).
 #
 # COST / SAFETY
-#   - COSTS QUOTA: ~1.5k tokens per run (5 calls x ~300 tokens; max_tokens=16).
+#   - COSTS QUOTA: ~2k tokens per run (7 calls x ~300 tokens; max_tokens=16).
 #   - Commands are only CLASSIFIED by the LLM as text - NEVER executed.
 #   - OPT-IN: nothing runs this except you, deliberately.
 #
@@ -25,10 +25,21 @@
 # HOW TO READ THE OUTPUT
 #   Unlike the offline suites, EVERY case prints a LIVE line as it completes:
 #       LIVE [Live-ReadOnly-Local] verdict=read-only latency=4820ms raw='false' - OK
+#   Attributed cases also show the parsed index list: indices=[2].
 #   ...so you can watch what the model actually answered. Failures also print
 #   as FAIL [<name>] + detail, and the summary lists them.
-#   Exit 0 = all 5 green. Exit 1 = a case failed OR the gateway is unreachable
+#   Exit 0 = all 7 green. Exit 1 = a case failed OR the gateway is unreachable
 #   (you asked for a live test; nothing ran is a failure, not a skip).
+#
+# CASE ATTRIBUTES (direct mode)
+#   expect-verdict   read-only|modifying|unusable|down (required)
+#   subcommands      semicolon-separated numbered list; when present the case
+#                    runs ATTRIBUTED (V2 prompt + <sub_commands> block) and the
+#                    list is passed to Get-LlmReviewVerdict -SubCommands.
+#                    When absent the case stays phase-I (V1 binary prompt).
+#   expect-indices   comma-separated indices the verdict MUST carry ("2",
+#                    "1,2"); "" means an explicitly EMPTY list (model answered
+#                    {"modifying":[]}). Absent = indices not asserted.
 #
 # RETRY POLICY (principled)
 #   Each case retries ONCE only on transient outcomes ('down' or 'unusable' -
@@ -121,6 +132,10 @@ $llmCfg = [PSCustomObject]@{
     MaxTokens             = 16
     ComplexMinSubcommands = 2
     RemoteIndicators      = @()
+    # Attributed verdicts are PER-CASE here: a case with a subcommands attr
+    # flips this to $true for that call (set in the loop below). Default off
+    # keeps the 5 phase-I cases on the V1 binary prompt byte-identically.
+    AttributedVerdicts    = $false
 }
 
 # =============================================================================
@@ -184,15 +199,23 @@ foreach ($tc in $testCases) {
     # ==================================================================
     $expectVerdict = $tc.GetAttribute('expect-verdict')
 
+    # Attributed mode is opt-in per case via the subcommands attr: the list is
+    # numbered in the prompt and the parser validates indices against it.
+    $subCmds = @()
+    if ($tc.HasAttribute('subcommands')) {
+        $subCmds = @($tc.GetAttribute('subcommands') -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+    $llmCfg.AttributedVerdicts = ($subCmds.Count -gt 0)
+
     $verdict = $null
     $attempts = 0
     foreach ($attempt in 1..2) {
         $attempts = $attempt
         try {
-            $verdict = Get-LlmReviewVerdict -Command $command -LlmConfig $llmCfg
+            $verdict = Get-LlmReviewVerdict -Command $command -LlmConfig $llmCfg -SubCommands $subCmds
         }
         catch {
-            $verdict = [PSCustomObject]@{ Verdict = 'down'; Raw = ''; LatencyMs = 0; Recovered = $false; Error = $_.Exception.Message }
+            $verdict = [PSCustomObject]@{ Verdict = 'down'; Raw = ''; LatencyMs = 0; Recovered = $false; Error = $_.Exception.Message; Indices = $null }
         }
         # Retry only on transient outcomes.
         if ($verdict.Verdict -ne 'down' -and $verdict.Verdict -ne 'unusable') { break }
@@ -200,8 +223,30 @@ foreach ($tc in $testCases) {
     }
 
     $ok = ($verdict.Verdict -eq $expectVerdict)
-    Write-Host "LIVE [$name] verdict=$($verdict.Verdict) latency=$($verdict.LatencyMs)ms raw='$($verdict.Raw)'$(if ($verdict.Recovered) {' (recovered)'})$(if ($ok) {' - OK'} else { " - WRONG (wanted $expectVerdict)" })"
-    Record-Result -Ok $ok -Name $name -Detail "cmd: $command | expected $expectVerdict got $($verdict.Verdict) after $attempts attempt(s) | raw='$($verdict.Raw)' error='$($verdict.Error)'"
+    $detail = "cmd: $command | expected $expectVerdict got $($verdict.Verdict) after $attempts attempt(s) | raw='$($verdict.Raw)' error='$($verdict.Error)'"
+
+    # Optional index assertion (attributed cases): exact set match, or an
+    # explicitly empty list when expect-indices="". A $null Indices (bare
+    # true/false fallback) only satisfies an ABSENT expect-indices attr.
+    if ($tc.HasAttribute('expect-indices')) {
+        $wantRaw = $tc.GetAttribute('expect-indices').Trim()
+        $haveIdx = $verdict.Indices
+        $haveStr = if ($null -ne $haveIdx) { "[$(@($haveIdx) -join ',')]" } else { '<null>' }
+        $detail += " indices=$haveStr"
+        if ($wantRaw -eq '') {
+            $idxOk = ($null -ne $haveIdx -and @($haveIdx).Count -eq 0)
+        }
+        else {
+            $wantStr = (@($wantRaw -split ',' | ForEach-Object { [int]$_.Trim() }) | Sort-Object) -join ','
+            $haveSorted = if ($null -ne $haveIdx) { (@($haveIdx) | Sort-Object) -join ',' } else { '<null>' }
+            $idxOk = ($haveSorted -eq $wantStr)
+        }
+        if (-not $idxOk) { $ok = $false; $detail += " (wanted indices [$wantRaw])" }
+    }
+
+    $idxPrint = if ($null -ne $verdict.Indices) { " indices=[$(@($verdict.Indices) -join ',')]" } else { '' }
+    Write-Host "LIVE [$name] verdict=$($verdict.Verdict)$idxPrint latency=$($verdict.LatencyMs)ms raw='$($verdict.Raw)'$(if ($verdict.Recovered) {' (recovered)'})$(if ($ok) {' - OK'} else { " - WRONG (wanted $expectVerdict)" })"
+    Record-Result -Ok $ok -Name $name -Detail $detail
 }
 
 Remove-Item Env:\PRETOOLHOOK_CONFIG_PATH -ErrorAction SilentlyContinue
