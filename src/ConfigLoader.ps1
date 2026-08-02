@@ -86,6 +86,10 @@ function Test-ConfigSchema {
             $llm.enabled -isnot [bool]) {
             throw "Configuration validation failed: 'llm_second_opinion.enabled' must be a boolean"
         }
+        if ((Get-Member -InputObject $llm -Name 'attributed_verdicts' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $llm.attributed_verdicts -isnot [bool]) {
+            throw "Configuration validation failed: 'llm_second_opinion.attributed_verdicts' must be a boolean"
+        }
         if ((Get-Member -InputObject $llm -Name 'level' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
             $llm.level -notin @('all', 'complex_commands', 'complex_remote')) {
             throw "Configuration validation failed: 'llm_second_opinion.level' must be 'all', 'complex_commands', or 'complex_remote', got '$($llm.level)'"
@@ -536,6 +540,8 @@ function Load-Config {
         if (Get-Member -InputObject $llmRaw -Name 'max_tokens' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmMaxTokens = [int]$llmRaw.max_tokens }
         $llmMinSubs = 2
         if (Get-Member -InputObject $llmRaw -Name 'complex_min_subcommands' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmMinSubs = [int]$llmRaw.complex_min_subcommands }
+        $llmAttributed = $true
+        if (Get-Member -InputObject $llmRaw -Name 'attributed_verdicts' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmAttributed = [bool]$llmRaw.attributed_verdicts }
         $llmCompiled = [PSCustomObject]@{
             Enabled               = $llmEnabled
             Level                 = $llmLevel
@@ -546,6 +552,7 @@ function Load-Config {
             Temperature           = $llmTemperature
             MaxTokens             = $llmMaxTokens
             ComplexMinSubcommands = $llmMinSubs
+            AttributedVerdicts      = $llmAttributed
             RemoteIndicators      = $indicatorRegexes
         }
     }
