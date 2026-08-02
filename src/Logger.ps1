@@ -204,7 +204,11 @@ function Format-LlmLogBlock {
                 $reconLine += " suppressed=[$($LlmLog.suppressed -join ',')](strictness_gated)"
             }
             $vetoIdx = @($LlmLog.flagged | Where-Object { $LlmLog.suppressed -notcontains $_ })
-            $reconLine += " veto=[$($vetoIdx -join ',')] -> FINAL: $($Result.Decision)"
+            $reconLine += " veto=[$($vetoIdx -join ',')]"
+            if ($LlmLog.path_guard_denied -and $LlmLog.path_guard_denied.Count -gt 0) {
+                $reconLine += " path-guard denied: [$($LlmLog.path_guard_denied -join ',')]"
+            }
+            $reconLine += " -> FINAL: $($Result.Decision)"
         }
         'veto-suppressed-policy' {
             $reconLine += "flagged=[$($LlmLog.flagged -join ',')] all suppressed (strictness_gated policy) -> FINAL: $($Result.Decision)"

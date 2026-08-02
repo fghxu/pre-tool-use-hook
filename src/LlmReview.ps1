@@ -350,15 +350,89 @@ function Get-LlmReviewVerdict {
     return $result
 }
 
+# =============================================================================
+# Stage-2 path-guard tables (phase-III)
+#
+# Skip-list: commands whose arguments are DATA, never filesystem write targets
+# (printf's format string, setx's registry value). Path-checking them would
+# veto benign shapes - exactly the noise phase II exists to kill.
+# =============================================================================
+$script:LlmGuardSkipCommands = @('printf', 'setx')
+
+# Writer name-list: commands that CAN take a filesystem path as a write target.
+# Used ONLY for the fail-closed variable rule (see Test-GatedInvocationSafe).
+$script:LlmGuardWriterCommands = @(
+    'set-content', 'add-content', 'out-file', 'export-csv', 'export-clixml',
+    'tee-object', 'new-item', 'copy-item', 'move-item', 'rename-item',
+    'sc', 'ac', 'cp', 'copy', 'cpi', 'mv', 'move', 'mi', 'ren', 'rename', 'rni',
+    'ni', 'md', 'mkdir', 'ln', 'unzip'
+)
+
+# Split-GuardTokens: quote-aware whitespace tokenizer. Quoted spans keep their
+# content whole (quotes stripped), so "C:\Windows\my file.txt" survives as one
+# token and cannot smuggle a protected path past the path-shape scan.
+# Unbalanced quotes keep the remainder as one token (fail-safe direction).
+function Split-GuardTokens {
+    param([string]$Command)
+    $tokens = @()
+    $cur = ''
+    $inS = $false; $inD = $false
+    foreach ($ch in $Command.ToCharArray()) {
+        if ($inS) { if ($ch -eq "'") { $inS = $false } else { $cur += $ch }; continue }
+        if ($inD) { if ($ch -eq '"') { $inD = $false } else { $cur += $ch }; continue }
+        if ($ch -eq "'") { $inS = $true; continue }
+        if ($ch -eq '"') { $inD = $true; continue }
+        if ($ch -match '\s') { if ($cur) { $tokens += $cur; $cur = '' }; continue }
+        $cur += $ch
+    }
+    if ($cur) { $tokens += $cur }
+    return $tokens
+}
+
 function Test-GatedInvocationSafe {
     <#
     .SYNOPSIS
-        Stage-2 extension point (spec P4): decides whether a strictness_gated
-        invocation is safe to suppress. Stage 1: always safe (tier-only
-        suppression). Stage 2 will path-check writable gated cmdlets;
-        unknown argument shapes must fail safe ($false = do not suppress).
+        Stage-2 guard (phase-III): decides whether a strictness_gated
+        invocation is safe to suppress. Generic token scan, no positional
+        table (interleaved flags make positions unreliable):
+          1. skip-list commands (args are data) are always safe;
+          2. every path-shaped token (drive-absolute / UNC / POSIX-absolute)
+             goes through Resolve-PathPolicy - any 'ask' denies suppression;
+          3. fail-closed variable rule: a KNOWN WRITER with NO literal path
+             token but an unresolved $var/%VAR% argument (temp forms
+             %TEMP%/%TMP%/$env:TEMP/$env:TMP excepted) cannot prove its
+             target safe (H5 class: %SystemRoot% unexpanded canonicalizes as
+             CWD-relative) - deny;
+          4. anything else (git/terraform/no-path commands) is safe, exactly
+             like stage 1.
+        Accepted residuals (documented in the phase-III spec): source-vs-
+        destination is not distinguished (Copy-Item FROM a system dir vetoes);
+        a writer with a literal SAFE path plus a variable TARGET slips (rule 3
+        only fires when no literal path token exists).
     #>
     param([string]$Command, [PSCustomObject]$Config)
+    if ([string]::IsNullOrWhiteSpace($Command)) { return $false }
+    $tokens = @(Split-GuardTokens $Command)
+    if ($tokens.Count -eq 0) { return $false }
+
+    $name = $tokens[0].Trim().ToLowerInvariant()
+    try { $name = [System.IO.Path]::GetFileNameWithoutExtension($name) } catch { }
+    if ($script:LlmGuardSkipCommands -contains $name) { return $true }
+    $isWriter = $script:LlmGuardWriterCommands -contains $name
+
+    $hasVar = $false
+    $hasLiteralPath = $false
+    foreach ($t in ($tokens | Select-Object -Skip 1)) {
+        if (-not $t) { continue }
+        if (($t.Contains('$') -or $t.Contains('%')) -and
+            ($t -notmatch '^(?i)(\$env:(TEMP|TMP)\b|%TEMP%|%TMP%)')) { $hasVar = $true }
+        if ($t -match '^([A-Za-z]:[\\/]|\\\\|/)') {
+            $hasLiteralPath = $true
+            $policy = Resolve-PathPolicy -Path $t -Config $Config
+            if ($policy.Decision -eq 'ask') { return $false }
+        }
+    }
+    if ($isWriter -and $hasVar -and -not $hasLiteralPath) { return $false }
     return $true
 }
 
@@ -398,6 +472,7 @@ function Invoke-LlmReview {
         local_decision    = ''
         local_reason      = ''
         timeout_ms        = $llm.TimeoutMs
+        path_guard_denied = @()
     }
 
     $scope = Test-LlmReviewScope -ClassifyResult $ClassifyResult -Config $Config
@@ -451,16 +526,24 @@ function Invoke-LlmReview {
                 $log.flagged = @($verdict.Indices)
                 $vetoIdx = @()
                 $suppIdx = @()
+                $pgDenied = @()
                 foreach ($ix in $verdict.Indices) {
                     if ($ix -eq 0) { $vetoIdx += 0; continue }   # unlisted danger: never suppressible (P3)
                     $sub = $scope.SubCommands[$ix - 1]
-                    if ($sub -and $sub.Tier -eq 'strictness_gated' -and
-                        (Test-GatedInvocationSafe -Command $sub.Command -Config $Config)) {
+                    $isGated = ($sub -and $sub.Tier -eq 'strictness_gated')
+                    if ($isGated -and (Test-GatedInvocationSafe -Command $sub.Command -Config $Config)) {
                         $suppIdx += $ix
                     }
-                    else { $vetoIdx += $ix }
+                    else {
+                        $vetoIdx += $ix
+                        # A gated flag the stage-2 guard REFUSED to suppress
+                        # (protected-path target / unproven variable) - recorded
+                        # so the reconciliation log can say WHY.
+                        if ($isGated) { $pgDenied += $ix }
+                    }
                 }
                 $log.suppressed = @($suppIdx)
+                $log.path_guard_denied = @($pgDenied)
                 if ($vetoIdx.Count -eq 0) {
                     # Every flag was accepted policy (the flood-killer)
                     $log.effect = 'veto-suppressed-policy'

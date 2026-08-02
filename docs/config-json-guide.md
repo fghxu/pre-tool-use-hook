@@ -250,10 +250,28 @@ against the tier the local engine recorded for that sub-command:
 
 | Flagged sub-command's local tier | Result |
 |----------------------------------|--------|
-| `strictness_gated` (risk:low, allows in normal mode) | **suppressed as policy** — no veto; if every flag suppresses, the final decision stays the local one (`effect=veto-suppressed-policy`) |
+| `strictness_gated` (risk:low, allows in normal mode) | **suppressed as policy** — no veto, *unless* the stage-2 path-guard refuses (below); if every flag suppresses, the final decision stays the local one (`effect=veto-suppressed-policy`) |
 | `read_only` | **veto** → ask, reason names the offender with its index |
 | unknown / untiered | **veto** (never suppressible) |
 | index `0` ("something modifying not in the list") | **veto** (never suppressible) |
+
+**Stage-2 path-guard (phase III).** Before a gated flag is suppressed, the
+guard (`Test-GatedInvocationSafe`) checks *where* the gated command writes —
+closing the documented gap where `Set-Content -Path C:\Windows\x.txt` (gated,
+args never path-checked locally) had its LLM flag suppressed. The guard scans
+every token of the flagged command: any absolute path (drive / UNC / POSIX)
+goes through the same `Resolve-PathPolicy` ladder redirects use, and an `ask`
+there **denies suppression** (veto). Three refinements keep the noise out:
+`printf`/`setx` are skip-listed (their arguments are data, not targets);
+relative paths are not scanned (CWD is writable in every mode); and a known
+writer cmdlet whose target is an *unresolvable variable* fails closed —
+unless a literal path token is present (`Set-Content C:\temp\a.txt $content`
+suppresses; `Set-Content $reportPath x` vetoes; `%SystemRoot%\x` always
+vetoes). Guard denials are reconciled in the `.log`
+(`path-guard denied: [N]` on the LLM-RECONCILE line) and in the JSONL `llm`
+object (`path_guard_denied`). Known residual: source and destination are not
+distinguished — `Copy-Item` *from* a system dir vetoes even though it only
+reads (rare; the reason names the path).
 
 A bare `true`/`false` answer is the *unattributed fallback* (P5): it vetoes
 exactly like phase I, even on a gated block. Out-of-range, non-integer, or
@@ -263,7 +281,8 @@ reasons list both the offenders and the suppressed
 Every in-scope check writes a four-line reconciliation block to the `.log`
 (`LLM-SENT` numbered list → `LLM-RECV` raw response → `LLM-LOCAL` decision +
 tiers → `LLM-RECONCILE` flagged/suppressed/veto → FINAL), and the JSONL `llm`
-object gains `indices`, `flagged`, `suppressed`, `tiers`, `local_decision`.
+object gains `indices`, `flagged`, `suppressed`, `tiers`, `local_decision`,
+`path_guard_denied`.
 
 **Never checked** (even at level `all`… `all` means "all full-pipeline command
 results"): ignore-listed tools, unknown tools, `trusted_pattern` /

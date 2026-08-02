@@ -242,4 +242,57 @@
     </test-case>
 
   </category-group>
+
+  <category-group name="P3G7-Stage2PathGuard">
+
+    <test-case expected="ask" category="G7-SystemPathVeto" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason-contains="Set-Content;sub-command 1" reason="stage-2: flagged gated write whose target is a system path is NOT suppressed - the LLM flag reaches the user (the phase-III fix)">
+      <description>G7: system-path target vetoes</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Set-Content -Path C:\Windows\x.txt -Value x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G7-QuotedSpaceVeto" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason="stage-2: quote-aware tokenizer keeps a spaced path whole - quotes cannot smuggle a system path past the guard">
+      <description>G7: quoted spaced path vetoes</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Set-Content "C:\Windows\my file.txt" x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G7-VariableTargetVeto" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason="stage-2 fail-closed: known writer whose target is an unresolvable variable (no literal path token present) cannot be proven safe - deny suppression">
+      <description>G7: variable target vetoes</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Set-Content $reportPath x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G7-ValueVariableSuppressed" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="stage-2: a literal safe path target is present, so a variable in the VALUE position does not trip the fail-closed rule (documented residual: writer with literal safe path + variable TARGET slips)">
+      <description>G7: variable value suppresses</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Set-Content C:\temp\a.txt $content ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G7-TempEnvSuppressed" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="stage-2: $env:TEMP is a recognized temp form - the variable rule does not fire and the path scan skips non-literal tokens">
+      <description>G7: $env:TEMP suppresses</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Set-Content "$env:TEMP\f.txt" x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G7-EnvVarSystemVeto" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason="stage-2 fail-closed (H5 class): %SystemRoot% unexpanded would canonicalize as CWD-relative - any %-var other than TEMP/TMP denies suppression">
+      <description>G7: %SystemRoot% vetoes</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Set-Content %SystemRoot%\x.txt y ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G7-CopySourceVeto" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason="stage-2 accepted noise (class B): Copy-Item FROM a system dir is a read, but the generic scan cannot tell source from destination - veto is the conservative answer">
+      <description>G7: copy from system vetoes (noise pin)</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Copy-Item C:\Windows\System32\calc.exe C:\temp\ ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G7-CopyDestVeto" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason="stage-2: copy INTO a system dir - the real hole, closed">
+      <description>G7: copy into system vetoes</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Copy-Item C:\temp\a.dll C:\Windows\System32\ ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G7-PrintfSkip" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="stage-2 skip-list: printf's argument is a format string (DATA), never a write target - path-looking content is not checked">
+      <description>G7: printf format string skips</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[printf C:\Windows\note ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G7-MkdirSystemVeto" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" reason="stage-2: mkdir into a system dir - Linux-domain gated writer, same guard">
+      <description>G7: mkdir into system vetoes</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[mkdir C:\Windows\foo ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" category="G7-RelativeSuppressed" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="stage-2: relative paths are CWD-relative (writable in every mode) - not scanned, stage-1 suppression stands">
+      <description>G7: relative target suppresses</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Set-Content sub\dir\a.txt x ; git status]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" category="G7-PathGuardLogMarker" level="complex_commands" strictness="normal" mock="idx:1" verdict="modifying" effect="veto" flagged="1" suppressed="" log-contains="path-guard denied: [1]" reason="reconciliation: the RECONCILE line annotates guard-denied indices so the log shows WHY a gated flag was not suppressed">
+      <description>G7: path-guard log marker</description><tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Set-Content -Path C:\Windows\x.txt -Value x ; git status]]></copilot-command>
+    </test-case>
+
+  </category-group>
 </commands>

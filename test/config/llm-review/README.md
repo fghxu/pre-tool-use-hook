@@ -3,7 +3,9 @@
 Isolated fixture for the second-opinion LLM feature (phase-I spec:
 `docs/superpowers/specs/2026-08-01-llm-second-opinion-design.md`; phase-II spec:
 `docs/superpowers/specs/2026-08-02-llm-second-opinion-phase2-design.md` —
-attributed verdicts + gated-tier suppression + reconciliation logging).
+attributed verdicts + gated-tier suppression + reconciliation logging;
+phase-III spec: `docs/superpowers/specs/2026-08-02-llm-second-opinion-phase3-design.md` —
+stage-2 path-guard for gated writable cmdlets).
 
 ## Run
 
@@ -16,9 +18,14 @@ pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/
 - **Default (small)**: 24 checks — 10 phase-II cases (`test-cases.p2.small.xml`)
   plus 14 shared pre-flights (config rejection ×2, 12 `ConvertTo-LlmVerdict`
   parser units).
-- **Large (opt-in)**: 64 checks — 50 cases (`test-cases.p2.large.xml`) in six
+- **Large (opt-in)**: 78 checks — 62 cases (`test-cases.p2.large.xml`) in seven
   groups: suppression matrix, levels, fallback/malformed indices,
-  effects/log/reason, scope numbering, `attributed_verdicts=false` regression.
+  effects/log/reason, scope numbering, `attributed_verdicts=false` regression,
+  and the **stage-2 path-guard** (G7: system-path targets veto, temp/CWD/
+  relative/variable-value suppress, skip-list, `%SystemRoot%` fail-closed,
+  copy source-vs-dest, `path-guard denied` log marker). The fixture config
+  carries a minimal `system_paths` for the guard (without it the compiled
+  regex matches nothing and `C:\Windows` allows at normal).
 - **Phase-I file**: 32 checks — the original 16 scope/merge cases + 2 fullpipe
   + the same pre-flights.
 

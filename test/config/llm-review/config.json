@@ -11,6 +11,12 @@
   "trusted_pattern": [],
   "untrusted_pattern": [],
 
+  "_comment_system_paths": "Needed by the stage-2 path-guard (Test-GatedInvocationSafe): without system_paths the compiled regex matches NOTHING and Resolve-PathPolicy allows C:\\Windows at normal. Windows entries are regex (not escaped by the loader) -> quadruple backslashes in JSON.",
+  "system_paths": {
+    "linux": ["/etc", "/usr", "/bin", "/sbin"],
+    "windows": ["C:\\\\Windows", "C:\\\\Program Files"]
+  },
+
   "intercept_tool_name": [ "Bash", "run_in_terminal" ],
 
   "tool_name_mapping": {
@@ -47,7 +53,8 @@
       "read_only": [],
       "modifying": [],
       "strictness_gated": [
-        { "name": "Set-Content", "patterns": ["Set-Content *"], "description": "Write file (gated; known path gap, spec P4)" }
+        { "name": "Set-Content", "patterns": ["Set-Content *"], "description": "Write file (gated; known path gap, spec P4)" },
+        { "name": "Copy-Item",   "patterns": ["Copy-Item *"],   "description": "Copy files (gated; stage-2 source+dest coverage)" }
       ]
     },
 
@@ -61,6 +68,10 @@
       ],
       "modifying": [
         { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ],
+      "strictness_gated": [
+        { "name": "printf", "patterns": ["printf *"], "description": "Format string is DATA (guard skip-list)" },
+        { "name": "mkdir",  "patterns": ["mkdir *"],  "description": "Create directory (gated; stage-2 target)" }
       ]
     },
 
