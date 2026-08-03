@@ -15,10 +15,10 @@ pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/
 pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.xml            # phase-I file (regression)
 ```
 
-- **Default (small)**: 24 checks — 10 phase-II cases (`test-cases.p2.small.xml`)
-  plus 14 shared pre-flights (config rejection ×2, 12 `ConvertTo-LlmVerdict`
-  parser units).
-- **Large (opt-in)**: 78 checks — 64 cases (`test-cases.p2.large.xml`) in seven
+- **Default (small)**: 26 checks — 10 phase-II cases (`test-cases.p2.small.xml`)
+  plus 16 shared pre-flights (config rejection ×2, 12 `ConvertTo-LlmVerdict`
+  parser units, 2 `Format-LlmLogBlock` sub-command-count units).
+- **Large (opt-in)**: 80 checks — 64 cases (`test-cases.p2.large.xml`) in seven
   groups: suppression matrix, levels, fallback/malformed indices,
   effects/log/reason, scope numbering, `attributed_verdicts=false` regression,
   and the **stage-2 path-guard** (G7: system-path targets veto, temp/CWD/
@@ -26,7 +26,7 @@ pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/
   copy source-vs-dest, `path-guard denied` log marker). The fixture config
   carries a minimal `system_paths` for the guard (without it the compiled
   regex matches nothing and `C:\Windows` allows at normal).
-- **Phase-I file**: 32 checks — the original 16 scope/merge cases + 2 fullpipe
+- **Phase-I file**: 34 checks — the original 16 scope/merge cases + 2 fullpipe
   + the same pre-flights.
 
 LLM verdicts are injected via `PRETOOLHOOK_LLMREVIEW_MOCK`

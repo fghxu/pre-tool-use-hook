@@ -19,14 +19,15 @@
 #           <one line: command, expected vs got, and why it failed>
 #   - At the end a summary prints:  Total / Passed / Failed  and the list of
 #     failed check names (empty list = everything green).
-#   - Expected healthy state:  Total: 25  Passed: 25  Failed: 0
-#
-# THE 25 CHECKS, IN THREE GROUPS
-#   1. Pre-flight (7 checks, no XML):
-#      - LlmConfig-BadLevel : config.badlevel.json has level="bogus";
-#        Load-Config MUST throw (proves config validation is fail-closed).
-#      - LlmParser-* (6)    : unit checks for ConvertTo-LlmVerdict, the layered
+# THE CHECKS, IN THREE GROUPS (totals vary by -XmlPath; pre-flights always run)
+#   1. Pre-flight (16 checks, no XML):
+#      - LlmConfig-BadLevel / LlmConfig-BadType (2): invalid level / attributed
+#        verdicts type MUST throw (proves config validation is fail-closed).
+#      - LlmParser-* (12)   : unit checks for ConvertTo-LlmVerdict, the layered
 #        parser that turns raw LLM text into modifying|read-only|unusable.
+#      - LlmLog-* (2)       : unit checks for Format-LlmLogBlock - the LLM-SENT
+#        line and the out-of-scope one-liner both carry the sub-command count
+#        ([ N subcommand ]) so threshold tuning is auditable from the log.
 #   2. XML classify cases (16 checks, mode=classify, the default):
 #      Each <test-case> in test-cases.xml is run IN-PROCESS: the command goes
 #      through Invoke-Classify (the real local engine) and then Invoke-LlmReview
@@ -292,6 +293,35 @@ foreach ($pc in $parserCases) {
     $idxGot = if ($null -ne $got.Indices -and $got.Indices.Count -gt 0) { ($got.Indices -join ',') } else { '' }
     $ok = ($got.Verdict -eq $pc.WantVerdict) -and ($got.Recovered -eq $pc.WantRecovered) -and ($idxGot -eq $wantIdx)
     Record-Result -Ok $ok -Name $pc.Name -Detail "raw='$($pc.Raw)' => verdict=$($got.Verdict) recovered=$($got.Recovered) indices='$idxGot' (wanted $($pc.WantVerdict)/$($pc.WantRecovered)/'$wantIdx')"
+}
+
+# =============================================================================
+# PRE-FLIGHT CHECKS 15-16 - LlmLog-* (Format-LlmLogBlock sub-command count)
+# The reconciliation block must show HOW MANY sub-commands were recorded, so
+# threshold tuning (complex_min_subcommands) is auditable from the log alone:
+#   in-scope  : "LLM-SENT      : [ N subcommand ] | model=..."
+#   out-scope : "LLM: [ N subcommand ] | in_scope=False verdict=not_called ..."
+# =============================================================================
+if (-not (Get-Command Format-LlmLogBlock -ErrorAction SilentlyContinue)) {
+    Record-Result -Ok $false -Name "LlmLog-SentCount" -Detail "Format-LlmLogBlock not defined"
+    Record-Result -Ok $false -Name "LlmLog-OutCount"  -Detail "Format-LlmLogBlock not defined"
+}
+else {
+    $inScopeLog = [PSCustomObject]@{
+        in_scope = $true; sub_command_count = 3; model = 'm'; timeout_ms = 30000
+        sent = @('a', 'b', 'c'); verdict = 'modifying'; raw_excerpt = '{"modifying":[1]}'
+        latency_ms = 1; recovered = $false; mocked = $false; indices = @(1)
+        local_decision = 'allow'; local_reason = 'r'; tiers = @('strictness_gated', 'read_only', 'read_only')
+        flagged = @(1); suppressed = @(); path_guard_denied = @(); effect = 'veto'
+    }
+    $block = Format-LlmLogBlock -Result ([PSCustomObject]@{ Decision = 'ask' }) -LlmLog $inScopeLog
+    Record-Result -Ok ($block.Contains('[ 3 subcommand ]')) -Name "LlmLog-SentCount" -Detail "LLM-SENT line missing count: $(($block -split "`n")[0])"
+
+    $outScopeLog = [PSCustomObject]@{
+        in_scope = $false; sub_command_count = 1; verdict = 'not_called'; effect = 'none'; latency_ms = $null
+    }
+    $line = Format-LlmLogBlock -Result ([PSCustomObject]@{ Decision = 'allow' }) -LlmLog $outScopeLog
+    Record-Result -Ok ($line.Contains('[ 1 subcommand ]')) -Name "LlmLog-OutCount" -Detail "out-of-scope one-liner missing count: $line"
 }
 
 # =============================================================================

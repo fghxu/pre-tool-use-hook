@@ -145,15 +145,16 @@ function Format-LlmLogBlock {
     )
     if ($null -eq $LlmLog) { return '' }
 
-    # Out-of-scope: keep the phase-I one-liner.
+    # Out-of-scope: keep the phase-I one-liner (with the sub-command count, so
+    # threshold tuning for complex_min_subcommands is auditable from the log).
     if (-not $LlmLog.in_scope) {
-        return "  LLM: in_scope=$($LlmLog.in_scope) verdict=$($LlmLog.verdict) effect=$($LlmLog.effect) latency_ms=$($LlmLog.latency_ms)`n"
+        return "  LLM: [ $($LlmLog.sub_command_count) subcommand ] | in_scope=$($LlmLog.in_scope) verdict=$($LlmLog.verdict) effect=$($LlmLog.effect) latency_ms=$($LlmLog.latency_ms)`n"
     }
 
     $mockMark = if ($LlmLog.mocked) { ' (mock)' } else { '' }
 
-    # --- LLM-SENT: model + timeout + the numbered sub-command list (<=120 chars each)
-    $sentLine = "  LLM-SENT      : model=$($LlmLog.model)"
+    # --- LLM-SENT: sub-command count + model + timeout + the numbered list (<=120 chars each)
+    $sentLine = "  LLM-SENT      : [ $($LlmLog.sub_command_count) subcommand ] | model=$($LlmLog.model)"
     if ($LlmLog.timeout_ms) { $sentLine += " timeout=$($LlmLog.timeout_ms)ms" }
     if ($LlmLog.sent -and $LlmLog.sent.Count -gt 0) {
         $parts = @()

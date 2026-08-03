@@ -454,14 +454,17 @@ production `.log` and in the fixture runner's per-run log
 (`c:\temp\pretoolhook-llm-review-testlogs\llm-review-run-<ts>.log`):
 
 ```text
-  LLM-SENT      : model=deepseek-v4-flash timeout=30000ms | [1] git add . | [2] curl -o … (each ≤120 chars)
+  LLM-SENT      : [ 2 subcommand ] | model=deepseek-v4-flash timeout=30000ms | [1] git add . | [2] curl -o … (each ≤120 chars)
   LLM-RECV      : '{"modifying":[1,2]}' (4820ms, recovered=false) -> verdict=modifying indices=[1,2]
   LLM-LOCAL     : decision=allow (read-only); tiers: [1]=strictness_gated [2]=read_only
   LLM-RECONCILE : flagged=[1,2] suppressed=[1](strictness_gated) veto=[2] path-guard denied: [2] -> FINAL: ask
 ```
 
-(`path-guard denied:` appears only when the stage-2 guard refused a gated flag;
-`(mock)` marks injected verdicts.) Out-of-scope keeps the phase-I one-liner;
+(The `[ N subcommand ]` prefix — also present on the out-of-scope one-liner
+`LLM: [ N subcommand ] | in_scope=False …` — records how many sub-commands
+the engine produced, so `complex_min_subcommands` threshold tuning is auditable
+from the log alone. `path-guard denied:` appears only when the stage-2 guard
+refused a gated flag; `(mock)` marks injected verdicts.) Out-of-scope keeps the phase-I one-liner;
 disabled logs nothing. JSONL `llm` object: `enabled, level, in_scope,
 sub_command_count, remote_match, sent, tiers, local_decision, local_reason,
 timeout_ms, verdict, recovered, latency_ms, indices, mocked, error,
