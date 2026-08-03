@@ -18,7 +18,7 @@ pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/
 - **Default (small)**: 24 checks — 10 phase-II cases (`test-cases.p2.small.xml`)
   plus 14 shared pre-flights (config rejection ×2, 12 `ConvertTo-LlmVerdict`
   parser units).
-- **Large (opt-in)**: 78 checks — 62 cases (`test-cases.p2.large.xml`) in seven
+- **Large (opt-in)**: 78 checks — 64 cases (`test-cases.p2.large.xml`) in seven
   groups: suppression matrix, levels, fallback/malformed indices,
   effects/log/reason, scope numbering, `attributed_verdicts=false` regression,
   and the **stage-2 path-guard** (G7: system-path targets veto, temp/CWD/
