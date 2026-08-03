@@ -501,15 +501,27 @@ raw_excerpt, flagged, suppressed, path_guard_denied, effect, model`.
   "api_key": "",
   "timeout_ms": 30000,                    // >0; hard cap becomes timeout_ms+2000 when enabled
   "temperature": 0.0,                     // 0.0-2.0
-  "max_tokens": 16,
-  "complex_min_subcommands": 2,           // int ≥ 1
+  "max_tokens": 64, // >1; attributed JSON answers are longer than a bare token
+  "complex_min_subcommands": 2,           // int >= 1
   "attributed_verdicts": true,            // bool; false = phase-I binary contract end-to-end (per-model fallback)
-  "remote_indicators": [ /* optional; compiled list replaces the §8.1 default */ ]
+  "json_mode": false,                     // bool (2026-08-03): response_format json_object on ATTRIBUTED calls
+                                          // (hard fix for models that answer with prose -> unusable); gateway-dependent
+  "remote_indicators": [ /* optional; compiled list replaces the 8.1 default */ ]
 }
 ```
 
-Optional-block pattern: absent ⇒ skip silently; present ⇒ validate everything
-even when disabled (bad values surface immediately); invalid ⇒ throw fail-closed.
+The V2 system prompt was hardened 2026-08-03 after BOTH glm-5.2 and
+deepseek-v4-flash ignored the contract on simple commands and answered with
+analysis prose (`Let me analyze these sub-commands...`) -> unusable ->
+fail-closed ask. Hardening: the OUTPUT CONTRACT block moved to the end
+(recency), a first-character rule (`'{'` only, also repeated as a user-message
+suffix after the command block), and one NEGATIVE EXAMPLE marked wrong.
+Combined with `json_mode: true` (API-level JSON constraint) this is the
+compliance lever; the live runner exposes `-JsonMode` / `-LegacyPrompt` for
+A/B comparison of plain vs hardened vs hardened+JSON.
+
+Optional-block pattern: absent => skip silently; present => validate everything
+even when disabled (bad values surface immediately); invalid => throw fail-closed.
 
 ### 8.10 Error handling and posture
 

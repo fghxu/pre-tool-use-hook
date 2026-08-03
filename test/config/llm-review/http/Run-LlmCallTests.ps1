@@ -62,7 +62,10 @@
 #                       seed-0           - body.seed == 0
 #                       auth-present     - Authorization: Bearer <api-key> arrived
 #                       auth-absent      - no Authorization header arrived
-#                       truncated-8000   - user content <= 8033 chars (8000 + wrapper)
+#                       truncated8000   - the 9000-char {{X9000}} command is
+#                       truncated to exactly 8000 'x' chars by the payload guard
+#                       (the attributed suffix adds ~80 chars to the user content,
+#                       so this asserts the truncation, not a fixed total)
 #   command           via <copilot-command> child (default 'Get-Date');
 #                     the token {{X9000}} expands to 9000 'x' characters
 #                     (drives the payload-truncation case)
@@ -194,7 +197,7 @@ function Invoke-RequestChecks {
             'seed-0'           { $ok = ($bodyObj -and [int]$bodyObj.seed -eq 0);                           $why = "seed=$($bodyObj.seed)" }
             'auth-present'     { $ok = ($State.LastAuth -eq "Bearer $ApiKey");                             $why = "Authorization=$($State.LastAuth)" }
             'auth-absent'      { $ok = [string]::IsNullOrEmpty($State.LastAuth);                           $why = "Authorization=$($State.LastAuth)" }
-            'truncated-8000'   { $len = ($bodyObj.messages[1].content).Length; $ok = ($bodyObj -and $len -le 8033); $why = "user content length=$len (>8033)" }
+            'truncated-8000'   { $len = ($bodyObj.messages[1].content).Length; $xc = ([regex]::Matches([string]$bodyObj.messages[1].content, 'x')).Count; $ok = ($bodyObj -and $xc -eq 8000 -and $len -lt 9000); $why = "user content length=$len x-count=$xc (want the 9000-char command truncated to 8000)" }
             'subcmds-tags'   { $c = $bodyObj.messages[1].content; $ok = ($bodyObj -and $c.Contains('<sub_commands>') -and $c.Contains('</sub_commands>') -and $c.Contains('1. ')); $why = "user content missing numbered <sub_commands> block" }
             'nosubcmds-tags' { $c = $bodyObj.messages[1].content; $ok = ($bodyObj -and -not $c.Contains('<sub_commands>')); $why = "user content unexpectedly contains <sub_commands>" }
             default            { $ok = $false;                                                             $why = "unknown check token '$t'" }
@@ -276,6 +279,7 @@ try {
             MaxTokens             = 16
             ComplexMinSubcommands = 2
             AttributedVerdicts    = $attrVerdicts
+            JsonMode              = $false
             RemoteIndicators      = @()
         }
 

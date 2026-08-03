@@ -80,8 +80,10 @@ commands are only classified as text, never executed.
 ```powershell
 pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1   # offline, mock server (default for code changes)
 pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1   # LIVE smoke, 7 cases ~2k tokens - run deliberately
-pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1 -XmlPath test/config/llm-review/http/test-llm-live-large.xml   # LIVE matrix, 25 cases ~8-12k tokens
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1 -XmlPath test/config/llm-review/http/test-llm-live-large.xml   # LIVE matrix, 25 ~8-12k tokens
 pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1 -BaseUri http://host:port -Model some-model
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1 -JsonMode      # A/B: hardened prompt + response_format json_object
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1 -LegacyPrompt  # A/B: pre-hardening prompt (control)-model
 ```
 
 Two live files:

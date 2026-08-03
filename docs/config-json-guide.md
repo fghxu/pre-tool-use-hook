@@ -214,8 +214,9 @@ two verdicts are compared. The LLM can only ever **escalate** an `allow` to
   "timeout_ms": 12000,
   "temperature": 0.0,
   "max_tokens": 16,
-  "complex_min_subcommands": 2,
-  "attributed_verdicts": true
+ complex_min_subcommands": 2,
+  "attributed_verdicts": true,
+  "json_mode": false
   // "remote_indicators": [ ... ]  // optional; compiled defaults used when omitted
 }
 ```
@@ -227,9 +228,10 @@ two verdicts are compared. The LLM can only ever **escalate** an `allow` to
 | `base_uri` / `model` | OpenAI-compatible gateway; the hook POSTs to `{base_uri}/v1/chat/completions`. |
 | `api_key` | Optional; sent as `Authorization: Bearer …` only when non-empty. Empty for a local gateway. |
 | `timeout_ms` | LLM wait budget (default 12000). When the feature is enabled, the hook's hard cap becomes `timeout_ms + 2000` (3000 ms otherwise). |
-| `temperature` / `max_tokens` | Sampling parameters (defaults 0.0 / 16 — the expected answer is one token). |
+| `temperature` / `max_tokens` | Sampling parameters (defaults 0.0 / 64 — raised from 16 in phase II because attributed JSON answers are longer; a token cap is never a target, a well-behaved model stops after the closing `}`). |
 | `complex_min_subcommands` | Integer ≥ 1 (default 2). What "complex" means for the two complex levels. |
 | `attributed_verdicts` | Bool (default true; non-bool → loader throws). Phase II: the LLM also receives the numbered sub-command list and answers `{"modifying":[indices]}`; see the suppression table below. `false` restores the phase-I binary prompt/veto. |
+| `json_mode` | Bool (default false; non-bool → loader throws). Phase III (2026-08-03): send `response_format: {"type":"json_object"}` on **attributed** calls, constraining the model to emit valid JSON — the hard fix for reasoning-leaning models that ignore the output contract and answer with analysis prose (→ unusable → fail-closed ask). Requires gateway support (the local gateway documents it). Ignored for the V1 binary contract (a bare token is not JSON). Pair with the hardened V2 prompt (negative example + first-character rule). |
 | `remote_indicators` | Optional array of regex (case-insensitive), matched against every sub-command AND the full original command text. Defaults: `\baws\b`, `\bkubectl\b`, `\bhelm\b`, `\bterraform\b`, `\bssh\b`, `\bscp\b`, `\bsftp\b`, `\bdocker\b`, `\bcurl\b`, `\bwget\b`, `\bInvoke-RestMethod\b`, `\birm\b`, `\bInvoke-WebRequest\b`, `\biwr\b`, `\bEnter-PSSession\b`, `\bNew-PSSession\b`, `Invoke-Command.*-ComputerName`. **git is deliberately absent (local).** |
 
 **Outcome matrix** (in-scope results only; all forced asks keep exit code 0):

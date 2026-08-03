@@ -37,6 +37,7 @@
     "max_tokens": 16,
     "complex_min_subcommands": 2,
     "attributed_verdicts": true,
+    "json_mode": false,
     "_comment": "remote_indicators omitted on purpose -> the compiled default list is under test. Verdicts are mocked via PRETOOLHOOK_LLMREVIEW_MOCK; no network call ever happens."
   },
 

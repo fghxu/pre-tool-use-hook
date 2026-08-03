@@ -48,6 +48,11 @@ Emit the single token immediately.
 '@
 
 # --- V2 system prompt (attributed verdicts; used when AttributedVerdicts is on) ---
+# Hardened 2026-08-03 after BOTH GLM-5.2 and deepseek-v4-flash ignored the
+# output contract on simple commands and answered with analysis prose
+# (-> unusable -> fail-closed ask). Three changes that measurably help small
+# reasoning-leaning models: the OUTPUT CONTRACT block sits LAST (recency); a
+# first-character rule ('{' only); one negative example showing prose rejected.
 $script:LlmSystemPromptV2 = @'
 You are a binary command-safety classifier protecting a production environment.
 You receive one command block (it may mix AWS CLI, PowerShell, CMD, bash, ssh,
@@ -74,15 +79,23 @@ block: Get-ChildItem C:\logs | Select-Object -First 5
 sub_commands: 1. Get-ChildItem C:\logs / 2. Select-Object -First 5
 answer: {"modifying":[]}
 
-OUTPUT CONTRACT - CRITICAL
-Your ENTIRE response must be one JSON object, nothing else:
+NEGATIVE EXAMPLE - this is WRONG, never do this:
+question: aws s3 ls && aws s3 cp f s3://b/k
+bad answer:  "Let me analyze these sub-commands. aws s3 ls lists buckets which is read-only, but aws s3 cp uploads a file so it is modifying."
+good answer: {"modifying":[2]}
+Do NOT explain, reason, or narrate. The bad answer is a critical failure.
+
+OUTPUT CONTRACT - CRITICAL (read this last)
+Your ENTIRE response must be ONE JSON object and NOTHING else:
   {"modifying": []}        - every numbered sub-command is read-only
   {"modifying": [2]}       - sub-command 2 is modifying
   {"modifying": [1, 2]}    - several are modifying
 Use index 0 for anything modifying that is NOT in the numbered list
 (for example a redirect target or an unlisted nested command).
-No reasoning. No explanation. No markdown. No code fences. Emit the JSON
-object immediately.
+- The FIRST character of your response MUST be '{'. It must not be a letter,
+  a space, a quote, or any markdown.
+- No reasoning. No explanation. No prose. No markdown. No code fences.
+- Output the JSON object immediately.
 '@
 
 function Test-LlmReviewScope {
@@ -297,13 +310,18 @@ function Get-LlmReviewVerdict {
     # User message: raw block, plus the numbered sub-command list in V2 mode
     $userPrompt = "<command_block>`n$cmdText`n</command_block>"
     $sysPrompt = $script:LlmSystemPrompt
+    $attributed = $false
     if ($LlmConfig.AttributedVerdicts) {
         $sysPrompt = $script:LlmSystemPromptV2
+        $attributed = $true
         if ($SubCommands.Count -gt 0) {
             $numbered = @()
             for ($i = 0; $i -lt $SubCommands.Count; $i++) { $numbered += "{0}. {1}" -f ($i + 1), $SubCommands[$i] }
             $userPrompt += "`n<sub_commands>`n" + ($numbered -join "`n") + "`n</sub_commands>"
         }
+        # First-character rule, repeated at the point of decision (recency):
+        # a response starting with '{' cannot ramble into analysis prose.
+        $userPrompt += "`nReply with the JSON object only. The first character of your response must be '{'."
     }
 
     $body = [ordered]@{
@@ -315,6 +333,15 @@ function Get-LlmReviewVerdict {
         temperature = $LlmConfig.Temperature
         max_tokens  = $LlmConfig.MaxTokens
         seed        = 0
+    }
+    # JSON mode (config json_mode, default off): constrain the response to be
+    # valid JSON at the API level (response_format: json_object). Attributed
+    # calls only - the V1 contract is a bare token, which is not JSON. This is
+    # the hard fix for reasoning-leaning models that ignore the output
+    # contract and answer with analysis prose (observed 2026-08-03 on BOTH
+    # GLM-5.2 and deepseek-v4-flash -> unusable -> fail-closed ask).
+    if ($attributed -and $LlmConfig.PSObject.Properties['JsonMode'] -and $LlmConfig.JsonMode) {
+        $body['response_format'] = @{ type = 'json_object' }
     }
     $bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
     $uri = "$($LlmConfig.BaseUri)/v1/chat/completions"

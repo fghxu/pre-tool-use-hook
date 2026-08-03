@@ -25,6 +25,11 @@
 #       pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1
 #   Against a different gateway/model:
 #       pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1 -BaseUri http://host:port -Model some-model
+#   A/B probe of the output-contract levers (2026-08-03; both GLM-5.2 and
+#   deepseek-v4-flash were answering with analysis prose -> unusable):
+#       ... -JsonMode        - hardened prompt + response_format json_object (attributed cases)
+#       ... -LegacyPrompt    - the PRE-hardening V2 prompt (control)
+#   Run the same file three ways and compare clean-verdict counts.
 #
 # HOW TO READ THE OUTPUT
 #   Unlike the offline suites, EVERY case prints a LIVE line as it completes:
@@ -55,7 +60,9 @@ param(
     [string]$BaseUri   = 'http://127.0.0.1:3030',
     [string]$Model     = 'deepseek-v4-flash',
     [int]$TimeoutMs    = 30000,   # live models under load can be slow; generous budget
-    [string]$XmlPath   = ""
+    [string]$XmlPath   = "",
+    [switch]$JsonMode,            # A/B probe: constrain responses to JSON (attributed calls only)
+    [switch]$LegacyPrompt         # A/B probe: use the PRE-hardening V2 prompt (no negative example / first-char rule)
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,8 +84,17 @@ Remove-Item Env:\PRETOOLHOOK_CONFIG_PATH -ErrorAction SilentlyContinue
 # Dot-source the production verdict client under test.
 . (Join-Path $srcDir "LlmReview.ps1")
 
+# A/B probe switch: swap the module's V2 prompt to the PRE-hardening version
+# (no negative example / first-character rule). The shipped hardened prompt is
+# the default. Direct-mode cases use whichever is active; the fullpipe child
+# re-dot-sources the module so it always uses the shipped prompt.
+if ($LegacyPrompt) {
+    $script:LlmSystemPromptV2 = ($script:LlmSystemPromptV2 -split 'NEGATIVE EXAMPLE')[0].TrimEnd()
+    Write-Host "A/B: using the PRE-hardening (plain) V2 prompt." -ForegroundColor Yellow
+}
+
 # Child-process engine for the fullpipe case (same family as this process).
-$engine = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershell' }
+$engine = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } { 'powershell' }
 
 # ---------------------------------------------------------------------------
 # PRE-FLIGHT: is the gateway even up? Probe GET {BaseUri}/v1/models (cheap,
@@ -140,6 +156,9 @@ $llmCfg = [PSCustomObject]@{
     # flips this to $true for that call (set in the loop below). Default off
     # keeps the 5 phase-I cases on the V1 binary prompt byte-identically.
     AttributedVerdicts    = $false
+    # JSON mode off by default; -JsonMode switch turns it on for the run (the
+    # A/B probe exercises both). Only takes effect on attributed calls.
+    JsonMode              = $JsonMode
 }
 
 # =============================================================================
