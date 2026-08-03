@@ -12,9 +12,13 @@
 #   verdicts sensible).
 #
 # COST / SAFETY
-#   - COSTS QUOTA: ~2k tokens per run (7 calls x ~300 tokens; max_tokens=16).
+#   - COSTS QUOTA: ~2k tokens per run of the 7-case smoke file (test-llm-live.xml);
+#     ~8-12k for the 25-case matrix (-XmlPath .../test-llm-live-large.xml).
 #   - Commands are only CLASSIFIED by the LLM as text - NEVER executed.
 #   - OPT-IN: nothing runs this except you, deliberately.
+#   - The 25-case matrix file reuses the mock matrix's most model-interesting
+#     commands TRUTH-KEYED (not mock-keyed) - it measures the MODEL (which
+#     sub-commands it flags), while the offline suites pin OUR code.
 #
 # HOW TO RUN
 #   From the repo root (gateway must be up):
@@ -49,7 +53,7 @@
 
 param(
     [string]$BaseUri   = 'http://127.0.0.1:3030',
-    [string]$Model     = 'glm-5.2',
+    [string]$Model     = 'deepseek-v4-flash',
     [int]$TimeoutMs    = 30000,   # live models under load can be slow; generous budget
     [string]$XmlPath   = ""
 )

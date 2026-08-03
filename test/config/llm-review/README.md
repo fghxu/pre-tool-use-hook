@@ -72,19 +72,38 @@ comment for the attribute vocabulary (`server`, `expect-verdict`, `expect-hit`,
 
 ## `http/Run-LlmLiveTests.ps1` — LIVE end-to-end test (real gateway, small quota)
 
-The true end-to-end proof: calls the **real** gateway (default `glm-5.2` @
+The true end-to-end proof: calls the **real** gateway (default `deepseek-v4-flash` @
 `http://127.0.0.1:3030`) through the production verdict client, plus one case
-through the real spawned `Hook.ps1`. **OPT-IN — costs ~2k tokens per run**
-(7 calls × ~300 tokens, `max_tokens=16`); commands are only classified as text,
-never executed.
+through the real spawned `Hook.ps1`. **OPT-IN — costs tokens per run**;
+commands are only classified as text, never executed.
 
 ```powershell
 pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1   # offline, mock server (default for code changes)
-pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1   # LIVE, real gateway - run deliberately
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1   # LIVE smoke, 7 cases ~2k tokens - run deliberately
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1 -XmlPath test/config/llm-review/http/test-llm-live-large.xml   # LIVE matrix, 25 cases ~8-12k tokens
 pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1 -BaseUri http://host:port -Model some-model
 ```
 
-What it does:
+Two live files:
+
+1. **`test-llm-live.xml` (smoke, 7 cases, ~2k tokens)**: 4 phase-I direct verdict
+   assertions (local/remote × read-only/modifying), 1 fullpipe `Get-Date`
+   through the real hook expecting `allow`, and 2 **attributed** cases
+   (`Live-Attr-*`) that send the V2 prompt with a numbered sub-command list and
+   assert the returned indices exactly (empty list for all-read-only; `[2]`
+   when only the second mutates).
+2. **`test-llm-live-large.xml` (matrix, 25 cases, ~8-12k tokens)**: the
+   model-interesting commands from the mock large matrix, **truth-keyed** (not
+   mock-keyed): 5 V1 binary discrimination cases, 17 V2 attributed cases with
+   exact `expect-indices` (gated mixes, position mapping at [1]/[2]/[3],
+   stage-2 guard shapes like `Set-Content -Path C:\Windows\…`, a path inside a
+   commit message that must not add phantom flags), and 3 verdict-only "open"
+   cases (wrapper/redirect shapes where several index answers are legitimately
+   correct — the LIVE print line shows what the model picked).
+
+The `Live-Attr-*` / `Live2-Attr-*` outcomes are the model-compliance signal
+that decides whether production ships `attributed_verdicts: true` for a given
+model. What it does:
 
 1. Probes `GET {BaseUri}/v1/models` first — gateway down = loud failure, no
    quota spent, exit 1 (a live test that can't run is a failure, not a skip).
