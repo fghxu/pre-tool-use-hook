@@ -4437,4 +4437,51 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
 
   </category-group>
 
+  <!-- =================================================================== -->
+  <!-- Unregistered-Wording: recognized tool + unregistered operation must   -->
+  <!-- fail closed (ask) with a PRECISE reason (unregistered verb /          -->
+  <!-- subcommand not registered), not the generic "unknown command".        -->
+  <!-- Decisions were already ask; these pin the coverage of the new         -->
+  <!-- fallbacks (wording verified by probe).                                -->
+  <!-- =================================================================== -->
+  <category-group name="Unregistered-Wording">
+
+    <test-case expected="ask" reason="unregistered PowerShell verb: Frobnicate- (fail-closed)" category="Unregistered-Wording">
+      <description>PowerShell Verb-Noun matching no verb tier</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Frobnicate-Widget -Name x]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="docker subcommand 'frobnicate' not registered (fail-closed)" category="Unregistered-Wording">
+      <description>docker unregistered subcommand</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[docker frobnicate mycontainer]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="git subcommand 'frobnicate' not registered (fail-closed)" category="Unregistered-Wording">
+      <description>git unregistered subcommand</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git frobnicate --all]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="kubectl subcommand 'frobnicate' not registered (fail-closed)" category="Unregistered-Wording">
+      <description>kubectl unregistered subcommand</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[kubectl frobnicate pods]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="terraform subcommand 'frobnicate' not registered (fail-closed)" category="Unregistered-Wording">
+      <description>terraform unregistered subcommand</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[terraform frobnicate -target=x]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="leading global flags are skipped when naming the subcommand (terraform -chdir)" category="Unregistered-Wording">
+      <description>terraform unregistered subcommand behind a global flag</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[terraform -chdir=prod frobnicate]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
 </commands>

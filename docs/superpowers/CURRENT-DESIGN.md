@@ -208,7 +208,13 @@ default **ask(medium)**.
 1b  modifying pattern arrays            → ask, Tier=modifying
 2   verb/prefix tiers (PS two-word → one-word; AWS prefixes; risk-tiered)
 2.5 shell flow keywords
-3   fallback: ask "unknown command: <cmd>", MatchedPattern='', Tier=''
+3   fallback ask, MatchedPattern='', Tier='' — with precise-wording variants:
+    static .NET call not on allowlist; aws parsed service+verb matching no
+    prefix ⇒ "unregistered AWS verb"; PowerShell Verb-Noun matching no verb
+    tier ⇒ "unregistered PowerShell verb"; docker/kubectl/terraform/git first
+    token recognized but subcommand unlisted ⇒ "<tool> subcommand 'X' not
+    registered" (≤3 leading global flags skipped). All still fail-closed ask;
+    generic "unknown command" remains for linux/dos_cmd (catch-all domain).
 ```
 
 Within a tier, first match wins (config array order). Patterns are start-anchored

@@ -539,6 +539,15 @@ function Resolve-Command {
             $risk = $modPrefix[$verbPrefix]
             return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (modifying verb: $verbPrefix)" -MatchedPattern $verbPrefix -Risk $risk -Tier "modifying"
         }
+
+        # Verb-Noun shape but no verb tier claimed it: the cmdlet presented
+        # like a real PowerShell command, but its verb is unregistered. Fail
+        # closed with a precise reason (mirrors the AWS unregistered-verb
+        # fallback) instead of the generic "unknown command". MatchedPattern/
+        # Tier stay empty - identical downstream treatment.
+        if ($cmdlet -match '^[A-Za-z][\w]*-') {
+            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (unregistered PowerShell verb: $verbPrefix - fail-closed)" -MatchedPattern "" -Risk "medium" -Tier ""
+        }
     }
 
     # -------------------------------------------------
@@ -773,6 +782,18 @@ function Resolve-Command {
         return New-ResolutionResult -Decision "ask" `
             -Reason "static method not on allowlist: [$staticType]::$staticMethod (see safe_expressions.dotnet_static_method_allowlist)" `
             -MatchedPattern $null -Risk "unknown"
+    }
+
+    # Known first-token tool (docker/kubectl/terraform/git) whose subcommand
+    # is not in the config lists: name the tool AND the subcommand instead of
+    # the generic wording. Up to 3 leading global flags are skipped when
+    # locating the subcommand (e.g. terraform -chdir=x frobnicate). Decision/
+    # tier unchanged: fail-closed ask, empty tier (mirrors the AWS fallback).
+    if ($domainLower -in @('docker', 'kubernetes', 'terraform', 'git') -and
+        $Command -match '^\s*([a-zA-Z][\w-]*)\s+(?:-\S+\s+){0,3}([^\s-][\w-]*)') {
+        $toolName = $Matches[1]
+        $subName = $Matches[2]
+        return New-ResolutionResult -Decision "ask" -Reason "$toolName subcommand '$subName' not registered (fail-closed)" -MatchedPattern "" -Risk "unknown" -Tier ""
     }
     $truncatedCommand = $Command.Substring(0, [Math]::Min(80, $Command.Length))
     return New-ResolutionResult -Decision "ask" -Reason "unknown command: $truncatedCommand" -MatchedPattern $null -Risk "unknown"
