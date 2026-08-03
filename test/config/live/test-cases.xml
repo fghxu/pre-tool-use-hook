@@ -4423,6 +4423,18 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <copilot-command><![CDATA[jq -i '.a = 1' c:\temp\cfg.json]]></copilot-command>
     </test-case>
 
+    <test-case expected="ask" reason="provision- is a registered modifying AWS verb (medium) - precise reason instead of generic unknown" category="Decomp-ParenPipeline">
+      <description>aws provision-permission-set asks as a known modifying verb</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws sso-admin provision-permission-set --instance-arn arn:aws:sso:::instance/ssoins-000000 --permission-set-arn arn:aws:sso:::instance/ssoins-000000 --target-type ALL_PROVISIONED_ACCOUNTS]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unregistered AWS verb fails closed with a precise reason (not generic unknown command)" category="Decomp-ParenPipeline">
+      <description>aws unregistered verb asks (fail-closed wording)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws sso-admin frobnicate-permission-set --instance-arn arn:aws:sso:::instance/ssoins-000000]]></copilot-command>
+    </test-case>
+
   </category-group>
 
 </commands>

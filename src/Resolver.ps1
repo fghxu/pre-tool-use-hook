@@ -605,6 +605,15 @@ function Resolve-Command {
                     return New-ResolutionResult -Decision "ask" -Reason "aws $service $verb (modifying verb: $modPrefix)" -MatchedPattern $modPrefix -Risk $risk -Tier "modifying"
                 }
             }
+
+            # Parsed service+verb but no prefix matched: this IS an aws command
+            # whose verb is simply unregistered. Fail closed (ask) but say so
+            # precisely - the generic "unknown command" fallback hides that the
+            # engine recognized the service and verb (2026-08-02 user report:
+            # "aws sso-admin provision-permission-set" said 'unknown command').
+            # MatchedPattern/Tier stay empty so downstream (arbiter gate, LLM
+            # merge) treats it exactly like the generic unknown fallback.
+            return New-ResolutionResult -Decision "ask" -Reason "aws $service $verb (unregistered AWS verb - fail-closed)" -MatchedPattern "" -Risk "medium" -Tier ""
         }
     }
 

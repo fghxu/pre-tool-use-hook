@@ -845,7 +845,7 @@
       "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-"],
       "modifying_prefixes": {
         "high":   ["delete-", "terminate-", "remove-", "detach-", "deactivate-", "disable-", "revoke-", "deregister-", "execute-"],
-        "medium": ["create-", "put-", "update-", "modify-", "attach-", "enable-", "activate-", "register-", "import-", "copy-", "sync", "cp ", "mv ", "start-"]
+        "medium": ["create-", "put-", "update-", "modify-", "attach-", "enable-", "activate-", "register-", "import-", "copy-", "sync", "cp ", "mv ", "start-", "provision-"]
       },
       "read_only": [
         { "name": "aws s3 ls",                     "patterns": ["aws s3 ls*"],                      "description": "List S3 buckets/objects" },
