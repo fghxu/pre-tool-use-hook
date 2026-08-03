@@ -435,12 +435,16 @@ to `dry_run_flags`.
 
 ### Everything at once (`Run-AllTests.ps1`)
 
-Discovers every suite under `test/config/live/`, runs each with its required invocation, and
-reports REGRESSION/OK/IMPROVED against per-suite known-failure baselines (all currently 0):
+Discovers every suite under `test/config/live/`, runs each with its required invocation,
+**plus the three zero-quota `llm-review` suites** (small, phase-I, http-mock — mocked
+verdicts, no network), and reports REGRESSION/OK/IMPROVED against per-suite known-failure
+baselines (all currently 0). Not included: the llm-review 80-check large matrix (opt-in
+`-XmlPath` run) and the live LLM suite (real gateway, ~2k tokens, user-run only):
 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1
 powershell.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1 -Filter strictness   # subset
+powershell.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1 -Filter llm          # LLM suites only
 ```
 
 **Important:** the suites run against `test/config/live/config.json` — a **test copy**, not the
@@ -559,9 +563,9 @@ classify the inner command. AWS CLI also classifies by operation prefix (`descri
 ## Test status
 
 All suites are green with zero known-failure baselines — any new failure is a regression by
-definition (tracked in `PROGRESS.md`). Current: 962/962 across the 6 `test/config/live/` suites
-+ 17/17 Codex unit tests; 938/938 in the test-strictness-gate sandbox; llm-review fixture
-24/24 (small), 78/78 (large), 32/32 (phase-I), 27/27 (http mock).
+definition (tracked in `PROGRESS.md`). Current: 1069/1069 in one `src/Run-AllTests.ps1` pass
+(6 `test/config/live/` suites + llm-review small/phase-I/http-mock) + 17/17 Codex unit tests;
+938/938 in the test-strictness-gate sandbox; llm-review large (opt-in) 80/80.
 
 ## License
 
