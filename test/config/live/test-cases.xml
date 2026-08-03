@@ -4341,4 +4341,88 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
 
   </category-group>
 
+  <!-- =================================================================== -->
+  <!-- Decomp-ParenPipeline: paren-group extraction + pipe split for ALL     -->
+  <!-- domains (2026-08-02, user-reported hole): an aws_cli pipeline was     -->
+  <!-- classified as ONE segment (pipes only split for powershell/linux/     -->
+  <!-- dos_cmd), and the AWS flag-stripper ate '(aws' as a flag value, so    -->
+  <!-- a modifying command hidden in a parenthesized subexpression and a     -->
+  <!-- pipeline tail were silently auto-allowed.                             -->
+  <!-- =================================================================== -->
+  <category-group name="Decomp-ParenPipeline">
+
+    <test-case expected="ask" reason="paren-wrapped aws provision command + pipeline tail must be seen: provision- is not a read-only prefix (unknown => ask) and Set-Object is a modifying verb" category="Decomp-ParenPipeline">
+      <description>the exact user-reported log line - hidden provision-permission-set + Set-Object tail</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws sso-admin describe-permission-set-provisioning-status --instance-arn arn:aws:sso:::instance/ssoins-000000 --provisioning-request-id (aws sso-admin provision-permission-set --instance-arn arn:aws:sso:::instance/ssoins-000000 --permission-set-arn arn:aws:sso:::instance/ssoins-000000 --target-type ALL_PROVISIONED_ACCOUNTS --no-cli-pager --output json | ConvertFrom-Json).PermissionSetProvissioningStatus.RequestId --no-cli-pager 2>&1 | Set-Object -First 3]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="aws pipeline tail is a modifying cmdlet (Remove-Item) - pipe split now applies to aws_cli" category="Decomp-ParenPipeline">
+      <description>aws read piped into a modifying cmdlet</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws s3 ls | Remove-Item c:\temp\x.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="docker pipeline tail is a modifying cmdlet - pipe split now applies to docker domain" category="Decomp-ParenPipeline">
+      <description>docker read piped into a modifying cmdlet</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[docker ps | Remove-Item c:\temp\x.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="terraform pipeline tail is a modifying cmdlet - pipe split now applies to terraform domain" category="Decomp-ParenPipeline">
+      <description>terraform read piped into a modifying cmdlet</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[terraform plan | Remove-Item c:\temp\x.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: aws read piped into a read cmdlet stays allow (no over-ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws s3 ls | Select-Object -First 2]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: kubectl read piped into a read cmdlet stays allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[kubectl get pods | Select-String nginx]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: git read piped into a read cmdlet stays allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git log --oneline -5 | Select-Object -First 3]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: unquoted kubectl field-selector paren group is NOT a command - not extracted, no over-ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[kubectl get pods --field-selector (status.phase=Running)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: quoted JMESPath query with brackets/parens is not extracted</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws ec2 describe-instances --query 'Reservations[*].Instances[].[InstanceId,State]']]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: bare non-command paren text is not extracted</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[echo (hello world)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: jq is read-only in pipelines (config gap-fill after the pipe split exposed it)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[kubectl get pods -o json | jq '.items[*].metadata.name']]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="jq -i edits the file in place - excluded from the read-only entry (unknown => ask)" category="Decomp-ParenPipeline">
+      <description>jq in-place edit asks</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[jq -i '.a = 1' c:\temp\cfg.json]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
 </commands>

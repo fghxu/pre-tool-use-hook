@@ -252,12 +252,13 @@ function Split-Commands {
 
                         # --------------------------------------------
                         # Step 4 (inside newline split): Split on pipeline
-                        # operator | for shell domains.  Skip this for
-                        # case-arm lines because | is a pattern separator
-                        # there, not a pipeline.
+                        # operator | for ALL domains (aws/git/docker/kubectl/
+                        # terraform included - a pipe is a pipe regardless of
+                        # the leading command; the splitter is quote+paren
+                        # aware so pipes inside "( ... )" stay put). Skip
+                        # case-arm lines: | is a pattern separator there.
                         # --------------------------------------------
-                        if ($segmentDomain -in @('powershell', 'linux', 'dos_cmd') -and
-                            $effectiveLine -match '\|' -and
+                        if ($effectiveLine -match '\|' -and
                             -not $inCaseBlock) {
                             $pipeParts = Split-NotInQuotes -Text $effectiveLine -Delimiter '|'
                             $isPipeChain = ($pipeParts.Count -gt 1)
@@ -290,9 +291,12 @@ function Split-Commands {
                     $segmentDomain = Get-CommandDomain -Command $trimmed
 
                     # --------------------------------------------
-                    # Step 4: Split on pipeline operator | for shell domains
+                    # Step 4: Split on pipeline operator | for ALL domains
+                    # (2026-08-02 hole: an aws_cli pipeline was classified as
+                    # ONE segment; the splitter is quote+paren aware so pipes
+                    # inside "( ... )" stay put).
                     # --------------------------------------------
-                    if ($segmentDomain -in @('powershell', 'linux', 'dos_cmd') -and $trimmed -match '\|') {
+                    if ($trimmed -match '\|') {
                         $pipeParts = Split-NotInQuotes -Text $trimmed -Delimiter '|'
                         $isPipeChain = ($pipeParts.Count -gt 1)
 
@@ -322,7 +326,90 @@ function Split-Commands {
         }
     }
 
+    # ---------------------------------------------------------------------
+    # Step 5: paren-group extraction (non-PowerShell segments only).
+    # PowerShell-style subexpressions like  --request-id (aws ... ).Property
+    # hide whole commands inside flag arguments; regex domains never saw
+    # inside the parens (2026-08-02 user-reported hole: a modifying
+    # provision-permission-set inside an aws describe- call auto-allowed).
+    # A group is extracted only when its content is command-shaped (maps to
+    # a known domain, or contains a top-level operator) - data groups like
+    # (status.phase=Running) stay put. PowerShell segments are covered by
+    # the AST walk and are skipped here.
+    # ---------------------------------------------------------------------
+    $extra = @()
+    foreach ($seg in $segments) {
+        if ($seg.Domain -eq 'powershell') { continue }
+        foreach ($g in @(Get-ParenGroupContents -Text $seg.CommandText)) {
+            if (Test-ParenContentIsCommand -Inner $g) {
+                $gt = $g.Trim()
+                $extra += [PSCustomObject]@{
+                    CommandText   = $gt
+                    Domain        = (Get-CommandDomain -Command $gt)
+                    IsPipeline    = $false
+                    ParentCommand = $seg.CommandText
+                }
+                # One nested level: parens inside the extracted content.
+                foreach ($g2 in @(Get-ParenGroupContents -Text $gt)) {
+                    if (Test-ParenContentIsCommand -Inner $g2) {
+                        $g2t = $g2.Trim()
+                        $extra += [PSCustomObject]@{
+                            CommandText   = $g2t
+                            Domain        = (Get-CommandDomain -Command $g2t)
+                            IsPipeline    = $false
+                            ParentCommand = $gt
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if ($extra.Count -gt 0) { $segments += $extra }
+
     return $segments
+}
+
+# Get-ParenGroupContents: quote-aware scan returning the contents of every
+# balanced TOP-LEVEL "( ... )" group in the text (without the parens).
+# Unbalanced opens are discarded; nesting is handled by the caller recursing
+# into extracted contents.
+function Get-ParenGroupContents {
+    param([string]$Text)
+    $groups = @()
+    $inS = $false; $inD = $false; $pd = 0; $start = -1
+    for ($i = 0; $i -lt $Text.Length; $i++) {
+        $ch = $Text[$i]
+        if ($inS) { if ($ch -eq "'") { $inS = $false }; continue }
+        if ($inD) { if ($ch -eq '"') { $inD = $false }; continue }
+        if ($ch -eq "'") { $inS = $true; continue }
+        if ($ch -eq '"') { $inD = $true; continue }
+        if ($ch -eq '(') { if ($pd -eq 0) { $start = $i + 1 }; $pd++; continue }
+        if ($ch -eq ')') {
+            $pd--
+            if ($pd -eq 0 -and $start -ge 0) {
+                $groups += $Text.Substring($start, $i - $start)
+                $start = -1
+            }
+            if ($pd -lt 0) { $pd = 0 }
+        }
+    }
+    return ,$groups
+}
+
+# Test-ParenContentIsCommand: is a paren group's content command-shaped?
+# Yes when it maps to a known (non-linux-fallback) domain, or when it has a
+# top-level pipe/semicolon/&& /|| operator. Data groups (field selectors,
+# filter values, bare words like "hello world") return false.
+function Test-ParenContentIsCommand {
+    param([string]$Inner)
+    $t = $Inner.Trim()
+    if (-not $t) { return $false }
+    if ((Get-CommandDomain -Command $t) -ne 'linux') { return $true }
+    if (@(Split-NotInQuotes -Text $t -Delimiter ';').Count -gt 1) { return $true }
+    if (@(Split-NotInQuotes -Text $t -Delimiter '|').Count -gt 1) { return $true }
+    if (@(Split-OperatorNotInQuotes -Text $t -Operator '&&').Count -gt 1) { return $true }
+    if (@(Split-OperatorNotInQuotes -Text $t -Operator '||').Count -gt 1) { return $true }
+    return $false
 }
 
 # =============================================================================

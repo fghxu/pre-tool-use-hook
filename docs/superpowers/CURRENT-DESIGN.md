@@ -197,7 +197,9 @@ default **ask(medium)**.
 0c  sudo strip (linux/dos)
 0d  git -C / global-option strip
 0e  AWS flag strip (effective strictness == normal; only if ≥2 tokens remain —
-    else keep original so explicit entries like `aws --version` match)
+    else keep original so explicit entries like `aws --version` match).
+    A token starting with '(' is NEVER consumed as a flag value (2026-08-02:
+    `(aws ...` after --request-id is a subexpression, not a value).
 0f  full-path strip (C:\...\git.exe → git) · trusted_programs check
 7   parameter_commands (modifying rules → read-only rules → default;
     unrecognized VALUE: strict/normal ask, loose default; ABSENT param: default always)
@@ -222,8 +224,20 @@ Within a tier, first match wins (config array order). Patterns are start-anchore
   (inner commands already found by the recursion). String constants count as
   commands only when top-level + separator/newline + word-pair, or when they
   start with a known command prefix. Parse failure → regex fallback.
-- **Other domains**: split on `; && || |` (quote-aware), per-segment domain
+- **Other domains**: split on `; && || |` (quote- AND paren-aware; pipes split
+  in EVERY domain since 2026-08-02 — an aws_cli pipeline was previously
+  classified as one segment, hiding the tail command). Per-segment domain
   re-detection; `$()`/`${}` subshells extracted recursively.
+- **Paren-group extraction** (regex domains, 2026-08-02): top-level
+  unquoted `( … )` groups whose contents are command-shaped (map to a known
+  domain via Get-CommandDomain, or contain a top-level operator) are extracted
+  as their own sub-commands — closing the hole where a modifying command
+  hidden in a PowerShell-style subexpression flag value
+  (`--request-id (aws … ).Prop`) was silently allowed. Data groups
+  (`(status.phase=Running)`, bare words, quoted parens) are NOT extracted;
+  one nested level; PowerShell segments are covered by the AST walk instead.
+  Residual: a bare linux-domain group with no operator (`(rm -rf /tmp/x)`)
+  is still not extracted (extracting it would over-ask on data parens).
 - **Wrappers** (`ssh host '...'`, `pwsh|powershell[.exe] [flags] -Command/-c/
   -ScriptBlock`, `Invoke-Command ... -ScriptBlock { }`, `bash -c`, `docker exec`,
   `sudo`, `kubectl exec`) are unwrapped; the regex `Find-NestedCommands` has the
@@ -600,6 +614,7 @@ entries for `gradlew`, `adb`, `unzip`, `javap`, `gh`, `net share`, `sc qc`,
 | Per-domain strictness for the path policy | path policy stays global (L4) |
 | Positional per-cmdlet target-arg table for the stage-2 guard (options 1/3) | user rejected — interleaved flags break position maps; generic token scan chosen (§8.7) |
 | Old file names: lowercase domains (`powershell`, `dos`), `test-cases.*` at repo root | domains are DOS_CMD/PowerShell/…; suites live under `test/config/live/` |
+| Pipe split restricted to powershell/linux/dos_cmd + paren-blind AWS flag strip (silent auto-allow of commands hidden in `( … )` subexpressions or non-shell pipeline tails) | fixed 2026-08-02 (all-domain pipe split + paren-group extraction + `(`-guard; Decomp-ParenPipeline group pins it) |
 
 ---
 

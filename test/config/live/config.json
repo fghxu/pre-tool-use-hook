@@ -492,6 +492,7 @@
         { "name": "sort",     "patterns": ["sort *", "sort"],                  "description": "Sort lines of text" },
         { "name": "sed",      "patterns": ["sed (?!-i|--in-place).*"],         "description": "Stream editor (read-only, excludes in-place editing)" },
         { "name": "uniq",     "patterns": ["uniq", "uniq *"],                  "description": "Report or omit repeated lines" },
+        { "name": "jq",       "patterns": ["jq (?!.*(-i|--inplace)).*"],        "description": "JSON query (read-only; -i/--inplace in-place edit excluded)" },
         { "name": "wc",       "patterns": ["wc *"],                            "description": "Word/line/byte count" },
         { "name": "ps",       "patterns": ["ps *"],                            "description": "List processes" },
         { "name": "top",      "patterns": ["top -b *", "top -n *", "top -bn*"],            "description": "System monitor (batch mode)" },

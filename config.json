@@ -15,14 +15,14 @@
   
   "_comment_llm_second_opinion": "Second-opinion LLM cross-check. OFF by default; when enabled, in-scope commands are ALSO classified by an LLM (OpenAI-compatible endpoint) and a disagreement in the dangerous direction (local=allow, LLM=modifying) forces ask with *** LLM-VETO *** wording. LLM unreachable/timeout/unparseable also forces ask (*** LLM-DOWN *** / *** LLM-UNUSABLE ***). attributed_verdicts (phase II, default true): the LLM also receives the numbered sub-command list and answers a JSON modifying-index list; flags on strictness_gated sub-commands are then SUPPRESSED as policy (effect=veto-suppressed-policy) instead of vetoing, while flags on read_only/unknown sub-commands or index 0 still veto; bare true/false answers keep the phase-I full-veto behavior. Levels: all | complex_commands | complex_remote (complex_commands needs >= complex_min_subcommands decomposed sub-commands; complex_remote additionally requires a remote_indicators match: aws/kubectl/helm/terraform/ssh/scp/sftp/docker/curl/wget/Invoke-RestMethod/irm/Invoke-WebRequest/iwr/Enter-PSSession/New-PSSession/Invoke-Command+ComputerName; git is LOCAL). remote_indicators omitted -> compiled defaults. When enabled, the hook hard cap becomes timeout_ms + 2000. See docs/config-json-guide.md.",
   "llm_second_opinion": {
-    "enabled": false,
+    "enabled": true,
     "level": "complex_remote",
     "base_uri": "http://127.0.0.1:3030",
     "model": "deepseek-v4-flash",
     "api_key": "",
     "timeout_ms": 30000,
     "temperature": 0.0,
-    "max_tokens": 16,
+    "max_tokens": 64,
     "complex_min_subcommands": 2,
     "attributed_verdicts": true
   },
@@ -494,6 +494,7 @@
         { "name": "sort",     "patterns": ["sort *", "sort"],                  "description": "Sort lines of text" },
         { "name": "sed",      "patterns": ["sed (?!-i|--in-place).*"],         "description": "Stream editor (read-only, excludes in-place editing)" },
         { "name": "uniq",     "patterns": ["uniq", "uniq *"],                  "description": "Report or omit repeated lines" },
+        { "name": "jq",       "patterns": ["jq (?!.*(-i|--inplace)).*"],        "description": "JSON query (read-only; -i/--inplace in-place edit excluded)" },
         { "name": "wc",       "patterns": ["wc *"],                            "description": "Word/line/byte count" },
         { "name": "ps",       "patterns": ["ps *"],                            "description": "List processes" },
         { "name": "top",      "patterns": ["top -b *", "top -n *", "top -bn*"],            "description": "System monitor (batch mode)" },

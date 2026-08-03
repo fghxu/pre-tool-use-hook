@@ -228,8 +228,12 @@ function Resolve-Command {
                     # --flag=value, value is embedded, skip this token
                     $i++
                 }
-                elseif (($i + 1) -lt $awsTokens.Count -and -not $awsTokens[$i + 1].StartsWith('-')) {
-                    # --flag value, skip both the flag and its value
+                elseif (($i + 1) -lt $awsTokens.Count -and -not $awsTokens[$i + 1].StartsWith('-') -and -not $awsTokens[$i + 1].StartsWith('(')) {
+                    # --flag value, skip both the flag and its value.
+                    # A value starting with '(' is a PowerShell subexpression
+                    # (e.g. --request-id (aws ... ).Prop), NOT a flag value -
+                    # consuming it mangles the command and hides the inner
+                    # command from classification (2026-08-02 hole).
                     $i += 2
                 }
                 else {
