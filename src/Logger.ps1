@@ -146,9 +146,16 @@ function Format-LlmLogBlock {
     if ($null -eq $LlmLog) { return '' }
 
     # Out-of-scope: keep the phase-I one-liner (with the sub-command count, so
-    # threshold tuning for complex_min_subcommands is auditable from the log).
+    # threshold tuning for complex_min_subcommands is auditable from the log),
+    # AND carry the level + the scope reason so the log alone explains WHY the
+    # LLM was skipped (user requirement 2026-08-04). level/scope_reason are
+    # null-safe: older Log objects without them just render empty.
     if (-not $LlmLog.in_scope) {
-        return "  LLM: [ $($LlmLog.sub_command_count) subcommand ] | in_scope=$($LlmLog.in_scope) verdict=$($LlmLog.verdict) effect=$($LlmLog.effect) latency_ms=$($LlmLog.latency_ms)`n"
+        $lvl = ''
+        if (Get-Member -InputObject $LlmLog -Name level -MemberType Properties -ErrorAction SilentlyContinue) { $lvl = "$($LlmLog.level)" }
+        $scopeReason = ''
+        if (Get-Member -InputObject $LlmLog -Name scope_reason -MemberType Properties -ErrorAction SilentlyContinue) { $scopeReason = "$($LlmLog.scope_reason)" }
+        return "  LLM: [ $($LlmLog.sub_command_count) subcommand ] | in_scope=$($LlmLog.in_scope) | level=$lvl | reason=$scopeReason | verdict=$($LlmLog.verdict) effect=$($LlmLog.effect) latency_ms=$($LlmLog.latency_ms)`n"
     }
 
     $mockMark = if ($LlmLog.mocked) { ' (mock)' } else { '' }

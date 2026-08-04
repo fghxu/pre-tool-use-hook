@@ -16,7 +16,7 @@
 # Regex constants
 # =============================================================================
 
-$script:VerbNounRegex = [regex]::new('^[A-Z]\w+-[A-Z]\w+', 'Compiled')
+$script:VerbNounRegex = [regex]::new('^[A-Z]\w+-[A-Z]\w+', 'Compiled,IgnoreCase')
 
 $script:PowershellMarkerRegex = [regex]::new(
     '(_|PSItem|ForEach-Object|Where-Object)|(\$\(|@\(|\$\{)',
@@ -92,12 +92,23 @@ function Get-CommandDomain {
     # 1. PowerShell markers (strongest signal)
     # -------------------------------------------------
 
-    # Check for Verb-Noun pattern (e.g., Get-ChildItem, Remove-Item)
+    # Check for Verb-Noun pattern (e.g., Get-ChildItem, Remove-Item).
+    # PowerShell cmdlet names are CASE-INSENSITIVE, so 'format-table' /
+    # 'convertfrom-json' typed lowercase are still PowerShell. The regex uses
+    # the ExplicitCapture + IgnoreCase options (case-insensitive) so lowercase
+    # Verb-Noun cmdlets are not mis-routed to the linux domain (2026-08-03 user
+    # report: 'format-table -autosize' / 'convertfrom-json' fell to linux and
+    # resolved as generic 'unknown command').
     if ($script:VerbNounRegex.IsMatch($trimmed)) {
         return 'powershell'
     }
 
     # Check for $_, $PSItem, | ForEach-Object, | Where-Object, @(), ${}
+    # NOTE: a stray $_ in a KNOWN BINARY command's arguments must NOT override
+    # the leading binary (2026-08-03 user report: 'aws ... --arn $_' was
+    # hijacked into the PowerShell domain, hiding the aws 'describe-' read-only
+    # prefix). Known binaries (aws/git/docker/kubectl/terraform/helm) are
+    # routed by their HEAD token first; $_ inside their args is just data.
     # NOTE: $( is deliberately excluded — it is valid in both Bash (command
     # substitution) and PowerShell (subexpression). Treating it as a
     # PowerShell-only marker causes false positives for awk '{print $(NF-3)}'
@@ -105,11 +116,16 @@ function Get-CommandDomain {
     # NOTE: ${ is also excluded — bash uses ${var} for parameter expansion
     # which is NOT a PowerShell-only pattern. False positive example:
     # echo "Waiting... (${elapsed}s/${timeout}s)".
-    if ($trimmed -match '\$_' -or
-        $trimmed -match '\$PSItem\b' -or
-        $trimmed -match '\|\s*ForEach-Object\b' -or
-        $trimmed -match '\|\s*Where-Object\b' -or
-        $trimmed -match '@\(') {
+    $startsKnownBinary = $false
+    foreach ($prefix in $script:KnownBinaryPrefixes) {
+        if ($trimmed -match $prefix.Pattern) { $startsKnownBinary = $true; break }
+    }
+    if (-not $startsKnownBinary -and
+        ($trimmed -match '\$_' -or
+         $trimmed -match '\$PSItem\b' -or
+         $trimmed -match '\|\s*ForEach-Object\b' -or
+         $trimmed -match '\|\s*Where-Object\b' -or
+         $trimmed -match '@\(')) {
         return 'powershell'
     }
 

@@ -300,11 +300,14 @@ foreach ($pc in $parserCases) {
 # The reconciliation block must show HOW MANY sub-commands were recorded, so
 # threshold tuning (complex_min_subcommands) is auditable from the log alone:
 #   in-scope  : "LLM-SENT      : [ N subcommand ] | model=..."
-#   out-scope : "LLM: [ N subcommand ] | in_scope=False verdict=not_called ..."
+#   out-scope : "LLM: [ N subcommand ] | in_scope=False | level=... | reason=... verdict=not_called ..."
+# The out-of-scope one-liner MUST carry the level and the scope reason so the
+# log alone explains WHY the LLM was skipped (user requirement 2026-08-04).
 # =============================================================================
 if (-not (Get-Command Format-LlmLogBlock -ErrorAction SilentlyContinue)) {
     Record-Result -Ok $false -Name "LlmLog-SentCount" -Detail "Format-LlmLogBlock not defined"
     Record-Result -Ok $false -Name "LlmLog-OutCount"  -Detail "Format-LlmLogBlock not defined"
+    Record-Result -Ok $false -Name "LlmLog-OutScopeReason" -Detail "Format-LlmLogBlock not defined"
 }
 else {
     $inScopeLog = [PSCustomObject]@{
@@ -319,9 +322,13 @@ else {
 
     $outScopeLog = [PSCustomObject]@{
         in_scope = $false; sub_command_count = 1; verdict = 'not_called'; effect = 'none'; latency_ms = $null
+        level = 'complex_remote'; scope_reason = 'complex but local-only'
     }
     $line = Format-LlmLogBlock -Result ([PSCustomObject]@{ Decision = 'allow' }) -LlmLog $outScopeLog
     Record-Result -Ok ($line.Contains('[ 1 subcommand ]')) -Name "LlmLog-OutCount" -Detail "out-of-scope one-liner missing count: $line"
+    # The out-of-scope line must state the level and the scope reason.
+    $reasonOk = ($line.Contains('level=complex_remote') -and $line.Contains('reason=complex but local-only'))
+    Record-Result -Ok $reasonOk -Name "LlmLog-OutScopeReason" -Detail "out-of-scope one-liner missing level/reason: $line"
 }
 
 # =============================================================================
