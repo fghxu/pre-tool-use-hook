@@ -563,6 +563,20 @@ function Load-Config {
     foreach ($domainKey in $commandKeys) {
         $domain = $config.commands.$domainKey
 
+        # Regex options are DOMAIN-AWARE: PowerShell is a case-insensitive
+        # language (cmdlet names 'format-table' == 'Format-Table'), so its
+        # patterns compile case-insensitive. Linux/DOS/POSIX-style tools are
+        # genuinely case-sensitive ('cat' != 'CAT'), so they keep the default
+        # case-sensitive match to avoid false allows. (2026-08-03 user report:
+        # lowercase 'convertfrom-json' missed the case-sensitive 'ConvertFrom-Json'
+        # read_only pattern and fell through to 'unregistered PowerShell verb'.)
+        $isPowerShell = ($domainKey -ieq 'PowerShell')
+        $regexOptions = if ($isPowerShell) {
+            [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+        } else {
+            [System.Text.RegularExpressions.RegexOptions]::Compiled
+        }
+
         # Compile read_only entry patterns
         if (Get-Member -InputObject $domain -Name 'read_only' -MemberType NoteProperty) {
             foreach ($entry in $domain.read_only) {
@@ -576,7 +590,7 @@ function Load-Config {
                         # Convert glob * to .* only when * follows a non-special character
                         # to avoid breaking patterns that already use proper regex like .*
                         $anchoredPattern = $anchoredPattern -replace '(?<![.*\\])\*(?!\?|\*|\{)', '.*'
-                        $compiledPatterns += [regex]::new($anchoredPattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+                        $compiledPatterns += [regex]::new($anchoredPattern, $regexOptions)
                     }
                 }
                 $entry | Add-Member -MemberType NoteProperty -Name '_compiledPatterns' -Value $compiledPatterns -Force
@@ -593,7 +607,7 @@ function Load-Config {
                         $anchoredPattern = if ($pattern.StartsWith('^')) { $pattern } else { '^' + $pattern }
                         # Convert glob * to .* only when * follows a non-special character
                         $anchoredPattern = $anchoredPattern -replace '(?<![.*\\])\*(?!\?|\*|\{)', '.*'
-                        $compiledPatterns += [regex]::new($anchoredPattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+                        $compiledPatterns += [regex]::new($anchoredPattern, $regexOptions)
                     }
                 }
                 $entry | Add-Member -MemberType NoteProperty -Name '_compiledPatterns' -Value $compiledPatterns -Force
@@ -610,7 +624,7 @@ function Load-Config {
                         $anchoredPattern = if ($pattern.StartsWith('^')) { $pattern } else { '^' + $pattern }
                         # Convert glob * to .* only when * follows a non-special character
                         $anchoredPattern = $anchoredPattern -replace '(?<![.*\\])\*(?!\?|\*|\{)', '.*'
-                        $compiledPatterns += [regex]::new($anchoredPattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+                        $compiledPatterns += [regex]::new($anchoredPattern, $regexOptions)
                     }
                 }
                 $entry | Add-Member -MemberType NoteProperty -Name '_compiledPatterns' -Value $compiledPatterns -Force

@@ -3,6 +3,17 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 
 (Prior goal — strictness_gated config section + per-domain strictness — COMPLETE; spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md)
 
+## TDD fix (2026-08-03): `$_` shadowing + lowercase-cmdlet domain mis-route (DONE, all suites green)
+- User report: the log block `$sso=...; $ps | foreach-object { $d = aws sso-admin describe-permission-set --instance-arn $sso --permission-set-arn $_ --output json | convertfrom-json } | format-table -autosize` came back ask with reasons `unknown command: aws sso-admin describe-permission-set ...` + `unknown command: format-table -autosize`.
+- Root cause (verified by probe against the real engine):
+  1. Get-CommandDomain (Parser.ps1) checks PowerShell markers (`\$_`) BEFORE the `^aws\s` binary-prefix table — so a stray `$_` in the aws args hijacked the whole command into the PowerShell domain; the aws `describe-` read-only prefix was never consulted (reason was generic "unknown command", NOT "unregistered AWS verb").
+  2. VerbNounRegex was case-sensitive (`^[A-Z]\w+-[A-Z]\w+`) and PowerShell read_only/modifying patterns were compiled case-sensitively — so lowercase `convertfrom-json` / `format-table` failed Verb-Noun detection, fell to the linux domain, and resolved as "unknown command".
+- TDD (red/green):
+  - RED: added the exact log line as `expected="allow"` in test/config/live/test-cases.xml Decomp-ParenPipeline (case 757). Baseline 762/762 → 762/763 (only the new case failed, reason byte-identical to the production log).
+  - GREEN: (a) Parser.ps1 — KnownBinaryPrefixes table is now checked before the `$_`/`$PSItem` marker block; the marker is skipped when the command STARTS with a known binary (aws/git/docker/kubectl/terraform/helm), so `$_` in args is treated as data. (b) Parser.ps1 — VerbNounRegex compiled with IgnoreCase. (c) ConfigLoader.ps1 — pattern compilation is DOMAIN-AWARE: the PowerShell domain's read_only/modifying/strictness_gated patterns compile with IgnoreCase (PS is case-insensitive); Linux/DOS/AWS/POSIX-style domains stay case-sensitive (those are genuinely case-sensitive → no new false allows).
+- Verified: Run-AllTests 1070/1070 (all 9 suites incl. SG-normal/strict, trustedpattern, redirect-strict, fullpipe, llm-review x3); codex 17/17. Safety probe: lowercase `remove-item`/`stop-service` still ASK; lowercase `convertfrom-json`/`format-table` now allow; aws describe w/ `$_` now routes to aws_cli and allows. Note: the all-gated Set-Content→C:\Windows allow in normal mode is pre-existing documented behavior (PROGRESS 2026-07-27), NOT caused by this change.
+
+
 ## State note (2026-07-25)
 - master @ 539f8eb. path-branch merged (864e85c) + test consolidation done.
 - strictness_gated implementation branches from master.

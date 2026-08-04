@@ -4435,6 +4435,23 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <copilot-command><![CDATA[aws sso-admin frobnicate-permission-set --instance-arn arn:aws:sso:::instance/ssoins-000000]]></copilot-command>
     </test-case>
 
+    <!-- RED case for the 2026-08-03 user report: the exact pipeline block    -->
+    <!-- from the live log. Should be allow (assignment + aws describe-* +    -->
+    <!-- read-only cmdlets), but every sub-command after [1] resolves unknown  -->
+    <!-- because: (a) the '$_' in the aws args hijacks it into the PowerShell  -->
+    <!-- domain (Get-CommandDomain checks $_ markers BEFORE the ^aws prefix), -->
+    <!-- so 'describe-' is never matched; (b) lowercase 'convertfrom-json' /   -->
+    <!-- 'format-table' fail the case-sensitive VerbNounRegex and fall to the  -->
+    <!-- linux domain -> generic 'unknown command'.                            -->
+    <test-case expected="allow" reason="read-only: $var = ...; aws describe-* is read-only; ConvertFrom-Json / Format-Table are read-only cmdlets (the $_ and lowercase cmdlet names must not re-route the segments into the wrong domain)" category="Decomp-ParenPipeline">
+      <description>user-reported log line: aws describe-permission-set piped through ConvertFrom-Json / Format-Table inside ForEach-Object (read-only, $_ must not shadow the aws prefix; lowercase cmdlets must stay PowerShell)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$sso = "arn:sso:::instance/ssoins-0000"
+$ps | foreach-object {
+$d = aws sso-admin describe-permission-set --instance-arn $sso --permission-set-arn $_ --output json| convertfrom-json
+} | format-table -autosize]]></copilot-command>
+    </test-case>
+
   </category-group>
 
   <!-- =================================================================== -->
