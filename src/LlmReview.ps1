@@ -454,6 +454,7 @@ function Invoke-LlmReview {
         enabled           = $true
         level             = $llm.Level
         in_scope          = $false
+        scope_reason      = ''
         sub_command_count = 0
         remote_match      = $null
         verdict           = 'not_called'
@@ -477,6 +478,7 @@ function Invoke-LlmReview {
 
     $scope = Test-LlmReviewScope -ClassifyResult $ClassifyResult -Config $Config
     $log.in_scope = $scope.InScope
+    $log.scope_reason = $scope.Reason
     $log.sub_command_count = $scope.SubCommandCount
     $log.remote_match = $scope.RemoteMatch
 

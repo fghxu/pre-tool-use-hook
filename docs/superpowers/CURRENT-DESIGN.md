@@ -481,12 +481,16 @@ production `.log` and in the fixture runner's per-run log
 ```
 
 (The `[ N subcommand ]` prefix — also present on the out-of-scope one-liner
-`LLM: [ N subcommand ] | in_scope=False …` — records how many sub-commands
-the engine produced, so `complex_min_subcommands` threshold tuning is auditable
-from the log alone. `path-guard denied:` appears only when the stage-2 guard
+`LLM: [ N subcommand ] | in_scope=False | level=… | reason=… | verdict=not_called …`
+— records how many sub-commands the engine produced, so `complex_min_subcommands`
+threshold tuning is auditable from the log alone. The out-of-scope line ALSO
+carries `level=` (the configured scope level) and `reason=` (the scope gate's
+explanation, e.g. `complex but local-only` / `only N sub-command(s) (< min)`) so
+the log alone explains WHY the LLM was skipped — user requirement 2026-08-04.
+`path-guard denied:` appears only when the stage-2 guard
 refused a gated flag; `(mock)` marks injected verdicts.) Out-of-scope keeps the phase-I one-liner;
 disabled logs nothing. JSONL `llm` object: `enabled, level, in_scope,
-sub_command_count, remote_match, sent, tiers, local_decision, local_reason,
+scope_reason, sub_command_count, remote_match, sent, tiers, local_decision, local_reason,
 timeout_ms, verdict, recovered, latency_ms, indices, mocked, error,
 raw_excerpt, flagged, suppressed, path_guard_denied, effect, model`.
 

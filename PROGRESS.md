@@ -4,7 +4,6 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 (Prior goal — strictness_gated config section + per-domain strictness — COMPLETE; spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md)
 
 ## TDD fix (2026-08-03): `$_` shadowing + lowercase-cmdlet domain mis-route (DONE, all suites green)
-- User report: the log block `$sso=...; $ps | foreach-object { $d = aws sso-admin describe-permission-set --instance-arn $sso --permission-set-arn $_ --output json | convertfrom-json } | format-table -autosize` came back ask with reasons `unknown command: aws sso-admin describe-permission-set ...` + `unknown command: format-table -autosize`.
 - Root cause (verified by probe against the real engine):
   1. Get-CommandDomain (Parser.ps1) checks PowerShell markers (`\$_`) BEFORE the `^aws\s` binary-prefix table — so a stray `$_` in the aws args hijacked the whole command into the PowerShell domain; the aws `describe-` read-only prefix was never consulted (reason was generic "unknown command", NOT "unregistered AWS verb").
   2. VerbNounRegex was case-sensitive (`^[A-Z]\w+-[A-Z]\w+`) and PowerShell read_only/modifying patterns were compiled case-sensitively — so lowercase `convertfrom-json` / `format-table` failed Verb-Noun detection, fell to the linux domain, and resolved as "unknown command".
