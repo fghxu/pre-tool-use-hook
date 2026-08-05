@@ -61,7 +61,11 @@ function Write-RecordEntry {
         [PSCustomObject]$LlmLog = $null
     )
 
+    # received_at is an instant in time (UTC, denoted by Z suffix).
+    # The daily record FILE is named by LOCAL computer date so that a late-
+    # evening run does not roll over to "tomorrow's" file (user is in EST).
     $utcNow = (Get-Date).ToUniversalTime()
+    $localNow = Get-Date
     $receivedAt = $utcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
 
     # Defensive: ensure log directory exists before writing
@@ -99,7 +103,7 @@ function Write-RecordEntry {
     $jsonLine = $record | ConvertTo-Json -Compress -Depth 10
 
     $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } elseif ($IDE -eq 'Codex') { 'codex' } else { 'claude' }
-    $fileName = $utcNow.ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.records.jsonl'
+    $fileName = $localNow.ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.records.jsonl'
     $filePath = Join-Path $LogDir $fileName
 
     # Append single line, close immediately (crash-safe)
@@ -362,8 +366,11 @@ function Write-LogEntry {
     $logEntry = $header + $body + "`n"
 
     # --- Write to file (UTF-8 without BOM, LF line endings) ---
+    # Daily file is named by LOCAL computer date so a late-evening run does
+    # not roll over to "tomorrow's" file (user is in EST; body timestamps
+    # are already local, so the filename should match them).
     $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } elseif ($IDE -eq 'Codex') { 'codex' } else { 'claude' }
-    $logFileName = (Get-Date -AsUTC).ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.log'
+    $logFileName = (Get-Date).ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.log'
     $logFilePath = Join-Path $LogDir $logFileName
 
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
