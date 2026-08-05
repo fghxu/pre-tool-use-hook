@@ -164,6 +164,44 @@ function Test-LlmReviewScope {
     }
 }
 
+# =============================================================================
+# ConvertFrom-BalancedJsonObject - step 5B of the LLM JSON-repair pipeline.
+# Character-scanning extractor that returns ALL top-level balanced {...}
+# substrings in document order. Deliberately NOT regex: JSON can contain
+# nested objects, arrays, and braces/quotes inside strings, so a brace-counting
+# scanner that tracks string state and backslash escapes is required. Used by
+# ConvertTo-LlmVerdict Layer 3.5 to recover the schema-valid JSON object a
+# chatty model glued to analysis prose (observed on glm-5.2 and
+# deepseek-v4-flash; both ignore the output contract under load).
+# =============================================================================
+function ConvertFrom-BalancedJsonObject {
+    param([AllowNull()][AllowEmptyString()][string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return @() }
+    $objs = New-Object System.Collections.Generic.List[string]
+    $depth = 0; $inStr = $false; $escape = $false; $start = -1
+    for ($i = 0; $i -lt $Text.Length; $i++) {
+        $c = $Text[$i]
+        if ($inStr) {
+            if ($escape) { $escape = $false }
+            elseif ($c -eq '\') { $escape = $true }
+            elseif ($c -eq '"') { $inStr = $false }
+        }
+        else {
+            if ($c -eq '"') { $inStr = $true }
+            elseif ($c -eq '{') { if ($depth -eq 0) { $start = $i }; $depth++ }
+            elseif ($c -eq '}') {
+                if ($depth -gt 0) {
+                    $depth--
+                    if ($depth -eq 0 -and $start -ge 0) {
+                        $objs.Add($Text.Substring($start, $i - $start + 1)); $start = -1
+                    }
+                }
+            }
+        }
+    }
+    return ,$objs
+}
+
 function ConvertTo-LlmVerdict {
     <#
     .SYNOPSIS
@@ -173,7 +211,9 @@ function ConvertTo-LlmVerdict {
         (bare token / phase-I JSON keys). Layers: 1 bare token; 2 JSON
         {"modifying":[...]} (strictly validated against -SubCommandCount) or
         phase-I verdict-ish JSON keys; 3 last-line rescue (bare token or the
-        modifying JSON); 4 unusable. Garbage NEVER maps to a verdict.
+        modifying JSON); 3.5 whole-response scan (chatty-model rescue, scans
+        for the last schema-valid JSON object then the last bare token);
+        4 unusable. Garbage NEVER maps to a verdict.
     #>
     param(
         [AllowNull()][AllowEmptyString()][string]$RawContent,
@@ -244,6 +284,41 @@ function ConvertTo-LlmVerdict {
                 }
             }
         }
+    }
+
+    # Layer 3.5: whole-response scan - chatty-model rescue (2026-08-04). Both
+    # glm-5.2 and deepseek-v4-flash ignore the output contract under load and
+    # glue the answer to analysis prose, often mid-line or mid-response, so
+    # Layer 3's last-line rule cannot see it. The model almost always KNOWS the
+    # answer; it just won't put it on a clean line. We scan the WHOLE response,
+    # preferring the unambiguous JSON form and falling back to a bare token.
+    # All returns here are flagged Recovered (we salvaged an embedded answer).
+    #
+    # 3.5a: last schema-valid {"modifying":[...]} object anywhere in the text.
+    # ConvertFrom-BalancedJsonObject handles nested braces/strings/escapes (a
+    # char scanner, NOT regex). Scanning last-to-first prefers the model's
+    # final answer when it emits the JSON twice.
+    $jsonObjs = ConvertFrom-BalancedJsonObject $RawContent
+    for ($j = $jsonObjs.Count - 1; $j -ge 0; $j--) {
+        $scanObj = $null
+        try { $scanObj = $jsonObjs[$j] | ConvertFrom-Json -ErrorAction Stop } catch { }
+        if ($scanObj -and ($scanObj.PSObject.Properties.Name -contains 'modifying')) {
+            $idxs = Test-ModifyingArray $scanObj.modifying $SubCommandCount
+            if ($null -ne $idxs) {
+                if ($idxs.Count -eq 0) { return (New-Verdict 'read-only' $true @()) }
+                return (New-Verdict 'modifying' $true $idxs)
+            }
+        }
+    }
+    # 3.5b: last bare true/false token anywhere in the response (V1 binary
+    # contract only; handles prose-glued tokens like "...modifying.true" and
+    # the doubled-token quirk "truetrue" / "falsefalse"). LastIndexOf picks the
+    # model's final token; an ordinal case-insensitive search matches any case.
+    $lt = $RawContent.LastIndexOf('true',  [System.StringComparison]::OrdinalIgnoreCase)
+    $lf = $RawContent.LastIndexOf('false', [System.StringComparison]::OrdinalIgnoreCase)
+    if ($lt -ge 0 -or $lf -ge 0) {
+        if ($lt -gt $lf) { return (New-Verdict 'modifying' $true $null) }
+        return (New-Verdict 'read-only' $true $null)
     }
 
     # Layer 4: unusable (distinct state - never treated as a verdict)

@@ -395,6 +395,22 @@ prompt and lookup, so mismatch is impossible by construction. The POC script
    accepted for back-compat.
 3. Last non-empty line rescue (bare token or the JSON) ⇒ same handling,
    `Recovered=$true`.
+3.5. **Whole-response scan — chatty-model rescue** (2026-08-04). A/B/C live
+   testing showed BOTH glm-5.2 and deepseek-v4-flash ignore the output contract
+   under load and glue the answer to analysis prose (`...read-only.{"modifying":[]}`,
+   `{"modifying":[]}{"modifying":[]}`, `...modifying.true`, `truetrue`), so Layer 3's
+   last-line rule can't see it. The correct answer is present ~100% of the time, so:
+   - **3.5a** scan the whole response (via `ConvertFrom-BalancedJsonObject` — a
+     character scanner, NOT regex, that handles nested braces/strings/escapes;
+     step 5B of the generic LLM-JSON-repair pipeline) for the LAST schema-valid
+     `{"modifying":[...]}` object; last-to-first prefers the model's final answer
+     when it emits the JSON twice.
+   - **3.5b** last bare `true`/`false` token anywhere (V1 binary contract only;
+     `LastIndexOf` picks the final token; handles glued and doubled tokens).
+   Both return `Recovered=$true`. Schema validation (step 5A) is the existing
+   `Test-ModifyingArray` (one key + bounded int array — no JSON-schema library
+   needed). Repair-prompt (a second LLM round-trip) is deferred: extraction alone
+   closes the gap at zero quota and no added latency.
 4. Anything else ⇒ `unusable` — NEVER mapped to a verdict.
 
 Verdicts: `modifying | read-only | unusable | down` (down = unreachable/timeout/

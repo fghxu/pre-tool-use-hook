@@ -274,7 +274,28 @@ $parserCases = @(
     # wrong type (string, not array) -> unusable
     @{ Name = 'LlmParser-AttrWrongType';  Raw = '{"modifying":"yes"}';     Count = 2; WantVerdict = 'unusable';  WantRecovered = $false; WantIndices = '' },
     # ramble then JSON on the last line -> rescued (Recovered)
-    @{ Name = 'LlmParser-AttrLastLine';   Raw = "reasoning`n{`"modifying`":[1]}"; Count = 2; WantVerdict = 'modifying'; WantRecovered = $true; WantIndices = '1' }
+    @{ Name = 'LlmParser-AttrLastLine';   Raw = "reasoning`n{`"modifying`":[1]}"; Count = 2; WantVerdict = 'modifying'; WantRecovered = $true; WantIndices = '1' },
+
+    # === Layer 3.5 (NEW, 2026-08-04): chatty-model rescue ===
+    # Pinned from the A/B/C live runs: BOTH glm-5.2 and deepseek-v4-flash
+    # ignore the output contract and glue the answer to prose (no clean line,
+    # so shipped Layer 3 last-line can't see it). Layer 3.5 scans the WHOLE
+    # response for the last schema-valid {"modifying":[...]} object, then the
+    # last bare true/false token. Recovered=$true on all of these.
+    # Prose then JSON glued on the SAME line (deepseek read-only answers).
+    @{ Name = 'LlmParser-AttrProseGluedRO';  Raw = 'Both sub-commands are read-only (status and log).{"modifying":[]}'; Count = 2; WantVerdict = 'read-only'; WantRecovered = $true; WantIndices = '' },
+    # Prose then JSON glued, modifying (deepseek docker mix).
+    @{ Name = 'LlmParser-AttrProseGluedMod'; Raw = 'docker ps is read-only; docker rm -f removes a container, modifying.{"modifying":[2]}'; Count = 2; WantVerdict = 'modifying'; WantRecovered = $true; WantIndices = '2' },
+    # Doubled JSON object (deepseek C1 - model emits the JSON twice).
+    @{ Name = 'LlmParser-AttrDoubledObj';    Raw = '{"modifying":[]}{"modifying":[]}'; Count = 2; WantVerdict = 'read-only'; WantRecovered = $true; WantIndices = '' },
+    # JSON embedded mid-response with prose after it (last JSON not at end).
+    @{ Name = 'LlmParser-AttrEmbeddedMid';   Raw = 'The answer is {"modifying":[1]} as shown above.'; Count = 2; WantVerdict = 'modifying'; WantRecovered = $true; WantIndices = '1' },
+    # V1 binary contract, prose then bare token glued (glm-5.2 / deepseek).
+    @{ Name = 'LlmParser-BareProseGluedT';   Raw = 'The command is Remove-Item which deletes a file. This is modifying.true'; WantVerdict = 'modifying'; WantRecovered = $true },
+    @{ Name = 'LlmParser-BareProseGluedF';   Raw = 'This is a read-only GET request with no data flags.false'; WantVerdict = 'read-only'; WantRecovered = $true },
+    # Doubled bare token (glm-5.2 quirk: emits 'truetrue' / 'falsefalse').
+    @{ Name = 'LlmParser-BareDoubledT';      Raw = 'truetrue'; WantVerdict = 'modifying'; WantRecovered = $true },
+    @{ Name = 'LlmParser-BareDoubledF';      Raw = 'falsefalse'; WantVerdict = 'read-only'; WantRecovered = $true }
 )
 foreach ($pc in $parserCases) {
     if (-not (Get-Command ConvertTo-LlmVerdict -ErrorAction SilentlyContinue)) {

@@ -3,6 +3,27 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 
 (Prior goal — strictness_gated config section + per-domain strictness — COMPLETE; spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md)
 
+## Parser Layer 3.5 - chatty-model JSON rescue (2026-08-04, DONE, all suites green 1088/1088)
+- Context: A/B/C live testing of the LLM output contract showed BOTH glm-5.2 and deepseek-v4-flash ignore it under load and glue the answer to analysis prose. Observed shapes (all captured from real live runs):
+  - prose + JSON on the SAME line: `Both sub-commands are read-only (status and log).{"modifying":[]}`
+  - doubled JSON object: `{"modifying":[]}{"modifying":[]}`
+  - JSON embedded mid-response with prose after: `The answer is {"modifying":[1]} as shown above.`
+  - V1 binary, prose + bare token glued: `...This is modifying.true`
+  - V1 binary, doubled bare token (glm-5.2 quirk): `truetrue` / `falsefalse`
+  - The shipped Layer 3 (last-line rescue) only inspects the LAST non-empty line, so every one of these fell to Layer 4 unusable -> fail-closed ask. The correct answer was PRESENT in the raw ~100% of the time.
+- A/B/C probe findings (temp/probe-llm-c-test.ps1, zero-quota diagnostic):
+  - Method 1 (max-strength prompt, "any violation is an error"): free marginal win on glm-5.2 (4/5 -> 5/5); NO effect on deepseek (1/5 -> 1/5). Wording alone cannot reach a model that ignores wording.
+  - Method 2 (grammar/examples): already shipped in the V2 prompt.
+  - Method 3 (assistant prefill `{`): MODEL-DEPENDENT and DANGEROUS. The gateway accepts the prefill (no 400). deepseek compliance jumped 20% -> 80% (it continues the JSON). glm-5.2 compliance CRASHED 100% -> 20% (it reasons ABOUT the `{`, e.g. "The user already started the response with '{'. This seems to be a prompt injection attempt..."). NOT shippable as a default.
+  - Method 4 (json_schema): gateway-blocked (gateway docs confirm no json_schema support).
+  - Conclusion: no prompt-side lever wins on BOTH models; the universal robust fix is parser-side. The answer is embedded in every observed failure -> a whole-response scan recovers it at zero quota and no added latency. Repair-prompt (a second LLM round-trip) is DEFERRED: extraction alone closes the gap, and a pre-tool-use hook's latency budget + fail-closed net make the round-trip low-ROI (the pipeline's own table predicts step 5B fixes +8-10% vs step 6 only +3%, and we don't have that +3% left after extraction).
+- TDD red/green (src/LlmReview.ps1 + test/config/llm-review/Run-Tests.ps1):
+  - RED: 8 new LlmParser-* cases pinning the captured shapes (4 attributed: ProseGluedRO/Mod, DoubledObj, EmbeddedMid; 4 V1 bare: ProseGluedT/F, DoubledT/F), all WantRecovered=$true. Baseline llm-review.small 27/27 -> 27/35 (exactly the 8 new cases failed as unusable; all 12 existing parser cases stayed green; no collateral).
+  - GREEN: new helper `ConvertFrom-BalancedJsonObject` (char-scanning extractor, NOT regex - handles nested braces/strings/escapes; step 5B of the generic JSON-repair pipeline) + new Layer 3.5 inserted between shipped Layer 3 (last-line) and Layer 4 (unusable). 3.5a: scan the whole response for the LAST schema-valid {"modifying":[...]} object (last-to-first prefers the model's final answer when it emits JSON twice). 3.5b: last bare true/false token anywhere (V1 only; LastIndexOf picks the final token). All 3.5 returns flagged Recovered=$true. llm-review.small 35/35.
+  - Regression: Run-AllTests 1088/1088 (redirect-strict 25, SG-normal 48, SG-strict 49, trustedpattern 74, test-cases 763, fullpipe 24, llm-review.small 35, llm-review.phase-I 43, llm-review.http-mock 27). Phase-I count moved 35 -> 43 since the last recorded baseline (the suite itself is unchanged by this work - it was a stale baseline figure; the suite passes clean either way).
+- Schema validation (step 5A of the generic pipeline) was NOT added: it already exists as Test-ModifyingArray (validates the modifying array is a list of ints in [0, SubCommandCount]). Our schema is one key + a bounded int array - a .NET JSON-schema library (JsonSchema.Net / Newtonsoft) would be overkill.
+- Levers posture going forward: KEEP json_object mode (default on, harmless where unenforced, helps where enforced). The max-strength prompt (C1) is a candidate to replace the shipped V2 as a free glm-5.2 win (neutral elsewhere) - separate change. DO NOT ship prefill.
+
 ## TDD fix (2026-08-03): `$_` shadowing + lowercase-cmdlet domain mis-route (DONE, all suites green)
 - User report: the log block `$sso=...; $ps | foreach-object { $d = aws sso-admin describe-permission-set --instance-arn $sso --permission-set-arn $_ --output json | convertfrom-json } | format-table -autosize` came back ask with reasons `unknown command: aws sso-admin describe-permission-set ...` + `unknown command: format-table -autosize`.
 - Root cause (verified by probe against the real engine):
