@@ -599,6 +599,16 @@ function Find-NestedCommands {
     $nested = @()
     $trimmed = $Command.Trim()
 
+    # Normalize: strip & call operator and resolve full-path pwsh.exe/powershell.exe
+    # so patterns below can match regardless of invocation form:
+    #   pwsh -File x.ps1           → pwsh -File x.ps1
+    #   & 'C:\...\pwsh.exe' -File  → pwsh -File ...
+    $trimmed = $trimmed -replace '^\s*&\s+', ''
+    if ($trimmed -match '^[''"]([A-Za-z]:\\(?:.*\\)?(?:pwsh|powershell)(?:\.exe)?)[''"]') {
+        $restAfterPath = $trimmed.Substring($Matches[0].Length)
+        $trimmed = "pwsh$restAfterPath"
+    }
+
     # -------------------------------------------------
     # Detect wrapper patterns and extract quoted/supplied inner command
     # -------------------------------------------------
@@ -670,7 +680,7 @@ function Find-NestedCommands {
     # Step 0f-trust (Test-TrustedProgram) can match it. If the path is NOT in
     # trusted_programs, the Resolver treats it as unknown/unclassified → ask.
     # Handles quoted and unquoted paths.
-    if ($trimmed -match '(?i)^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-File\s+(?:"([^"]+)"|''([^'']+)''|(\S+))\s*$') {
+    if ($trimmed -match '(?i)^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-File\s+(?:"([^"]+)"|''([^'']+)''|(\S+))') {
         $filePath = if ($Matches[1]) { $Matches[1] } elseif ($Matches[2]) { $Matches[2] } else { $Matches[3] }
         if ($filePath) {
             # Route as PowerShell domain — the path is a PowerShell script,
