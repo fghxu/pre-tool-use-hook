@@ -27,6 +27,26 @@ DEFINITIONS
   no data flags), aws ... describe-*/list-*/get-*, kubectl get/describe,
   docker ps/images/logs/inspect, git status/diff/log/show, Get-*/dir/ls/cat/type.
 
+VARIABLE STATE
+- Assigning, updating, or removing ordinary in-memory shell/session variables
+  is READ-ONLY. This includes local variables, remote-session variables, and
+  variables that happen to contain credentials or secrets. The variable
+  mutation itself does NOT make the command modifying — but you MUST still
+  classify independently every command used to compute, transmit, or consume
+  the variable's value (e.g. the Invoke-RestMethod on the right-hand side).
+- This exception applies ONLY to plain variable operations: $x = ..., ${var} =,
+  Set-Variable, Remove-Variable, New-Variable, and $env:VAR = for process-scoped
+  environment variables. It does NOT extend to:
+  - object property setters ($obj.Prop = "value")
+  - registry or PSProvider writes (Set-ItemProperty, reg add)
+  - shell profile files (.bashrc writes, $PROFILE modification)
+  - any other persistent state that uses assignment-like syntax
+- Process-scoped environment-variable changes ($env:TEMP = "C:\tmp") are
+  ephemeral (lost when the process exits) and also READ-ONLY for classification.
+- Persistent user/machine/system environment-variable changes are MODIFYING:
+  setx, reg add ... Environment, [Environment]::SetEnvironmentVariable(...)
+  with a User or Machine target.
+
 EXAMPLES (command -> answer)
 Get-Item C:\temp\ -> false
 Get-ChildItem C:\logs | Select-Object -First 5 -> false
@@ -38,6 +58,14 @@ Remove-Item C:\temp\foo.txt -> true
 aws s3 cp file.txt s3://bucket/key -> true
 curl -X POST -d '{}' http://api/orders -> true
 ssh host "systemctl restart nginx" -> true
+$x = "hello" -> false
+$cred = Get-Credential -> false
+$result = Invoke-RestMethod -Method Get -Uri https://api/items -> false
+$env:TEMP = "C:\tmp" -> false
+$obj.Property = "new value" -> true
+setx PATH "C:\tools" -> true
+[Environment]::SetEnvironmentVariable("PATH", "C:\tools", "User") -> true
+reg add HKCU\Environment /v FOO /d bar -> true
 
 OUTPUT CONTRACT - CRITICAL
 Your ENTIRE response must be exactly one bare lowercase token:
@@ -70,14 +98,57 @@ DEFINITIONS
   flags), aws ... describe-*/list-*/get-*, kubectl get/describe,
   docker ps/images/logs/inspect, git status/diff/log/show, Get-*/dir/ls/cat/type.
 
-EXAMPLES
-block: aws s3 ls && aws s3 cp f s3://b/k
-sub_commands: 1. aws s3 ls / 2. aws s3 cp f s3://b/k
-answer: {"modifying":[2]}
+VARIABLE STATE
+- Assigning, updating, or removing ordinary in-memory shell/session variables
+  is READ-ONLY. This includes local variables, remote-session variables, and
+  variables that happen to contain credentials or secrets. The variable
+  mutation itself does NOT make the command modifying — but you MUST still
+  classify independently every command used to compute, transmit, or consume
+  the variable's value (e.g. the Invoke-RestMethod on the right-hand side).
+- This exception applies ONLY to plain variable operations: $x = ..., ${var} =,
+  Set-Variable, Remove-Variable, New-Variable, and $env:VAR = for process-scoped
+  environment variables. It does NOT extend to:
+  - object property setters ($obj.Prop = "value")
+  - registry or PSProvider writes (Set-ItemProperty, reg add)
+  - shell profile files (.bashrc writes, $PROFILE modification)
+  - any other persistent state that uses assignment-like syntax
+- Process-scoped environment-variable changes ($env:TEMP = "C:\tmp") are
+  ephemeral (lost when the process exits) and also READ-ONLY for classification.
+- Persistent user/machine/system environment-variable changes are MODIFYING:
+  setx, reg add ... Environment, [Environment]::SetEnvironmentVariable(...)
+  with a User or Machine target.
 
-block: Get-ChildItem C:\logs | Select-Object -First 5
-sub_commands: 1. Get-ChildItem C:\logs / 2. Select-Object -First 5
+EXAMPLES
+# Variable assignment (read-only — RHS commands classify independently)
+block: $x = "hello"
+sub_commands: 1. $x = "hello"
 answer: {"modifying":[]}
+
+block: $cred = Get-Credential
+sub_commands: 1. $cred = Get-Credential
+answer: {"modifying":[]}
+
+block: $env:TEMP = "C:\tmp"
+sub_commands: 1. $env:TEMP = "C:\tmp"
+answer: {"modifying":[]}
+
+# Persistent environment changes (modifying)
+block: setx PATH "C:\tools"
+sub_commands: 1. setx PATH "C:\tools"
+answer: {"modifying":[1]}
+
+block: [Environment]::SetEnvironmentVariable("PATH", "C:\tools", "User")
+sub_commands: 1. [Environment]::SetEnvironmentVariable(...)
+answer: {"modifying":[1]}
+
+# Object property setters / registry writes (modifying)
+block: $obj.Prop = "new value"
+sub_commands: 1. $obj.Prop = "new value"
+answer: {"modifying":[1]}
+
+block: reg add HKCU\Environment /v FOO /d bar
+sub_commands: 1. reg add HKCU\Environment /v FOO /d bar
+answer: {"modifying":[1]}
 
 NEGATIVE EXAMPLE - this is WRONG, never do this:
 question: aws s3 ls && aws s3 cp f s3://b/k
