@@ -975,6 +975,18 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
       <description>pwsh -File 'src/Run-AllTests.ps1' — single-quoted path, trusted => allow</description>
       <copilot-command><![CDATA[pwsh -File 'src/Run-AllTests.ps1']]></copilot-command>
     </test-case>
+    <test-case expected="allow" reason="trusted_programs: &amp; full-path pwsh with -File trusted script" category="PSWrapper-FlagSkipping">
+      <description>&amp; "C:\Program Files\PowerShell\7\pwsh.exe" -File "src/Run-AllTests.ps1" — &amp; full-path + trusted script => allow</description>
+      <copilot-command><![CDATA[& "C:\Program Files\PowerShell\7\pwsh.exe" -File "src/Run-AllTests.ps1"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="untrusted: &amp; full-path pwsh with -File untrusted script => ask" category="PSWrapper-FlagSkipping">
+      <description>&amp; 'C:\Program Files\PowerShell\7\pwsh.exe' -File C:\temp\untrusted.ps1 — &amp; single-quoted full-path + untrusted script => ask</description>
+      <copilot-command><![CDATA[& 'C:\Program Files\PowerShell\7\pwsh.exe' -File C:\temp\untrusted.ps1]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="untrusted: -File with trailing arguments => ask" category="PSWrapper-FlagSkipping">
+      <description>pwsh -File C:\temp\untrusted.ps1 -OtherFlag value — trailing args after -File must not block extraction</description>
+      <copilot-command><![CDATA[pwsh -File C:\temp\untrusted.ps1 -OtherFlag value]]></copilot-command>
+    </test-case>
     <test-case expected="allow" reason="read-only: -c short form + flag skipped, inner Get-ChildItem" category="PSWrapper-FlagSkipping">
       <description>powershell.exe -NoProfile -c "Get-ChildItem" (short -c form must unwrap like -Command)</description>
       <copilot-command><![CDATA[powershell.exe -NoProfile -c "Get-ChildItem C:\Windows"]]></copilot-command>
