@@ -4209,6 +4209,48 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <copilot-command><![CDATA[$null = [System.IO.File]::Delete("c:\temp\x.txt"); Get-ChildItem c:\temp]]></copilot-command>
     </test-case>
 
+    <!-- System.Uri static string ops (EscapeDataString/EscapeUriString/UnescapeDataString +
+         validators CheckSchemeName/IsWellFormedUriString): pure String->String / ->Bool,
+         no I/O. Covers the reported over-block ([uri]::EscapeDataString in a ;-chain with
+         Invoke-RestMethod -Method Get). Entry form is the FULL name System.Uri::Method;
+         reflection resolves the [uri] accelerator to System.Uri so BOTH spellings match. -->
+
+    <test-case expected="allow" reason="safe static: [uri]::EscapeDataString in ;-chain with read-only cmdlet (arbiter path)" category="SafeStaticMethods">
+      <description>$enc = [uri]::EscapeDataString("solr-oa/oa-search") ; Get-ChildItem - reported over-block case</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$enc = [uri]::EscapeDataString("solr-oa/oa-search"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: [uri]::EscapeDataString pure expression (certifier path)" category="SafeStaticMethods">
+      <description>$z = @(); $null = [uri]::EscapeDataString(...) - zero cmdlets, safe-expression certifier</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null = [uri]::EscapeDataString("a b/c")]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: [System.Uri]::EscapeDataString full-name spelling (reflection resolves accelerator too)" category="SafeStaticMethods">
+      <description>$null = [System.Uri]::EscapeDataString(...) ; Get-ChildItem - full-name spelling</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.Uri]::EscapeDataString("a b/c"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: sibling Uri encoders EscapeUriString + UnescapeDataString" category="SafeStaticMethods">
+      <description>$a = [uri]::EscapeUriString(...); $b = [uri]::UnescapeDataString($a) - pure String ops</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$a = [uri]::EscapeUriString("https://x/a b"); $b = [uri]::UnescapeDataString($a)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: Uri validator CheckSchemeName (String->Bool)" category="SafeStaticMethods">
+      <description>$ok = [uri]::CheckSchemeName("https") ; Get-ChildItem - pure validator</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$ok = [uri]::CheckSchemeName("https"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="integration: [uri]::EscapeDataString + Invoke-RestMethod -Method Get + format pipeline (reported case, clean form)" category="SafeStaticMethods">
+      <description>URL-encode + HTTP GET (parameter_commands read-only) + format output - the cleaned reported pipeline</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$enc = [uri]::EscapeDataString("solr-oa/oa-search"); $r = Invoke-RestMethod -Method Get -Uri "https://example.com/api"; $r | Select-Object -First 5 | Format-Table -AutoSize]]></copilot-command>
+    </test-case>
+
   </category-group>
 
   <category-group name="DotNetMethodAllowlist">
