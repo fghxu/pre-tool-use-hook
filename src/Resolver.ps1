@@ -120,7 +120,7 @@ function Resolve-Command {
     # Safe-expression synthetic marker from Parser.ps1
     # -------------------------------------------------
     if ($Command -eq '(safe expression)') {
-        return New-ResolutionResult -Decision "allow" -Reason "safe expression" -MatchedPattern $null -Risk "none"
+        return New-ResolutionResult -Decision "allow" -Reason "safe expression" -MatchedPattern $null -Risk "none" -Tier "safe_expr"
     }
 
     # -------------------------------------------------
@@ -136,7 +136,7 @@ function Resolve-Command {
     }
 
     if (-not $domainKey) {
-        return New-ResolutionResult -Decision "ask" -Reason "unknown domain: $Domain" -MatchedPattern $null -Risk "unknown"
+        return New-ResolutionResult -Decision "ask" -Reason "unknown domain: $Domain" -MatchedPattern $null -Risk "unknown" -Tier "unknown_domain"
     }
 
     $domainConfig = $Config.commands.$domainKey
@@ -267,10 +267,19 @@ function Resolve-Command {
     # Strip PowerShell call operator & (e.g., & "C:\tools\tool.exe" args)
     $trimmedForPath = $trimmedForPath -replace '^\s*&\s+', ''
 
-    # Extract first token (handling quoted paths with spaces)
+    # Strip PowerShell dot-source operator . (e.g., . 'C:\scripts\helper.ps1' args)
+    # The dot-source operator runs a script in the current scope; it is not a
+    # command itself — the script path is the real program token.
+    $trimmedForPath = $trimmedForPath -replace '^\s*\.\s+', ''
+
+    # Extract first token (handling quoted paths with spaces, both " and ')
     $firstToken = $null
     $rest = ''
     if ($trimmedForPath -match '^"([^"]+)"\s*(.*)$') {
+        $firstToken = $matches[1]
+        $rest = $matches[2]
+    }
+    elseif ($trimmedForPath -match "^'([^']+)'\s*(.*)`$") {
         $firstToken = $matches[1]
         $rest = $matches[2]
     }
@@ -299,10 +308,10 @@ function Resolve-Command {
             if ($modToken) {
                 return New-ResolutionResult -Decision "ask" `
                     -Reason "trusted program '$trustedProg' invoked with modifying arg '$modToken'" `
-                    -MatchedPattern $trustedProg -Risk "unknown"
+                    -MatchedPattern $trustedProg -Risk "unknown" -Tier "trusted_program"
             }
             return New-ResolutionResult -Decision "allow" `
-                -Reason "trusted program: $trustedProg" -MatchedPattern "trusted-program:$trustedProg" -Risk "none"
+                -Reason "trusted program: $trustedProg" -MatchedPattern "trusted-program:$trustedProg" -Risk "none" -Tier "trusted_program"
         }
     }
 
@@ -546,7 +555,7 @@ function Resolve-Command {
         # fallback) instead of the generic "unknown command". MatchedPattern/
         # Tier stay empty - identical downstream treatment.
         if ($cmdlet -match '^[A-Za-z][\w]*-') {
-            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (unregistered PowerShell verb: $verbPrefix - fail-closed)" -MatchedPattern "" -Risk "medium" -Tier ""
+            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (unregistered PowerShell verb: $verbPrefix - fail-closed)" -MatchedPattern "" -Risk "medium" -Tier "unregistered_verb"
         }
     }
 
@@ -622,7 +631,7 @@ function Resolve-Command {
             # "aws sso-admin provision-permission-set" said 'unknown command').
             # MatchedPattern/Tier stay empty so downstream (arbiter gate, LLM
             # merge) treats it exactly like the generic unknown fallback.
-            return New-ResolutionResult -Decision "ask" -Reason "aws $service $verb (unregistered AWS verb - fail-closed)" -MatchedPattern "" -Risk "medium" -Tier ""
+            return New-ResolutionResult -Decision "ask" -Reason "aws $service $verb (unregistered AWS verb - fail-closed)" -MatchedPattern "" -Risk "medium" -Tier "unregistered_verb"
         }
     }
 
@@ -781,7 +790,7 @@ function Resolve-Command {
         $staticMethod = $Matches[2]
         return New-ResolutionResult -Decision "ask" `
             -Reason "static method not on allowlist: [$staticType]::$staticMethod (see safe_expressions.dotnet_static_method_allowlist)" `
-            -MatchedPattern $null -Risk "unknown"
+            -MatchedPattern $null -Risk "unknown" -Tier "unregistered_static"
     }
 
     # Known first-token tool (docker/kubectl/terraform/git) whose subcommand
@@ -793,10 +802,10 @@ function Resolve-Command {
         $Command -match '^\s*([a-zA-Z][\w-]*)\s+(?:-\S+\s+){0,3}([^\s-][\w-]*)') {
         $toolName = $Matches[1]
         $subName = $Matches[2]
-        return New-ResolutionResult -Decision "ask" -Reason "$toolName subcommand '$subName' not registered (fail-closed)" -MatchedPattern "" -Risk "unknown" -Tier ""
+        return New-ResolutionResult -Decision "ask" -Reason "$toolName subcommand '$subName' not registered (fail-closed)" -MatchedPattern "" -Risk "unknown" -Tier "unregistered"
     }
     $truncatedCommand = $Command.Substring(0, [Math]::Min(80, $Command.Length))
-    return New-ResolutionResult -Decision "ask" -Reason "unknown command: $truncatedCommand" -MatchedPattern $null -Risk "unknown"
+    return New-ResolutionResult -Decision "ask" -Reason "unknown command: $truncatedCommand" -MatchedPattern $null -Risk "unknown" -Tier "unclassified"
 }
 
 # =============================================================================
@@ -1100,7 +1109,7 @@ function Evaluate-ParameterRules {
             if (Get-Member -InputObject $rule -Name 'risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $risk = $rule.risk }
             return [PSCustomObject]@{
                 Command = $Command; Decision = 'ask'
-                Reason = "$DisplayName (parameter rule: modifying)"; MatchedPattern = $DisplayName; Risk = $risk
+                Reason = "$DisplayName (parameter rule: modifying)"; MatchedPattern = $DisplayName; Risk = $risk; Tier = 'modifying'
             }
         }
     }
@@ -1109,7 +1118,7 @@ function Evaluate-ParameterRules {
         if ($rule.decision -eq 'read-only' -and (Test-ParamRule $rule $ParamMap)) {
             return [PSCustomObject]@{
                 Command = $Command; Decision = 'allow'
-                Reason = "$DisplayName (parameter rule: read-only)"; MatchedPattern = $DisplayName; Risk = 'none'
+                Reason = "$DisplayName (parameter rule: read-only)"; MatchedPattern = $DisplayName; Risk = 'none'; Tier = 'param_rule'
             }
         }
     }
@@ -1128,7 +1137,7 @@ function Evaluate-ParameterRules {
     if ($unrecognized -and (Get-EffectiveStrictness -Config $Config -Domain $Domain) -ne 'loose') {
         return [PSCustomObject]@{
             Command = $Command; Decision = 'ask'
-            Reason = "$DisplayName (unrecognized parameter value)"; MatchedPattern = $DisplayName; Risk = 'unknown'
+            Reason = "$DisplayName (unrecognized parameter value)"; MatchedPattern = $DisplayName; Risk = 'unknown'; Tier = 'param_rule'
         }
     }
     # default (absent param, OR unrecognized in loose mode)
@@ -1137,11 +1146,11 @@ function Evaluate-ParameterRules {
         if (Get-Member -InputObject $Entry -Name 'default_risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $dr = $Entry.default_risk }
         return [PSCustomObject]@{
             Command = $Command; Decision = 'ask'
-            Reason = "$DisplayName (parameter rule: default modifying)"; MatchedPattern = $DisplayName; Risk = $dr
+            Reason = "$DisplayName (parameter rule: default modifying)"; MatchedPattern = $DisplayName; Risk = $dr; Tier = 'modifying'
         }
     }
     return [PSCustomObject]@{
         Command = $Command; Decision = 'allow'
-        Reason = "$DisplayName (parameter rule: default read-only)"; MatchedPattern = $DisplayName; Risk = 'none'
+        Reason = "$DisplayName (parameter rule: default read-only)"; MatchedPattern = $DisplayName; Risk = 'none'; Tier = 'param_rule'
     }
 }

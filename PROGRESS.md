@@ -3,6 +3,33 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 
 (Prior goal — strictness_gated config section + per-domain strictness — COMPLETE; spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md)
 
+## Tier label cleanup — no more "unknown" in LLM-LOCAL tiers (2026-08-06, DONE, all suites green 1096/1096)
+- User feedback: `tiers: [1]=unknown [2]=read_only` in LLM-LOCAL log line was confusing — "unknown" reads like "unknown command" but actually means "no tier label assigned."
+- Root cause: several resolution paths either set `Tier = ""` or didn't set Tier at all (default `''`). The Logger safety-net then converted empty string to `"unknown"` for display.
+- Fixes (src/Resolver.ps1 + src/Logger.ps1):
+  - **Logger.ps1**: empty-Tier fallback changed from `"unknown"` → `"unlabeled"` (safety net; should never fire now that all paths are labeled)
+  - **Evaluate-ParameterRules**: added `Tier = 'param_rule'` (read-only/default read-only) or `Tier = 'modifying'` (modifying/default modifying) to all 5 return objects
+  - **unknown domain**: `Tier = "unknown_domain"`
+  - **safe expression**: `Tier = "safe_expr"`
+  - **trusted program** (allow + ask w/ modifying arg): `Tier = "trusted_program"`
+  - **unregistered PowerShell/AWS verb**: `Tier = "unregistered_verb"` (was `""`)
+  - **unregistered tool subcommand** (docker/k8s/terraform/git): `Tier = "unregistered"` (was `""`)
+  - **static method not on allowlist**: `Tier = "unregistered_static"` (was missing)
+  - **genuine unknown command fallback**: `Tier = "unclassified"` (was missing)
+- The genuine `Reason = "unknown command: ..."` text is preserved (line 808) — that IS truly unknown.
+- All 9 suites green: 1096/1096.
+
+## Dot-source operator (. path) now stripped for trusted_programs matching (2026-08-06, DONE, all suites green 1096/1096)
+- User report: `. 'C:\git\cc\pretoolhook\src\ConfigLoader.ps1'` classified as "unknown command" even though `src\ConfigLoader.ps1` is in trusted_programs. The dot-source operator `.` (PowerShell's current-scope script runner) was being treated as the program token instead of the script path that follows it.
+- Root cause (Resolver.ps1): the `&` call operator was stripped but `. ` (dot-source) was not. The first-token extraction grabbed `.` as the token, and `.` doesn't match any trusted program entry, pattern, or verb → fell to "unknown command" fallback.
+- Also: single-quoted paths (`'...'`) were not handled in the first-token extraction — only double-quoted (`"..."`).
+- Fix (src/Resolver.ps1, line ~270):
+  1. Added `$trimmedForPath -replace '^\s*\.\s+', ''` after the `&` stripping — the dot-source operator is now treated like the call operator.
+  2. Added `elseif ($trimmedForPath -match "^'([^']+)'\s*(.*)`$")` for single-quoted path extraction.
+- TDD: added 2 test cases to TrustedPrograms group in test/config/live/test-cases.xml: dot-source with single-quoted path + double-quoted path, both matching `src/Classifier.ps1` (already in the live fixture's trusted_programs). RED = 769/771 (2 new failed, zero collateral). GREEN = 771/771.
+- All suites: 1096/1096 (test-cases 771, SG-normal 48, SG-strict 49, redirect-strict 25, trustedpattern 74, fullpipe 24, llm-review.small 35, phase-I 43, http-mock 27).
+- Note: the overall command the user ran STILL asks because of `Load-Config` (unregistered PowerShell verb: `Load-` — it's a function defined inside ConfigLoader.ps1, not a native cmdlet). The fix addresses only the dot-source sub-command's false "unknown command".
+
 ## System.Uri statics added to dotnet_static_method_allowlist (2026-08-05, DONE, all suites green)
 - User report: the production log block `$enc = [uri]::EscapeDataString("solr-oa/oa-search"); $commits = Invoke-RestMethod -Method Get -uri "$gbase/projects/$end/repository""   -Header $GHDR' $commints |Select-Obbject short_id | Format-table -autosize` came back **ask**; LLM said read-only, local said ask, "LLM never downgrades" => FINAL ask. Diagnosed against the engine oracle (temp/Classify.ps1 + targeted probes) as TWO independent issues:
   1. **REAL config gap (fixed):** `[uri]::EscapeDataString` was genuinely absent from `safe_expressions.dotnet_static_method_allowlist` (zero matches repo-wide) => "static method not on allowlist". It is a pure String->String URL-encoding method. Verified read-only via .NET reflection (temp/probe-uri-static.ps1). The CLEAN form of the user's command (proper quotes) was blocked ONLY by this.

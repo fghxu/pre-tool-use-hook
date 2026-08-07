@@ -200,7 +200,7 @@ function Format-LlmLogBlock {
         $tierParts = @()
         for ($i = 0; $i -lt $LlmLog.tiers.Count; $i++) {
             $tier = "$($LlmLog.tiers[$i])"
-            if (-not $tier) { $tier = 'unknown' }
+            if (-not $tier) { $tier = 'unlabeled' }
             $tierParts += "[$($i + 1)]=$tier"
         }
         $localLine += "; tiers: " + ($tierParts -join ' ')

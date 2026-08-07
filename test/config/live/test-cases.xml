@@ -4139,6 +4139,18 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <copilot-command><![CDATA[& src\Classifier.ps1 somerandomtoken c:\temp]]></copilot-command>
     </test-case>
 
+    <test-case expected="allow" reason="trusted_programs: dot-source (. path) match (partial-path suffix)" category="TrustedPrograms">
+      <description>. 'C:\git\cc\pretoolhook\src\Classifier.ps1' - dot-source trusted program, single-quoted path</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[. 'C:\git\cc\pretoolhook\src\Classifier.ps1']]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted_programs: dot-source (. path) match, double-quoted path" category="TrustedPrograms">
+      <description>. "C:\git\cc\pretoolhook\src\Classifier.ps1" - dot-source trusted program, double-quoted path</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[. "C:\git\cc\pretoolhook\src\Classifier.ps1"]]></copilot-command>
+    </test-case>
+
   </category-group>
 
   <category-group name="SafeStaticMethods">
