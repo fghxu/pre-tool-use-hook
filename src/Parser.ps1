@@ -572,7 +572,7 @@ function Split-OperatorNotInQuotes {
 # Detected wrappers:
 #   - pwsh/powershell[.exe] [flags...] -Command "<inner>" / -c "<inner>"
 #   - pwsh/powershell[.exe] [flags...] -ScriptBlock { <inner> }
-#   (-File is deliberately NOT unwrapped: script content is opaque -> plain ask)
+#   - pwsh/powershell[.exe] [flags...] -File <path> (extracts script path for trusted_programs check)
 #   - bash -c '<inner>'
 #   - sh -c '<inner>'
 #   - cmd /c "<inner>"
@@ -661,6 +661,28 @@ function Find-NestedCommands {
             $nested += $in
         }
 
+        return $nested
+    }
+
+    # pwsh/powershell[.exe] [flags...] -File <path>
+    # Script file content is opaque, but the script PATH can be checked against
+    # trusted_programs. Extract the path as a sub-command so the Resolver's
+    # Step 0f-trust (Test-TrustedProgram) can match it. If the path is NOT in
+    # trusted_programs, the Resolver treats it as unknown/unclassified → ask.
+    # Handles quoted and unquoted paths.
+    if ($trimmed -match '(?i)^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-File\s+(?:"([^"]+)"|''([^'']+)''|(\S+))\s*$') {
+        $filePath = if ($Matches[1]) { $Matches[1] } elseif ($Matches[2]) { $Matches[2] } else { $Matches[3] }
+        if ($filePath) {
+            # Route as PowerShell domain — the path is a PowerShell script,
+            # and the Resolver's full-path stripping + Test-TrustedProgram
+            # will handle it.
+            $nested += [PSCustomObject]@{
+                CommandText   = $filePath
+                Domain        = 'powershell'
+                IsPipeline    = $false
+                ParentCommand = $trimmed
+            }
+        }
         return $nested
     }
 

@@ -963,9 +963,17 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
       <description>powershell.exe -NoProfile -Command wrapping cross-domain modifying (docker run)</description>
       <copilot-command><![CDATA[powershell.exe -NoProfile -Command "docker run -d redis"]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="unknown: script file execution is opaque (pinned accepted behavior)" category="PSWrapper-FlagSkipping">
-      <description>powershell.exe -ExecutionPolicy Bypass -File stays ask — script content not inspectable</description>
+    <test-case expected="allow" reason="trusted_programs: -File path matches trusted entry (partial-path suffix)" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -ExecutionPolicy Bypass -File "src/Run-AllTests.ps1" — script in trusted_programs => allow</description>
       <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -File "src/Run-AllTests.ps1"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="-File path NOT in trusted_programs => ask (untrusted script)" category="PSWrapper-FlagSkipping">
+      <description>pwsh -NoProfile -File C:\temp\untrusted.ps1 — script NOT in trusted_programs => ask</description>
+      <copilot-command><![CDATA[pwsh -NoProfile -File C:\temp\untrusted.ps1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: -File with single-quoted path matching trusted entry" category="PSWrapper-FlagSkipping">
+      <description>pwsh -File 'src/Run-AllTests.ps1' — single-quoted path, trusted => allow</description>
+      <copilot-command><![CDATA[pwsh -File 'src/Run-AllTests.ps1']]></copilot-command>
     </test-case>
     <test-case expected="allow" reason="read-only: -c short form + flag skipped, inner Get-ChildItem" category="PSWrapper-FlagSkipping">
       <description>powershell.exe -NoProfile -c "Get-ChildItem" (short -c form must unwrap like -Command)</description>

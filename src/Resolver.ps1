@@ -712,7 +712,7 @@ function Resolve-Command {
         # [Type]::Method(...), $var.Method(), $proc.Kill() — which must fall
         # through to normal classification.
         $bareToken = $Command.Trim()
-        if ($bareToken -notmatch '\s' -and $bareToken -notmatch '[()]' -and $bareToken -notmatch '::') {
+        if ($bareToken -notmatch '\s' -and $bareToken -notmatch '[()]' -and $bareToken -notmatch '::' -and $bareToken -notmatch '\.') {
             return New-ResolutionResult -Decision "allow" -Reason "$firstWord (heredoc delimiter or marker)" -MatchedPattern $firstWord -Risk "none"
         }
 

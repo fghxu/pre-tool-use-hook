@@ -3,6 +3,15 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 
 (Prior goal — strictness_gated config section + per-domain strictness — COMPLETE; spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md)
 
+## pwsh -File now checked against trusted_programs (2026-08-07, DONE, all suites green 1098/1098)
+- User report: `pwsh -noprofile -file c:\temp\extract-policy.ps1` was allowed despite the script NOT being in trusted_programs. The `pwsh *` read_only pattern was designed to allow `pwsh -Command` wrappers (inner commands classified separately), but `-File` was NOT unwrapped ("script content is opaque") so it slipped through.
+- Fix requires THREE coordinated changes because three independent code paths were each allowing it:
+  1. **Parser.ps1 — Find-NestedCommands**: added `-File` path extraction. Detects `pwsh/powershell -File <path>` (quoted or unquoted, single or double quotes) and extracts the script path as a nested sub-command. The path flows to the Resolver's Step 0f-trust (Test-TrustedProgram).
+  2. **Classifier.ps1 — AST priority fix**: `Get-PowerShellCommands` returns the full `pwsh -File ...` as a single PowerShell command, and the AST path (`$astCommands.Count -gt 0`) previously took priority OVER `Find-NestedCommands` — so nested commands were silently dropped. Fixed by changing `$allCommands = $astCommands` → `$allCommands = $astCommands + $nestedCommands + $subshellCommands` (same for safe-expressions path).
+  3. **Resolver.ps1 — heredoc dot exclusion**: after full-path stripping, bare file paths like `untrusted.ps1` were matched by Step 2.5h as "heredoc delimiter" (any single bare word without spaces/parens/`::`). Fixed by adding `-and $bareToken -notmatch '\.'` — heredoc delimiters (EOF, STOP, ENDOFFILE) don't contain dots; file extensions do.
+- TDD: updated 1 existing test (PSWrapper-FlagSkipping -File → now allow via trusted_programs), added 2 new -File tests (untrusted path → ask, single-quoted trusted path → allow), updated 3 trustedpattern "documented residual" tests (bare .ps1/.sh paths no longer matched as heredoc → ask).
+- All 9 suites green: 1098/1098 (test-cases 773, SG-normal 48, SG-strict 49, redirect-strict 25, trustedpattern 74, fullpipe 24, llm-review.small 35, phase-I 43, http-mock 27).
+
 ## Tier label cleanup — no more "unknown" in LLM-LOCAL tiers (2026-08-06, DONE, all suites green 1096/1096)
 - User feedback: `tiers: [1]=unknown [2]=read_only` in LLM-LOCAL log line was confusing — "unknown" reads like "unknown command" but actually means "no tier label assigned."
 - Root cause: several resolution paths either set `Tier = ""` or didn't set Tier at all (default `''`). The Logger safety-net then converted empty string to `"unknown"` for display.

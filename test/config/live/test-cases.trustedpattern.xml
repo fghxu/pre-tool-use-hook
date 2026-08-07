@@ -264,8 +264,8 @@ done]]></copilot-command>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[C:\temp\tool.exe]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="[RESIDUAL] Bash ps1 in temp allows via zero-command" category="TP-CmdPaths">
-      <description>Bash C:\temp\tool.ps1 — exe-guard blocks trusted; .ps1 path not command-stripped; zero-command allows (documented residual)</description>
+    <test-case expected="ask" reason="bare .ps1 path not a heredoc delimiter (dot exclusion) => unclassified => ask" category="TP-CmdPaths">
+      <description>Bash C:\temp\tool.ps1 — .ps1 path no longer matched as heredoc; unclassified => ask</description>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[C:\temp\tool.ps1]]></copilot-command>
     </test-case>
@@ -274,8 +274,8 @@ done]]></copilot-command>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[C:\git\repo\run.bat]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="[RESIDUAL] Bash sh in temp allows via zero-command" category="TP-CmdPaths">
-      <description>Bash D:\temp\run.sh — exe-guard blocks trusted; zero-command allows (documented residual)</description>
+    <test-case expected="ask" reason="bare .sh path not a heredoc delimiter (dot exclusion) => unclassified => ask" category="TP-CmdPaths">
+      <description>Bash D:\temp\run.sh — .sh path no longer matched as heredoc; unclassified => ask</description>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[D:\temp\run.sh]]></copilot-command>
     </test-case>
@@ -299,8 +299,8 @@ done]]></copilot-command>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[/etc/init.d/nginx start]]></copilot-command>
     </test-case>
-    <test-case expected="allow" reason="[RESIDUAL] PowerShell ps1 path allows via zero-command" category="TP-CmdPaths">
-      <description>PowerShell C:\temp\script.ps1 — exe-guard blocks trusted; zero-command allows (documented residual)</description>
+    <test-case expected="ask" reason="bare .ps1 path not a heredoc delimiter (dot exclusion) => unclassified => ask" category="TP-CmdPaths">
+      <description>PowerShell C:\temp\script.ps1 — .ps1 path no longer matched as heredoc; unclassified => ask</description>
       <tool-name>PowerShell</tool-name>
       <copilot-command><![CDATA[C:\temp\script.ps1]]></copilot-command>
     </test-case>

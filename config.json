@@ -39,11 +39,14 @@
   "trusted_programs": [
 
 	  "TestRunner.ps1",
+	  "src\\Parser.ps1",
+	  "src\\Resolver.ps1",
 	  "test-strictness-gate\\Run-Tests.ps1",
 	  "Classifier.ps1",
 	  "src\\Run-AllTests.ps1",
 	  "live\\Sync-Fixtures.ps1",
-	  "src\\ConfigLoader.ps1"
+	  "src\\ConfigLoader.ps1",
+	  "temp\\Classify.ps1"
   ],
 
 

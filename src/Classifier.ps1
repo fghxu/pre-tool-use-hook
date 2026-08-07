@@ -393,10 +393,10 @@ function Invoke-Classify {
     # Combine all commands to classify.
     # Prefer AST-extracted commands for PowerShell; fall back to regex split.
     if ($astCommands.Count -gt 0) {
-        $allCommands = $astCommands
+        $allCommands = $astCommands + $nestedCommands + $subshellCommands
     }
     elseif ($safeExpressions.Count -gt 0) {
-        $allCommands = $safeExpressions
+        $allCommands = $safeExpressions + $nestedCommands + $subshellCommands
     }
     elseif ($nestedCommands.Count -gt 0) {
         $parentTexts = [System.Collections.Generic.HashSet[string]]::new()
