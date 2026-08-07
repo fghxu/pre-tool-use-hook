@@ -6,6 +6,9 @@
 # project design
 - read the C:\git\cc\pretoolhook\CLAUDE.md to get the project overall design.
 
+# development\bug fix approach
+- always use "red/green" TDD approach whenever new feature is to be added, or a bug is defined.
+
 # Testing
 - Do NOT rely on the live config.json under the project root dir.  live version of config.json is for normal use.
 - Always create (mockup/and modify) config.json file under the same dir that test case file sits, and use that config file.
