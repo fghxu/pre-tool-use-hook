@@ -3,6 +3,22 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 
 (Prior goal — strictness_gated config section + per-domain strictness — COMPLETE; spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md)
 
+## safetynet: LLM second-opinion for local-unknown tiers (2026-08-08, DONE, all suites green 1133/1133)
+- User request: when the local hook can't identify a command (tier = unclassified / unregistered_verb / etc.) AND the normal llm_second_opinion scope gate says out-of-scope (e.g. single command, or complex_remote without a remote indicator), the human still has to approve blind. Safetynet consults the LLM in those cases so the human sees the LLM's per-sub-command verdict at approval time and can reason faster.
+- KEY INVARIANT (user-confirmed): safetynet NEVER changes the decision. Local ask stays ask. The LLM verdict only enriches the reason text. The "LLM never downgrades" rule is untouched.
+- Master kill switch: `llm_second_opinion.enabled=false` disables safetynet too (no LLM = no safetynet).
+- Config (under `llm_second_opinion`):
+  ```json
+  "safetynet": { "enabled": true, "tiers": ["unclassified","unregistered_verb","unregistered_static","unregistered","unknown_domain"] }
+  ```
+  Default tiers = all 5 local-unknown tiers. `enabled` defaults false.
+- Trigger (`Test-LlmReviewScope`): if the normal scope gate returns out-of-scope AND `safetynet.enabled=true` AND any sub-command's Tier ∈ `safetynet.tiers` → set `InScope=true`, `scope_reason="safetynet: local <tier>"`, `SafetynetTier=<tier>`. Bypasses level / min-subcommands / remote_indicators entirely.
+- Merge (`Invoke-LlmReview`): safetynet branch runs BEFORE the normal switch. Decision is ALWAYS `ask` (never downgrade, never upgrade). New effect value `safetynet-ask` (or `forced-ask` on LLM down/unusable). Reason text leads with `*** SAFETYNET *** safetynet: local <tier>` then shows BOTH the local tier per sub-command (`local tiers: [1]=unclassified [2]=read_only`) AND the LLM verdict per sub-command (`LLM second-opinion: MODIFYING ([1]=read-only [2]=MODIFYING)`).
+- Failure modes: LLM `down`/`unusable` → still `ask`, reason notes safetynet was attempted but LLM unavailable (`*** LLM-DOWN ***` / `*** LLM-UNUSABLE ***`).
+- New log field: `safetynet_triggered` (bool).
+- TDD red/green: 7-case `test-cases.safetynet.xml` (32 total checks incl. pre-flights). RED = 5 of 7 feature cases failed (2 negative cases passed because they don't need the feature). GREEN = 32/32. ConfigLoader validation + compilation added. Run-Tests.ps1 extended with `safetynet` attribute + `safetynet-triggered` assertion; null-log verdict now reads as `not_called` (was `<null>`).
+- All 10 suites green: 1133/1133 (was 1101; +32 safetynet checks).
+
 ## pwsh -File now checked against trusted_programs (2026-08-07, DONE, all suites green 1098/1098)
 - User report: `pwsh -noprofile -file c:\temp\extract-policy.ps1` was allowed despite the script NOT being in trusted_programs. The `pwsh *` read_only pattern was designed to allow `pwsh -Command` wrappers (inner commands classified separately), but `-File` was NOT unwrapped ("script content is opaque") so it slipped through.
 - Fix requires THREE coordinated changes because three independent code paths were each allowing it:

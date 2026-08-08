@@ -148,6 +148,10 @@ if (-not $config._compiled.llmSecondOpinion) {
             MaxTokens             = 16
             ComplexMinSubcommands = 2
             RemoteIndicators      = @()
+            AttributedVerdicts    = $true
+            JsonMode              = $false
+            # safetynet (optional): compiled sibling block, mirrors production.
+            Safetynet             = [PSCustomObject]@{ Enabled = $false; Tiers = @() }
         })
 }
 
@@ -482,6 +486,18 @@ foreach ($tc in $testCases) {
     $attrWant = $true
     if ($tc.HasAttribute('attributed')) { $attrWant = [bool]::Parse($tc.GetAttribute('attributed')) }
     $llmCfg | Add-Member -MemberType NoteProperty -Name 'AttributedVerdicts' -Value $attrWant -Force
+    # safetynet (optional). Default off. The compiled block always has a
+    # Safetynet sibling (the loader adds one); the per-case attribute toggles
+    # Enabled on it so safetynet cases fire without editing config files.
+    $snEnabled = $false
+    if ($tc.HasAttribute('safetynet')) { $snEnabled = [bool]::Parse($tc.GetAttribute('safetynet')) }
+    $snBlock = $null
+    if ($llmCfg.PSObject.Properties['Safetynet']) { $snBlock = $llmCfg.Safetynet }
+    if (-not $snBlock) {
+        $snBlock = [PSCustomObject]@{ Enabled = $false; Tiers = @('unclassified','unregistered_verb','unregistered_static','unregistered','unknown_domain') }
+        $llmCfg | Add-Member -MemberType NoteProperty -Name 'Safetynet' -Value $snBlock -Force
+    }
+    $snBlock.Enabled = $snEnabled
     # strictness override (suppression cases need normal so gated allows).
     if ($tc.HasAttribute('strictness')) { $config.global_modifying_strictness = $tc.GetAttribute('strictness') }
     else { $config.global_modifying_strictness = $fileStrictness }
@@ -551,12 +567,14 @@ foreach ($tc in $testCases) {
         if (-not $ok) { $detail += " | in_scope expected $wantScope got $gotScope" }
     }
     if ($ok -and $tc.HasAttribute('verdict')) {
-        $got = if ($llmLog) { "$($llmLog.verdict)" } else { '<null>' }
+        # A null log (feature disabled) reads as 'not_called' - that is what
+        # "no LLM call" looks like from the outside.
+        $got = if ($llmLog) { "$($llmLog.verdict)" } else { 'not_called' }
         $ok = ($got -eq $tc.GetAttribute('verdict'))
         if (-not $ok) { $detail += " | verdict expected $($tc.GetAttribute('verdict')) got $got" }
     }
     if ($ok -and $tc.HasAttribute('effect')) {
-        $got = if ($llmLog) { "$($llmLog.effect)" } else { '<null>' }
+        $got = if ($llmLog) { "$($llmLog.effect)" } else { 'none' }
         $ok = ($got -eq $tc.GetAttribute('effect'))
         if (-not $ok) { $detail += " | effect expected $($tc.GetAttribute('effect')) got $got" }
     }
@@ -569,6 +587,12 @@ foreach ($tc in $testCases) {
         $got = if ($llmLog -and $null -ne $llmLog.suppressed -and $llmLog.suppressed.Count -gt 0) { ($llmLog.suppressed -join ',') } else { '' }
         $ok = ($got -eq $tc.GetAttribute('suppressed'))
         if (-not $ok) { $detail += " | suppressed expected '$($tc.GetAttribute('suppressed'))' got '$got'" }
+    }
+    if ($ok -and $tc.HasAttribute('safetynet-triggered')) {
+        $wantSN = [bool]::Parse($tc.GetAttribute('safetynet-triggered'))
+        $gotSN = if ($llmLog -and $null -ne $llmLog.safetynet_triggered) { [bool]$llmLog.safetynet_triggered } else { $false }
+        $ok = ($gotSN -eq $wantSN)
+        if (-not $ok) { $detail += " | safetynet_triggered expected $wantSN got $gotSN" }
     }
     Record-Result -Ok $ok -Name $name -Detail $detail
     Write-CaseLog -Name $name -Ok $ok -Result $result -LlmLog $llmLog -Mode 'classify'

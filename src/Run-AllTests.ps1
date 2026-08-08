@@ -79,6 +79,7 @@ if ($Filter) {
 $extraSuites = @(
     @{ Name = 'llm-review.small';    File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @() },
     @{ Name = 'llm-review.phase-I';  File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\llm-review\test-cases.xml')) },
+    @{ Name = 'llm-review.safetynet'; File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\llm-review\test-cases.safetynet.xml')) },
     @{ Name = 'llm-review.http-mock'; File = (Join-Path $repoRoot 'test\config\llm-review\http\Run-LlmCallTests.ps1'); Args = @() }
 )
 if ($Filter) {

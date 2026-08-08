@@ -179,7 +179,7 @@ function Test-LlmReviewScope {
         [Parameter(Mandatory = $true)][PSCustomObject]$ClassifyResult,
         [Parameter(Mandatory = $true)][PSCustomObject]$Config
     )
-    $scope = [PSCustomObject]@{ InScope = $false; Reason = ''; SubCommandCount = 0; RemoteMatch = $null; SubCommands = @() }
+    $scope = [PSCustomObject]@{ InScope = $false; Reason = ''; SubCommandCount = 0; RemoteMatch = $null; SubCommands = @(); SafetynetTier = $null }
     $llm = $Config._compiled.llmSecondOpinion
     if (-not $llm) { $scope.Reason = 'llm_second_opinion not configured'; return $scope }
 
@@ -204,14 +204,15 @@ function Test-LlmReviewScope {
         'complex_commands' {
             if ($subs.Count -ge $llm.ComplexMinSubcommands) {
                 $scope.InScope = $true; $scope.Reason = "complex ($($subs.Count) sub-commands)"
+                return $scope
             }
-            else { $scope.Reason = "only $($subs.Count) sub-command(s) (< $($llm.ComplexMinSubcommands))" }
-            return $scope
+            $scope.Reason = "only $($subs.Count) sub-command(s) (< $($llm.ComplexMinSubcommands))"
+            break
         }
         'complex_remote' {
             if ($subs.Count -lt $llm.ComplexMinSubcommands) {
                 $scope.Reason = "only $($subs.Count) sub-command(s) (< $($llm.ComplexMinSubcommands))"
-                return $scope
+                break
             }
             # Remote indicators match against every sub-command AND the full
             # original command text: wrappers (Invoke-Command -ComputerName,
@@ -229,10 +230,34 @@ function Test-LlmReviewScope {
                 }
             }
             $scope.Reason = 'complex but local-only'
-            return $scope
+            break
         }
         default { $scope.Reason = "unknown level '$($llm.Level)'"; return $scope }
     }
+
+    # ----------------------------------------------------------------
+    # Safetynet (out-of-scope rescue): if the normal scope gate said
+    # out-of-scope AND safetynet is enabled AND any sub-command's Tier
+    # is in the safetynet tier list, the LLM IS consulted (InScope=$true).
+    # SAFETNET NEVER CHANGES THE DECISION (local ask stays ask); the LLM
+    # verdict only enriches the reason text the human sees at approval.
+    # The first matching unknown tier is recorded for the reason wording.
+    # ----------------------------------------------------------------
+    if ($llm.PSObject.Properties['Safetynet'] -and $llm.Safetynet -and $llm.Safetynet.Enabled) {
+        $tierSet = @{}
+        foreach ($t in $llm.Safetynet.Tiers) { $tierSet["$t"] = $true }
+        foreach ($sub in $subs) {
+            $tier = "$($sub.Tier)"
+            if ($tierSet.ContainsKey($tier)) {
+                $scope.InScope = $true
+                $scope.SafetynetTier = $tier
+                $scope.Reason = "safetynet: local $tier"
+                return $scope
+            }
+        }
+    }
+
+    return $scope
 }
 
 # =============================================================================
@@ -647,6 +672,7 @@ function Invoke-LlmReview {
         local_reason      = ''
         timeout_ms        = $llm.TimeoutMs
         path_guard_denied = @()
+        safetynet_triggered = $false
     }
 
     $scope = Test-LlmReviewScope -ClassifyResult $ClassifyResult -Config $Config
@@ -654,6 +680,9 @@ function Invoke-LlmReview {
     $log.scope_reason = $scope.Reason
     $log.sub_command_count = $scope.SubCommandCount
     $log.remote_match = $scope.RemoteMatch
+    # Safetynet fires when the scope reason starts with "safetynet:".
+    $log.safetynet_triggered = ($scope.SafetynetTier -ne $null)
+    $isSafetynet = $log.safetynet_triggered
 
     # Numbered list for the prompt AND the index lookup (spec P2: same list).
     $subTexts = @($scope.SubCommands | ForEach-Object { "$($_.Command)" })
@@ -686,6 +715,63 @@ function Invoke-LlmReview {
 
     $localDecision = $ClassifyResult.Decision
     $localReason   = "$($ClassifyResult.Reason)"
+
+    # ----------------------------------------------------------------
+    # SAFETYNET merge (out-of-scope rescue). When safetynet triggered,
+    # the normal merge rules DO NOT apply: the decision is ALWAYS the
+    # local decision (never downgraded, never upgraded by LLM). The LLM
+    # verdict is only used to ENRICH the reason text the human sees at
+    # approval time. Failure modes (down/unusable) note the LLM was
+    # attempted but unavailable. The reason shows BOTH the local tier
+    # for each sub-command AND the LLM's per-sub-command verdict so the
+    # human can reason faster without re-reading the raw command.
+    # ----------------------------------------------------------------
+    if ($isSafetynet) {
+        $tierLabel = "$($scope.SafetynetTier)"
+        # Build the local-tiers summary: "[1]=unclassified [2]=read_only".
+        $tierParts = @()
+        for ($i = 0; $i -lt $scope.SubCommands.Count; $i++) {
+            $t = "$($scope.SubCommands[$i].Tier)"
+            if (-not $t) { $t = 'unlabeled' }
+            $tierParts += "[$($i + 1)]=$t"
+        }
+        $tierSummary = $tierParts -join ' '
+
+        # Build the LLM per-sub-command verdict summary from $verdict.Indices.
+        # flaggedIdx is the set the LLM said is modifying; the rest are read-only.
+        $flaggedSet = @{}
+        if ($null -ne $verdict.Indices) { foreach ($ix in $verdict.Indices) { $flaggedSet[" $ix "] = $true } }
+        $llmParts = @()
+        for ($i = 0; $i -lt $scope.SubCommands.Count; $i++) {
+            $tag = if ($flaggedSet.ContainsKey(" $($i + 1) ")) { 'MODIFYING' } else { 'read-only' }
+            $llmParts += "[$($i + 1)]=$tag"
+        }
+        $llmSummary = $llmParts -join ' '
+
+        switch ($verdict.Verdict) {
+            'read-only' {
+                $llmHeadline = "LLM second-opinion: READ-ONLY (all sub-commands)"
+            }
+            'modifying' {
+                $llmHeadline = "LLM second-opinion: MODIFYING ($llmSummary)"
+            }
+            'down' {
+                $llmHeadline = "*** LLM-DOWN *** safetynet consulted the LLM but it was unreachable/timed out ($($llm.TimeoutMs)ms)"
+            }
+            'unusable' {
+                $llmHeadline = "*** LLM-UNUSABLE *** safetynet consulted the LLM but its response was unparseable. Raw: '$($log.raw_excerpt)'"
+            }
+            default { $llmHeadline = "LLM second-opinion: ($($verdict.Verdict))" }
+        }
+
+        # SAFETNET NEVER CHANGES THE DECISION. Local ask stays ask; the
+        # reason is rewritten to lead with the safetynet headline so the
+        # human sees the LLM hint at a glance.
+        $ClassifyResult.Decision = 'ask'
+        $ClassifyResult.Reason = "*** SAFETYNET *** safetynet: local $tierLabel (local tiers: $tierSummary) | $llmHeadline | local reason: $localReason"
+        $log.effect = if ($verdict.Verdict -in @('down', 'unusable')) { 'forced-ask' } else { 'safetynet-ask' }
+        return [PSCustomObject]@{ Result = $ClassifyResult; Log = $log }
+    }
 
     switch ($verdict.Verdict) {
         'modifying' {

@@ -126,6 +126,25 @@ function Test-ConfigSchema {
                 catch { throw "Invalid regex in llm_second_opinion.remote_indicators: $p" }
             }
         }
+        # Validate optional "safetynet" sub-block (LLM second-opinion for
+        # local-unknown tiers). OPTIONAL: absent = safetynet off. When present
+        # it is validated even when the parent feature is disabled, so bad
+        # values surface at load time. SAFETNET NEVER CHANGES THE DECISION -
+        # it only enriches the reason text the human sees at approval time.
+        if (Get-Member -InputObject $llm -Name 'safetynet' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $sn = $llm.safetynet
+            if ($sn -isnot [PSCustomObject] -and $sn -isnot [hashtable]) {
+                throw "Configuration validation failed: 'llm_second_opinion.safetynet' must be an object"
+            }
+            if ((Get-Member -InputObject $sn -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+                $sn.enabled -isnot [bool]) {
+                throw "Configuration validation failed: 'llm_second_opinion.safetynet.enabled' must be a boolean"
+            }
+            if ((Get-Member -InputObject $sn -Name 'tiers' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+                $sn.tiers -isnot [array]) {
+                throw "Configuration validation failed: 'llm_second_opinion.safetynet.tiers' must be an array of tier strings"
+            }
+        }
         # base_uri and model are required only when the feature is enabled
         if ($llm.enabled -eq $true) {
             if (-not (Get-Member -InputObject $llm -Name 'base_uri' -MemberType NoteProperty) -or [string]::IsNullOrWhiteSpace($llm.base_uri)) {
@@ -548,6 +567,20 @@ function Load-Config {
         if (Get-Member -InputObject $llmRaw -Name 'attributed_verdicts' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmAttributed = [bool]$llmRaw.attributed_verdicts }
         $llmJsonMode = $false
         if (Get-Member -InputObject $llmRaw -Name 'json_mode' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmJsonMode = [bool]$llmRaw.json_mode }
+        # safetynet sub-block (optional). Compiled into a sibling Safetynet
+        # object the scope engine consults after the normal scope gate fails.
+        # Default tiers = all local-unknown tiers. SAFETYNET NEVER CHANGES THE
+        # DECISION; it only enriches the reason text.
+        $snEnabled = $false
+        $snTiers = @('unclassified', 'unregistered_verb', 'unregistered_static', 'unregistered', 'unknown_domain')
+        if (Get-Member -InputObject $llmRaw -Name 'safetynet' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $snRaw = $llmRaw.safetynet
+            if (Get-Member -InputObject $snRaw -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $snEnabled = [bool]$snRaw.enabled }
+            if ((Get-Member -InputObject $snRaw -Name 'tiers' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and $snRaw.tiers) {
+                $snTiers = @($snRaw.tiers | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
+            }
+        }
+        $snCompiled = [PSCustomObject]@{ Enabled = $snEnabled; Tiers = $snTiers }
         $llmCompiled = [PSCustomObject]@{
             Enabled               = $llmEnabled
             Level                 = $llmLevel
@@ -561,6 +594,7 @@ function Load-Config {
             AttributedVerdicts      = $llmAttributed
             JsonMode                = $llmJsonMode
             RemoteIndicators      = $indicatorRegexes
+            Safetynet             = $snCompiled
         }
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'llmSecondOpinion' -Value $llmCompiled -Force

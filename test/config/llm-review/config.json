@@ -38,7 +38,12 @@
     "complex_min_subcommands": 2,
     "attributed_verdicts": true,
     "json_mode": false,
-    "_comment": "remote_indicators omitted on purpose -> the compiled default list is under test. Verdicts are mocked via PRETOOLHOOK_LLMREVIEW_MOCK; no network call ever happens."
+    "_comment": "remote_indicators omitted on purpose -> the compiled default list is under test. Verdicts are mocked via PRETOOLHOOK_LLMREVIEW_MOCK; no network call ever happens.",
+    "safetynet": {
+      "enabled": false,
+      "_comment": "OFF by default in the fixture; per-case safetynet= attribute toggles it. SAFETYNET NEVER CHANGES THE DECISION - it only enriches the reason text the human sees at approval time. Triggers when the normal scope gate says out-of-scope AND any sub-command's Tier is in tiers[].",
+      "tiers": ["unclassified", "unregistered_verb", "unregistered_static", "unregistered", "unknown_domain"]
+    }
   },
 
   "commands": {
