@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CHECK_BLINDSPOT SUITE - the check_blindspot feature (LLM second-opinion for unknown
+     local tiers when normal scope gate says out-of-scope).
+     KEY INVARIANT: check_blindspot NEVER changes the decision. Local ask stays ask.
+     The LLM verdict is consulted ONLY to enrich the reason text the human sees
+     at approval time, so the human can reason faster.
+     Mock values idx:... inject attributed JSON verdicts. The check_blindspot attribute
+     on each case toggles check_blindspot.enabled on the compiled block.
+     Run:  pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.check-blindspot.xml -->
+<commands>
+  <category-group name="CheckBlindspot">
+
+    <!-- =========================================================== -->
+    <!-- CORE: check_blindspot fires when local tier is unknown AND   -->
+    <!-- normal scope gate says out-of-scope. Final is ALWAYS ask     -->
+    <!-- (never downgrade). Reason carries local tier + LLM verdict.  -->
+    <!-- =========================================================== -->
+
+    <!-- Single unknown sub-command: out-of-scope normally (1 < min=2), but
+         check_blindspot fires because tier=unclassified. LLM says read-only.
+         Final = ask (check_blindspot never downgrades). Reason must show the
+         LLM's READ-ONLY verdict for human reference. -->
+    <test-case expected="ask" category="CB-UnclassifiedFireReadOnly" level="complex_commands" check_blindspot="true" mock="idx:" in-scope="true" verdict="read-only" effect="check-blindspot-ask" reason-contains="check_blindspot: local unclassified;LLM second-opinion: READ-ONLY" reason="single unclassified command, out-of-scope normally, check_blindspot fires, LLM says read-only => final ask, reason shows LLM hint">
+      <description>frobnicate --foo — unclassified, single sub-command, check_blindspot fires</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[frobnicate --foo]]></copilot-command>
+    </test-case>
+
+    <!-- Single unknown sub-command: check_blindspot fires, LLM says modifying. -->
+    <test-case expected="ask" category="CB-UnclassifiedFireModifying" level="complex_commands" check_blindspot="true" mock="idx:1" in-scope="true" verdict="modifying" effect="check-blindspot-ask" reason-contains="check_blindspot: local unclassified;LLM second-opinion: MODIFYING" reason="unclassified + LLM modifying => final ask, reason shows LLM hint">
+      <description>frobnicate --write — unclassified, check_blindspot fires, LLM says modifying</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[frobnicate --write]]></copilot-command>
+    </test-case>
+
+    <!-- =========================================================== -->
+    <!-- DISABLED: check_blindspot off => no LLM call. Same as today. -->
+    <!-- =========================================================== -->
+
+    <!-- check_blindspot=false: out-of-scope, no LLM call. Not in scope, no verdict. -->
+    <test-case expected="ask" category="CB-DisabledNoCall" level="complex_commands" check_blindspot="false" mock="idx:" in-scope="false" verdict="not_called" effect="none" reason="check_blindspot off => out-of-scope gate stays; no LLM call">
+      <description>frobnicate --foo — check_blindspot disabled, single sub-command, out of scope</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[frobnicate --foo]]></copilot-command>
+    </test-case>
+
+    <!-- master kill switch: llm_second_opinion.enabled=false. No LLM call at
+         all (no feature, no check_blindspot). Decision still ask (local unclassified). -->
+    <test-case expected="ask" category="CB-FeatureDisabledNoCall" level="complex_commands" enabled="false" check_blindspot="true" mock="idx:" in-scope="false" verdict="not_called" effect="none" reason="master enabled=false => no feature at all, no check_blindspot">
+      <description>frobnicate --foo — feature disabled, no LLM call regardless of check_blindspot</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[frobnicate --foo]]></copilot-command>
+    </test-case>
+
+    <!-- =========================================================== -->
+    <!-- FAILURE MODES: LLM down/unusable. Final = ask, reason notes  -->
+    <!-- check_blindspot was attempted but LLM unavailable.           -->
+    <!-- =========================================================== -->
+
+    <test-case expected="ask" category="CB-UnclassifiedLLMDown" level="complex_commands" check_blindspot="true" mock="down" in-scope="true" verdict="down" effect="forced-ask" reason-contains="check_blindspot: local unclassified;LLM-DOWN" reason="check_blindspot fires, LLM unreachable => forced ask">
+      <description>frobnicate --foo — check_blindspot fires, LLM down => forced ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[frobnicate --foo]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="CB-UnclassifiedLLMUnusable" level="complex_commands" check_blindspot="true" mock="garbage" in-scope="true" verdict="unusable" effect="forced-ask" reason-contains="check_blindspot: local unclassified;LLM-UNUSABLE" reason="check_blindspot fires, LLM garbage => forced ask">
+      <description>frobnicate --foo — check_blindspot fires, LLM unusable => forced ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[frobnicate --foo]]></copilot-command>
+    </test-case>
+
+    <!-- =========================================================== -->
+    <!-- KNOWN TIER: not an unknown tier, so check_blindspot does NOT -->
+    <!-- fire. This is the key guardrail: check_blindspot only helps  -->
+    <!-- with "couldn't identify" cases, not normal ask decisions.    -->
+    <!-- =========================================================== -->
+
+    <!-- Two known commands (rm + ls): local ask (rm is high). Even with
+         check_blindspot on, it's IN normal scope (2 sub-commands) so the scope
+         gate fires normally and check_blindspot is not consulted. -->
+    <test-case expected="ask" category="CB-KnownTierInNormalScope" level="complex_commands" check_blindspot="true" mock="idx:1" in-scope="true" verdict="modifying" effect="agree" reason="known rm + ls in normal scope => normal path, check_blindspot not triggered (scope was true)">
+      <description>rm file ; ls dir — known modifying + read-only, in normal scope, check_blindspot not consulted</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[rm c:\temp\foo.txt ; ls c:\temp]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

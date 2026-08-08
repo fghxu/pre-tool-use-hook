@@ -126,23 +126,23 @@ function Test-ConfigSchema {
                 catch { throw "Invalid regex in llm_second_opinion.remote_indicators: $p" }
             }
         }
-        # Validate optional "safetynet" sub-block (LLM second-opinion for
-        # local-unknown tiers). OPTIONAL: absent = safetynet off. When present
+        # Validate optional "check_blindspot" sub-block (LLM second-opinion for
+        # local-unknown tiers). OPTIONAL: absent = check_blindspot off. When present
         # it is validated even when the parent feature is disabled, so bad
-        # values surface at load time. SAFETNET NEVER CHANGES THE DECISION -
+        # values surface at load time. CHECK_BLINDSPOT NEVER CHANGES THE DECISION -
         # it only enriches the reason text the human sees at approval time.
-        if (Get-Member -InputObject $llm -Name 'safetynet' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
-            $sn = $llm.safetynet
-            if ($sn -isnot [PSCustomObject] -and $sn -isnot [hashtable]) {
-                throw "Configuration validation failed: 'llm_second_opinion.safetynet' must be an object"
+        if (Get-Member -InputObject $llm -Name 'check_blindspot' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $cb = $llm.check_blindspot
+            if ($cb -isnot [PSCustomObject] -and $cb -isnot [hashtable]) {
+                throw "Configuration validation failed: 'llm_second_opinion.check_blindspot' must be an object"
             }
-            if ((Get-Member -InputObject $sn -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
-                $sn.enabled -isnot [bool]) {
-                throw "Configuration validation failed: 'llm_second_opinion.safetynet.enabled' must be a boolean"
+            if ((Get-Member -InputObject $cb -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+                $cb.enabled -isnot [bool]) {
+                throw "Configuration validation failed: 'llm_second_opinion.check_blindspot.enabled' must be a boolean"
             }
-            if ((Get-Member -InputObject $sn -Name 'tiers' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
-                $sn.tiers -isnot [array]) {
-                throw "Configuration validation failed: 'llm_second_opinion.safetynet.tiers' must be an array of tier strings"
+            if ((Get-Member -InputObject $cb -Name 'tiers' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+                $cb.tiers -isnot [array]) {
+                throw "Configuration validation failed: 'llm_second_opinion.check_blindspot.tiers' must be an array of tier strings"
             }
         }
         # base_uri and model are required only when the feature is enabled
@@ -567,20 +567,20 @@ function Load-Config {
         if (Get-Member -InputObject $llmRaw -Name 'attributed_verdicts' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmAttributed = [bool]$llmRaw.attributed_verdicts }
         $llmJsonMode = $false
         if (Get-Member -InputObject $llmRaw -Name 'json_mode' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmJsonMode = [bool]$llmRaw.json_mode }
-        # safetynet sub-block (optional). Compiled into a sibling Safetynet
+        # check_blindspot sub-block (optional). Compiled into a sibling CheckBlindspot
         # object the scope engine consults after the normal scope gate fails.
-        # Default tiers = all local-unknown tiers. SAFETYNET NEVER CHANGES THE
+        # Default tiers = all local-unknown tiers. CHECK_BLINDSPOT NEVER CHANGES THE
         # DECISION; it only enriches the reason text.
-        $snEnabled = $false
-        $snTiers = @('unclassified', 'unregistered_verb', 'unregistered_static', 'unregistered', 'unknown_domain')
-        if (Get-Member -InputObject $llmRaw -Name 'safetynet' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
-            $snRaw = $llmRaw.safetynet
-            if (Get-Member -InputObject $snRaw -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $snEnabled = [bool]$snRaw.enabled }
-            if ((Get-Member -InputObject $snRaw -Name 'tiers' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and $snRaw.tiers) {
-                $snTiers = @($snRaw.tiers | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
+        $cbEnabled = $false
+        $cbTiers = @('unclassified', 'unregistered_verb', 'unregistered_static', 'unregistered', 'unknown_domain')
+        if (Get-Member -InputObject $llmRaw -Name 'check_blindspot' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $cbRaw = $llmRaw.check_blindspot
+            if (Get-Member -InputObject $cbRaw -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $cbEnabled = [bool]$cbRaw.enabled }
+            if ((Get-Member -InputObject $cbRaw -Name 'tiers' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and $cbRaw.tiers) {
+                $cbTiers = @($cbRaw.tiers | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
             }
         }
-        $snCompiled = [PSCustomObject]@{ Enabled = $snEnabled; Tiers = $snTiers }
+        $cbCompiled = [PSCustomObject]@{ Enabled = $cbEnabled; Tiers = $cbTiers }
         $llmCompiled = [PSCustomObject]@{
             Enabled               = $llmEnabled
             Level                 = $llmLevel
@@ -594,7 +594,7 @@ function Load-Config {
             AttributedVerdicts      = $llmAttributed
             JsonMode                = $llmJsonMode
             RemoteIndicators      = $indicatorRegexes
-            Safetynet             = $snCompiled
+            CheckBlindspot        = $cbCompiled
         }
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'llmSecondOpinion' -Value $llmCompiled -Force

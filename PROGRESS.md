@@ -3,7 +3,7 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 
 (Prior goal — strictness_gated config section + per-domain strictness — COMPLETE; spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md)
 
-## safetynet: LLM second-opinion for local-unknown tiers (2026-08-08, DONE, all suites green 1133/1133)
+## check_blindspot: LLM second-opinion for local-unknown tiers (2026-08-08, DONE, all suites green 1133/1133, renamed from safetynet)
 - User request: when the local hook can't identify a command (tier = unclassified / unregistered_verb / etc.) AND the normal llm_second_opinion scope gate says out-of-scope (e.g. single command, or complex_remote without a remote indicator), the human still has to approve blind. Safetynet consults the LLM in those cases so the human sees the LLM's per-sub-command verdict at approval time and can reason faster.
 - KEY INVARIANT (user-confirmed): safetynet NEVER changes the decision. Local ask stays ask. The LLM verdict only enriches the reason text. The "LLM never downgrades" rule is untouched.
 - Master kill switch: `llm_second_opinion.enabled=false` disables safetynet too (no LLM = no safetynet).

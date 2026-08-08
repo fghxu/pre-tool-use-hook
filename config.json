@@ -18,7 +18,7 @@
   "_comment_global_modifying_strictness": "strict: more prompts (strictness_gated entries ask; AWS flag-stripping disabled). loose: fewer prompts (unrecognized parameter_commands values auto-allow). normal: default; also the only global value that lets per-domain modifying_strictness take effect (see _readme_strictness_guard).",
   
   
-  "_comment_llm_second_opinion": "Second-opinion LLM cross-check. OFF by default; when enabled, in-scope commands are ALSO classified by an LLM (OpenAI-compatible endpoint) and a disagreement in the dangerous direction (local=allow, LLM=modifying) forces ask with *** LLM-VETO *** wording. LLM unreachable/timeout/unparseable also forces ask (*** LLM-DOWN *** / *** LLM-UNUSABLE ***). attributed_verdicts (phase II, default true): the LLM also receives the numbered sub-command list and answers a JSON modifying-index list; flags on strictness_gated sub-commands are then SUPPRESSED as policy (effect=veto-suppressed-policy) instead of vetoing, while flags on read_only/unknown sub-commands or index 0 still veto; bare true/false answers keep the phase-I full-veto behavior. Levels: all | complex_commands | complex_remote (complex_commands needs >= complex_min_subcommands decomposed sub-commands; complex_remote additionally requires a remote_indicators match: aws/kubectl/helm/terraform/ssh/scp/sftp/docker/curl/wget/Invoke-RestMethod/irm/Invoke-WebRequest/iwr/Enter-PSSession/New-PSSession/Invoke-Command+ComputerName; git is LOCAL). remote_indicators omitted -> compiled defaults. When enabled, the hook hard cap becomes timeout_ms + 2000. See docs/config-json-guide.md.",
+  "_comment_llm_second_opinion": "Second-opinion LLM cross-check. When enabled, in-scope commands are ALSO classified by an LLM (OpenAI-compatible endpoint). A disagreement in the dangerous direction (local=allow, LLM=modifying) forces ask with *** LLM-VETO *** wording. LLM unreachable/timeout/unparseable also forces ask (*** LLM-DOWN *** / *** LLM-UNUSABLE ***).\n\nFIELD REFERENCE:\n- enabled: true|false. Master kill switch for the entire LLM feature (including check_blindspot).\n- level: 'all' | 'complex_commands' | 'complex_remote'. Scope gate. 'all' = every command; 'complex_commands' = only commands with >= complex_min_subcommands decomposed sub-commands; 'complex_remote' = complex_commands + must also match a remote_indicators regex (aws/kubectl/ssh/docker/curl/etc; git is LOCAL).\n- base_uri: string. OpenAI-compatible API base URL (e.g. http://127.0.0.1:3030). Required when enabled=true.\n- model: string. Model name sent to the API (e.g. 'deepseek-v4-pro', 'GLM-5.2'). Required when enabled=true.\n- api_key: string (optional). Bearer token for the API; omit for local gateways.\n- timeout_ms: integer (>=1). HTTP timeout in milliseconds. Hard cap becomes timeout_ms + 2000 when enabled.\n- temperature: number (0.0-2.0). LLM sampling temperature; 0.0 for deterministic answers.\n- max_tokens: integer (>=1). Maximum tokens in the LLM response (V1: 16; V2: 64 typical).\n- complex_min_subcommands: integer (>=1). Minimum decomposed sub-commands needed for 'complex_commands' and 'complex_remote' levels.\n- attributed_verdicts: true|false. When true (V2 prompt), the LLM receives the numbered sub-command list and answers {\"modifying\":[N]}; flags on strictness_gated sub-commands are SUPPRESSED as policy (veto-suppressed-policy). When false (V1 prompt), bare true/false => full veto on the whole block.\n- json_mode: true|false. When true (V2 only), adds response_format:json_object to the API call (constrains response to valid JSON).\n- remote_indicators: array of regex strings (optional). Custom remote-indicator patterns for the 'complex_remote' level. Omit to use compiled defaults (aws, kubectl, helm, terraform, ssh, scp, sftp, docker, curl, wget, Invoke-RestMethod, irm, Invoke-WebRequest, iwr, Enter-PSSession, New-PSSession, Invoke-Command+ComputerName). git is always LOCAL.\n- check_blindspot: object { enabled: true|false, tiers: [string...] }. When the normal scope gate says out-of-scope AND any sub-command's local Tier is in tiers[], the LLM is still consulted so the human sees its per-sub-command verdict at approval time. CHECK_BLINDSPOT NEVER CHANGES THE DECISION - local ask stays ask. Only enriches the reason text. Default tiers: ['unclassified','unregistered_verb','unregistered_static','unregistered','unknown_domain']. See docs/config-json-guide.md.",
   "llm_second_opinion": {
     "enabled": true,
     "level": "complex_remote",
@@ -31,21 +31,28 @@
     "max_tokens": 64,
     "complex_min_subcommands": 2,
     "attributed_verdicts": true,
-    "json_mode": true
+    "json_mode": true,
+    "_comment_check_blindspot": "check_blindspot (2026-08-08): LLM second-opinion for local-unknown tiers. When the normal scope gate says out-of-scope AND any sub-command's local Tier is in tiers[], the LLM is still consulted so the human sees its per-sub-command verdict at approval time. CHECK_BLINDSPOT NEVER CHANGES THE DECISION - local ask stays ask; the LLM verdict only enriches the reason text. Master kill switch: llm_second_opinion.enabled=false disables check_blindspot too. Default tiers = all 5 local-unknown tiers.",
+    "check_blindspot": {
+      "enabled": true,
+      "tiers": ["unclassified", "unregistered_verb", "unregistered_static", "unregistered", "unknown_domain"]
+    }
   },
   
   
   "_comment_trusted_programs": "Programs trusted to run. Matched AFTER decomposition, against the program token of each decomposed sub-command (the & call-target / first token). A match grants 'allow' for that sub-command ONLY IF no modifying command also appears in its arguments or sibling statements (Option B: args are scanned; unknown args ignored). Entry forms: full path, partial path (path-suffix match; '/' and '\\' are equivalent), or bare name (basename match). Case-insensitive. Covers the & path / bare-path invocation forms; pwsh -File is NOT unwrapped (those invocations are already allowed by the pwsh read_only pattern).",
   "trusted_programs": [
 
-	  "TestRunner.ps1",
+    
+    "TestRunner.ps1",
 	  "src\\Parser.ps1",
 	  "src\\Resolver.ps1",
-	  "test-strictness-gate\\Run-Tests.ps1",
-	  "Classifier.ps1",
-	  "src\\Run-AllTests.ps1",
 	  "live\\Sync-Fixtures.ps1",
+    "llm-review\\Run-Tests.ps1",
+	  "test-strictness-gate\\Run-Tests.ps1",
+	  "src\\Run-AllTests.ps1",
 	  "src\\ConfigLoader.ps1",
+	  "Classifier.ps1",
 	  "temp\\Classify.ps1"
   ],
 

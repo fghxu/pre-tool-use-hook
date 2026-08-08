@@ -179,7 +179,7 @@ function Test-LlmReviewScope {
         [Parameter(Mandatory = $true)][PSCustomObject]$ClassifyResult,
         [Parameter(Mandatory = $true)][PSCustomObject]$Config
     )
-    $scope = [PSCustomObject]@{ InScope = $false; Reason = ''; SubCommandCount = 0; RemoteMatch = $null; SubCommands = @(); SafetynetTier = $null }
+    $scope = [PSCustomObject]@{ InScope = $false; Reason = ''; SubCommandCount = 0; RemoteMatch = $null; SubCommands = @(); CheckBlindspotTier = $null }
     $llm = $Config._compiled.llmSecondOpinion
     if (-not $llm) { $scope.Reason = 'llm_second_opinion not configured'; return $scope }
 
@@ -236,22 +236,22 @@ function Test-LlmReviewScope {
     }
 
     # ----------------------------------------------------------------
-    # Safetynet (out-of-scope rescue): if the normal scope gate said
-    # out-of-scope AND safetynet is enabled AND any sub-command's Tier
-    # is in the safetynet tier list, the LLM IS consulted (InScope=$true).
-    # SAFETNET NEVER CHANGES THE DECISION (local ask stays ask); the LLM
+    # check_blindspot (out-of-scope rescue): if the normal scope gate said
+    # out-of-scope AND check_blindspot is enabled AND any sub-command's Tier
+    # is in the check_blindspot tier list, the LLM IS consulted (InScope=$true).
+    # CHECK_BLINDSPOT NEVER CHANGES THE DECISION (local ask stays ask); the LLM
     # verdict only enriches the reason text the human sees at approval.
     # The first matching unknown tier is recorded for the reason wording.
     # ----------------------------------------------------------------
-    if ($llm.PSObject.Properties['Safetynet'] -and $llm.Safetynet -and $llm.Safetynet.Enabled) {
+    if ($llm.PSObject.Properties['CheckBlindspot'] -and $llm.CheckBlindspot -and $llm.CheckBlindspot.Enabled) {
         $tierSet = @{}
-        foreach ($t in $llm.Safetynet.Tiers) { $tierSet["$t"] = $true }
+        foreach ($t in $llm.CheckBlindspot.Tiers) { $tierSet["$t"] = $true }
         foreach ($sub in $subs) {
             $tier = "$($sub.Tier)"
             if ($tierSet.ContainsKey($tier)) {
                 $scope.InScope = $true
-                $scope.SafetynetTier = $tier
-                $scope.Reason = "safetynet: local $tier"
+                $scope.CheckBlindspotTier = $tier
+                $scope.Reason = "check_blindspot: local $tier"
                 return $scope
             }
         }
@@ -672,7 +672,7 @@ function Invoke-LlmReview {
         local_reason      = ''
         timeout_ms        = $llm.TimeoutMs
         path_guard_denied = @()
-        safetynet_triggered = $false
+        check_blindspot_triggered = $false
     }
 
     $scope = Test-LlmReviewScope -ClassifyResult $ClassifyResult -Config $Config
@@ -680,9 +680,9 @@ function Invoke-LlmReview {
     $log.scope_reason = $scope.Reason
     $log.sub_command_count = $scope.SubCommandCount
     $log.remote_match = $scope.RemoteMatch
-    # Safetynet fires when the scope reason starts with "safetynet:".
-    $log.safetynet_triggered = ($scope.SafetynetTier -ne $null)
-    $isSafetynet = $log.safetynet_triggered
+    # check_blindspot fires when the scope reason starts with "check_blindspot:".
+    $log.check_blindspot_triggered = ($scope.CheckBlindspotTier -ne $null)
+    $isCheckBlindspot = $log.check_blindspot_triggered
 
     # Numbered list for the prompt AND the index lookup (spec P2: same list).
     $subTexts = @($scope.SubCommands | ForEach-Object { "$($_.Command)" })
@@ -717,7 +717,7 @@ function Invoke-LlmReview {
     $localReason   = "$($ClassifyResult.Reason)"
 
     # ----------------------------------------------------------------
-    # SAFETYNET merge (out-of-scope rescue). When safetynet triggered,
+    # CHECK_BLINDSPOT merge (out-of-scope rescue). When check_blindspot triggered,
     # the normal merge rules DO NOT apply: the decision is ALWAYS the
     # local decision (never downgraded, never upgraded by LLM). The LLM
     # verdict is only used to ENRICH the reason text the human sees at
@@ -726,8 +726,8 @@ function Invoke-LlmReview {
     # for each sub-command AND the LLM's per-sub-command verdict so the
     # human can reason faster without re-reading the raw command.
     # ----------------------------------------------------------------
-    if ($isSafetynet) {
-        $tierLabel = "$($scope.SafetynetTier)"
+    if ($isCheckBlindspot) {
+        $tierLabel = "$($scope.CheckBlindspotTier)"
         # Build the local-tiers summary: "[1]=unclassified [2]=read_only".
         $tierParts = @()
         for ($i = 0; $i -lt $scope.SubCommands.Count; $i++) {
@@ -756,20 +756,20 @@ function Invoke-LlmReview {
                 $llmHeadline = "LLM second-opinion: MODIFYING ($llmSummary)"
             }
             'down' {
-                $llmHeadline = "*** LLM-DOWN *** safetynet consulted the LLM but it was unreachable/timed out ($($llm.TimeoutMs)ms)"
+                $llmHeadline = "*** LLM-DOWN *** check_blindspot consulted the LLM but it was unreachable/timed out ($($llm.TimeoutMs)ms)"
             }
             'unusable' {
-                $llmHeadline = "*** LLM-UNUSABLE *** safetynet consulted the LLM but its response was unparseable. Raw: '$($log.raw_excerpt)'"
+                $llmHeadline = "*** LLM-UNUSABLE *** check_blindspot consulted the LLM but its response was unparseable. Raw: '$($log.raw_excerpt)'"
             }
             default { $llmHeadline = "LLM second-opinion: ($($verdict.Verdict))" }
         }
 
-        # SAFETNET NEVER CHANGES THE DECISION. Local ask stays ask; the
-        # reason is rewritten to lead with the safetynet headline so the
+        # CHECK_BLINDSPOT NEVER CHANGES THE DECISION. Local ask stays ask; the
+        # reason is rewritten to lead with the check_blindspot headline so the
         # human sees the LLM hint at a glance.
         $ClassifyResult.Decision = 'ask'
-        $ClassifyResult.Reason = "*** SAFETYNET *** safetynet: local $tierLabel (local tiers: $tierSummary) | $llmHeadline | local reason: $localReason"
-        $log.effect = if ($verdict.Verdict -in @('down', 'unusable')) { 'forced-ask' } else { 'safetynet-ask' }
+        $ClassifyResult.Reason = "*** CHECK_BLINDSPOT *** check_blindspot: local $tierLabel (local tiers: $tierSummary) | $llmHeadline | local reason: $localReason"
+        $log.effect = if ($verdict.Verdict -in @('down', 'unusable')) { 'forced-ask' } else { 'check-blindspot-ask' }
         return [PSCustomObject]@{ Result = $ClassifyResult; Log = $log }
     }
 
