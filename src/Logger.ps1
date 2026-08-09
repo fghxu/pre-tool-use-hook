@@ -186,7 +186,13 @@ function Format-LlmLogBlock {
         $recvLine += "ERROR '$err'"
     }
     else {
-        $recvLine += "'$($LlmLog.raw_excerpt)'"
+        $rawDisplay = $LlmLog.raw_full
+        if (-not $rawDisplay) { $rawDisplay = $LlmLog.raw_excerpt }
+        # Collapse to single line for log readability
+        $rawDisplay = ($rawDisplay -replace '\s+', ' ').Trim()
+        $displayLimit = if ($LlmLog.raw_display_limit) { $LlmLog.raw_display_limit } else { 500 }
+        if ($rawDisplay.Length -gt $displayLimit) { $rawDisplay = $rawDisplay.Substring(0, $displayLimit) + '…' }
+        $recvLine += "'$rawDisplay'"
     }
     $recvLine += " ($($LlmLog.latency_ms)ms, recovered=$($LlmLog.recovered)$mockMark) -> verdict=$($LlmLog.verdict)"
     if ($LlmLog.indices) { $recvLine += " indices=[$($LlmLog.indices -join ',')]" }

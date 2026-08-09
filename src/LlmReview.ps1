@@ -502,7 +502,7 @@ function Get-LlmReviewVerdict {
             @{ role = 'user';   content = $userPrompt }
         )
         temperature = $LlmConfig.Temperature
-        max_tokens  = $LlmConfig.MaxTokens
+        max_tokens  = $LlmConfig.LlmResponseMaxTokens
         seed        = 0
     }
     # JSON mode (config json_mode, default off): constrain the response to be
@@ -661,6 +661,7 @@ function Invoke-LlmReview {
         model             = $llm.Model
         effect            = 'none'
         raw_excerpt       = $null
+        raw_full          = $null
         indices           = $null
         flagged           = @()
         suppressed        = @()
@@ -673,6 +674,7 @@ function Invoke-LlmReview {
         timeout_ms        = $llm.TimeoutMs
         path_guard_denied = @()
         check_blindspot_triggered = $false
+        raw_display_limit = $llm.LlmResponseMaxTokens * 4
     }
 
     $scope = Test-LlmReviewScope -ClassifyResult $ClassifyResult -Config $Config
@@ -704,12 +706,13 @@ function Invoke-LlmReview {
     if ($verdict.Error) { $log.error = $verdict.Error }
     if ($verdict.Raw) {
         $excerpt = ($verdict.Raw -replace '\s+', ' ').Trim()
-        if ($excerpt.Length -gt 120) { $excerpt = $excerpt.Substring(0, 120) }
+        if ($excerpt.Length -gt $log.raw_display_limit) { $excerpt = $excerpt.Substring(0, $log.raw_display_limit) }
         $log.raw_excerpt = $excerpt
+        $log.raw_full = "$($verdict.Raw)"
     }
     elseif ($verdict.Error) {
         $errExcerpt = ($verdict.Error -replace '\s+', ' ').Trim()
-        if ($errExcerpt.Length -gt 120) { $errExcerpt = $errExcerpt.Substring(0, 120) }
+        if ($errExcerpt.Length -gt $log.raw_display_limit) { $errExcerpt = $errExcerpt.Substring(0, $log.raw_display_limit) }
         $log.raw_excerpt = $errExcerpt
     }
 

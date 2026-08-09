@@ -98,7 +98,7 @@ function Test-ConfigSchema {
             $llm.level -notin @('all', 'complex_commands', 'complex_remote')) {
             throw "Configuration validation failed: 'llm_second_opinion.level' must be 'all', 'complex_commands', or 'complex_remote', got '$($llm.level)'"
         }
-        $intFields = @('complex_min_subcommands', 'timeout_ms', 'max_tokens')
+        $intFields = @('complex_min_subcommands', 'timeout_ms', 'llm_response_max_tokens')
         foreach ($f in $intFields) {
             if (Get-Member -InputObject $llm -Name $f -MemberType NoteProperty -ErrorAction SilentlyContinue) {
                 $v = 0
@@ -559,8 +559,8 @@ function Load-Config {
         if (Get-Member -InputObject $llmRaw -Name 'timeout_ms' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmTimeoutMs = [int]$llmRaw.timeout_ms }
         $llmTemperature = 0.0
         if (Get-Member -InputObject $llmRaw -Name 'temperature' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmTemperature = [double]$llmRaw.temperature }
-        $llmMaxTokens = 16
-        if (Get-Member -InputObject $llmRaw -Name 'max_tokens' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmMaxTokens = [int]$llmRaw.max_tokens }
+        $llmRespMaxTokens = 16
+        if (Get-Member -InputObject $llmRaw -Name 'llm_response_max_tokens' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmRespMaxTokens = [int]$llmRaw.llm_response_max_tokens }
         $llmMinSubs = 2
         if (Get-Member -InputObject $llmRaw -Name 'complex_min_subcommands' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmMinSubs = [int]$llmRaw.complex_min_subcommands }
         $llmAttributed = $true
@@ -589,7 +589,7 @@ function Load-Config {
             ApiKey                = $llmApiKey
             TimeoutMs             = $llmTimeoutMs
             Temperature           = $llmTemperature
-            MaxTokens             = $llmMaxTokens
+            LlmResponseMaxTokens  = $llmRespMaxTokens
             ComplexMinSubcommands = $llmMinSubs
             AttributedVerdicts      = $llmAttributed
             JsonMode                = $llmJsonMode

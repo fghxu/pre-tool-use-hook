@@ -276,7 +276,7 @@ try {
             ApiKey                = $apiKey
             TimeoutMs             = $timeoutMs
             Temperature           = 0.0
-            MaxTokens             = 16
+            LlmResponseMaxTokens  = 16
             ComplexMinSubcommands = 2
             AttributedVerdicts    = $attrVerdicts
             JsonMode              = $false

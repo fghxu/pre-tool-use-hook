@@ -145,7 +145,7 @@ if (-not $config._compiled.llmSecondOpinion) {
             ApiKey                = ''
             TimeoutMs             = 12000
             Temperature           = 0.0
-            MaxTokens             = 16
+            LlmResponseMaxTokens  = 16
             ComplexMinSubcommands = 2
             RemoteIndicators      = @()
             AttributedVerdicts    = $true

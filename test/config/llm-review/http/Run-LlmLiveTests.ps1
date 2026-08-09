@@ -149,7 +149,7 @@ $llmCfg = [PSCustomObject]@{
     ApiKey                = ''
     TimeoutMs             = $TimeoutMs
     Temperature           = 0.0
-    MaxTokens             = 16
+    LlmResponseMaxTokens  = 16
     ComplexMinSubcommands = 2
     RemoteIndicators      = @()
     # Attributed verdicts are PER-CASE here: a case with a subcommands attr
