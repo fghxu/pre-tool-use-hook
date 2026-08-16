@@ -616,7 +616,18 @@ function Find-NestedCommands {
     # pwsh/powershell[.exe] [flags...] -Command "<inner>" / -c "<inner>"
     # Flags between the binary and -Command (e.g. -ExecutionPolicy Bypass,
     # -NoProfile) are skipped via lazy .*? — Claude Code always emits them.
-    if ($trimmed -match '^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-(?:Command|c)\s+["''](.+)["'']\s*$') {
+    # GUARD: skip this branch when -File precedes -Command. With -File <script>,
+    # powershell passes everything after the script path to the SCRIPT as $args,
+    # so a later -Command belongs to the script, not to powershell (otherwise
+    # 'powershell -File trusted.ps1 -Command "Remove-Item x"' mis-extracts
+    # Remove-Item as a modifying inner). Let it fall through to the -File branch.
+    $hasFileBeforeCommand = $false
+    $m = [regex]::Match($trimmed, '(?i)-File\b')
+    if ($m.Success) {
+        $cMatch = [regex]::Match($trimmed, '(?i)-(?:Command|c)\s+["'']')
+        if ($cMatch.Success -and $m.Index -lt $cMatch.Index) { $hasFileBeforeCommand = $true }
+    }
+    if (-not $hasFileBeforeCommand -and $trimmed -match '^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-(?:Command|c)\s+["''](.+)["'']\s*$') {
 
         $innerCommand = $Matches[1]
         $innerDomain = Get-CommandDomain -Command $innerCommand
@@ -1700,7 +1711,13 @@ function Get-AstCommands {
             if ($isTopLevel -and ($trimmedStr -match '[;&|]' -or $trimmedStr -match "`n") -and ($trimmedStr -match '\S\s+\S')) {
                 $isCommandLike = $true
             }
-            elseif ($trimmedStr -match '^(aws|docker|kubectl|helm|terraform|git|npm|yarn|python|node|pwsh|powershell|bash|sh|cmd|ssh|scp|make|go|cargo|dotnet|java|perl|ruby|php)\s') {
+            elseif ($isTopLevel -and ($trimmedStr -match '^(aws|docker|kubectl|helm|terraform|git|npm|yarn|python|node|pwsh|powershell|bash|sh|cmd|ssh|scp|make|go|cargo|dotnet|java|perl|ruby|php)\s')) {
+                # Known-prefix branch MUST also require $isTopLevel: otherwise a
+                # string ARGUMENT that happens to start with a known binary
+                # (e.g. powershell -File trusted.ps1 -Command "python somescript.py",
+                # where the python string is a phantom script arg) is wrongly
+                # extracted as a standalone command. Genuine 'pwsh -Command "docker run x"'
+                # unwrapping is handled by Get-AstWrapperInnerCommands, not here.
                 $isCommandLike = $true
             }
         }
@@ -1787,12 +1804,38 @@ function Get-AstWrapperInnerCommands {
     $elementCount = $commandElements.Count
 
     # =========================================================================
-    # pwsh / powershell  —  -Command, -c, -ScriptBlock
+    # pwsh / powershell  —  -Command, -c, -ScriptBlock, -File
     # =========================================================================
     if ($CommandName -match '^(pwsh|powershell)(\.exe)?$') {
         for ($i = 1; $i -lt $elementCount; $i++) {
             $arg = $commandElements[$i]
             $argText = $arg.Extent.Text
+
+            # -File <path>  — TERMINAL. powershell.exe -File consumes the script
+            # and passes everything AFTER it to the script as $args. So any later
+            # -Command/-ConfigPath/-X belongs to the SCRIPT, not to powershell.exe,
+            # and must NOT be unwrapped as powershell's own -Command (otherwise a
+            # script arg like '-Command Remove-Item ...' is mis-extracted as a
+            # modifying inner command). Extract the script path as the inner
+            # command (routed to powershell domain so Test-TrustedProgram can match
+            # it) and stop. Mirrors Find-NestedCommands' -File handling.
+            if ($argText -match '^-(File|f)$' -and ($i + 1) -lt $elementCount) {
+                $nextArg = $commandElements[$i + 1]
+                if ($nextArg -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                    $filePath = $nextArg.Value
+                }
+                else {
+                    $filePath = $nextArg.Extent.Text
+                }
+                if ($filePath) {
+                    $null = $results.Add([PSCustomObject]@{
+                        CommandText = $filePath
+                        Domain      = 'powershell'
+                        IsPipeline  = $false
+                    })
+                }
+                return $results.ToArray()
+            }
 
             # -Command "inner"  or  -c "inner"
             if ($argText -match '^-(Command|c)$' -and ($i + 1) -lt $elementCount) {

@@ -427,7 +427,7 @@
         { "name": "Set-Variable",   "patterns": ["Set-Variable *"],                        "description": "Set-Variable" },
         { "name": "Invoke-Command",     "patterns": ["Invoke-Command *", "icm *"],                 "description": "Execute commands remotely (ScriptBlock classified separately)" },
         { "name": "Remove-PSRemoting",  "patterns": ["Remove-PSRemoting *"],                       "description": "Remove PowerShell remoting" },
-        { "name": "pwsh",               "patterns": ["pwsh *", "powershell *"],                    "description": "PowerShell wrapper (inner commands classified separately)" }
+        { "name": "pwsh",               "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"],  "description": "PowerShell wrapper (inner commands classified separately); .exe suffix tolerated so the outer wrapper does not fall to 'unknown command' on decomposed commands" }
       ],
       "strictness_gated": [
         { "name": "Export File",        "patterns": ["Export-Csv *","Export-Clixml *", "Tee-Object *","Out-Printer"],                                "description": "Export" },

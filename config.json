@@ -44,16 +44,16 @@
   "trusted_programs": [
 
     
-    "TestRunner.ps1",
-	  "src\\Parser.ps1",
-	  "src\\Resolver.ps1",
-	  "live\\Sync-Fixtures.ps1",
-    "llm-review\\Run-Tests.ps1",
-	  "test-strictness-gate\\Run-Tests.ps1",
-	  "src\\Run-AllTests.ps1",
-	  "src\\ConfigLoader.ps1",
-	  "Classifier.ps1",
-	  "temp\\Classify.ps1"
+	"TestRunner.ps1",
+	"src\\Parser.ps1",
+	"src\\Resolver.ps1",
+	"live\\Sync-Fixtures.ps1",
+	"llm-review\\Run-Tests.ps1",
+	"test-strictness-gate\\Run-Tests.ps1",
+	"src\\Run-AllTests.ps1",
+	"src\\ConfigLoader.ps1",
+	"Classifier.ps1",
+	"temp\\Classify.ps1"
   ],
 
 
@@ -118,7 +118,7 @@
   "_comment_trusted_pattern": "Regexes matched against the WHOLE command string, checked after untrusted_pattern and before all per-command tiers. Any match => allow immediately, bypassing every command rule below. Keep entries tight: anything matching is never prompted.",
   "trusted_pattern": [
 	
-	  "^trusted_stuff\\s+$"
+	"^trusted_stuff\\s+$"
   ],
  
 
@@ -131,6 +131,7 @@
 		"github_repo",
 		"run_vscode_command",
 		"run_in_terminal",
+		"kill_terminal",
 		"create_and_run_task",
 		"run_task",
 		"edit_files",
@@ -467,7 +468,7 @@
         { "name": "Set-Variable",   "patterns": ["Set-Variable *"],                        "description": "Set-Variable" },
         { "name": "Invoke-Command",     "patterns": ["Invoke-Command *", "icm *"],                 "description": "Execute commands remotely (ScriptBlock classified separately)" },
         { "name": "Remove-PSRemoting",  "patterns": ["Remove-PSRemoting *"],                       "description": "Remove PowerShell remoting" },
-        { "name": "pwsh",               "patterns": ["pwsh *", "powershell *"],                    "description": "PowerShell wrapper (inner commands classified separately)" }
+        { "name": "pwsh",               "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"],  "description": "PowerShell wrapper (inner commands classified separately); .exe suffix tolerated so the outer wrapper does not fall to 'unknown command' on decomposed commands" }
       ],
       "strictness_gated": [
         { "name": "Export File",        "patterns": ["Export-Csv *","Export-Clixml *", "Tee-Object *","Out-Printer"],                                "description": "Export" },

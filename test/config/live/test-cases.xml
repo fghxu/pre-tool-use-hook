@@ -1008,6 +1008,34 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
       <copilot-command><![CDATA[powershell.exe -NoProfile -Command "Get-Process" | Select-Object -First 5]]></copilot-command>
     </test-case>
 
+    <!-- -File + -Command coexistence (2026-08-13): when powershell is invoked with
+         -File <script>, everything after the script path (including any -Command)
+         is passed to the SCRIPT as $args — it is NOT powershell.exe's -Command.
+         The wrapper must treat -File as terminal: extract the script path for the
+         trusted_programs check and NOT mis-attribute a later -Command to powershell.
+         Also: the .exe suffix must not make the outer wrapper fall to 'unknown command'.
+         T1 isolates the -File/-Command fix (no .exe); T2/T3 also require .exe tolerance. -->
+    <test-case expected="allow" reason="trusted_programs: -File script trusted; trailing -Command is a script arg, not powershell's -Command" category="PSWrapper-FlagSkipping">
+      <description>powershell -File src/Run-AllTests.ps1 -Command Remove-Item C:\temp\x — Remove-Item is a phantom script arg, trusted script => allow</description>
+      <copilot-command><![CDATA[powershell -File src/Run-AllTests.ps1 -Command Remove-Item C:\temp\x]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: -File script trusted; .exe wrapper read-only; trailing -Command not mis-attributed" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -File src/Run-AllTests.ps1 -Command Remove-Item C:\temp\x — .exe outer + -File terminal => allow</description>
+      <copilot-command><![CDATA[powershell.exe -File src/Run-AllTests.ps1 -Command Remove-Item C:\temp\x]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: -File script trusted; pwsh.exe + flags + -Command not mis-attributed" category="PSWrapper-FlagSkipping">
+      <description>pwsh.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1 -Command Stop-Service Spooler — .exe + flags + -File terminal => allow</description>
+      <copilot-command><![CDATA[pwsh.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1 -Command Stop-Service Spooler]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: -File script trusted; QUOTED -Command value is a script arg, not powershell's -Command (regex path must honor -File terminal)" category="PSWrapper-FlagSkipping">
+      <description>powershell -File src/Run-AllTests.ps1 -Command "Remove-Item C:\temp\x" — quoted -Command after -File is a script arg => allow</description>
+      <copilot-command><![CDATA[powershell -File src/Run-AllTests.ps1 -Command "Remove-Item C:\temp\x"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: -File script trusted; a known-prefix string arg (-Command 'python ...') after -File is a script arg, not a standalone command" category="PSWrapper-FlagSkipping">
+      <description>powershell -File src/Run-AllTests.ps1 -Command "python somescript.py --batch 1k" — python is a phantom script arg => allow</description>
+      <copilot-command><![CDATA[powershell -File src/Run-AllTests.ps1 -Command "python somescript.py --batch 1k"]]></copilot-command>
+    </test-case>
+
     <test-case expected="ask" reason="modifying: Remove-LocalUser" category="PowerShell-UserManagement">
       <description>Remove-LocalUser deletes a local user account</description>
       <copilot-command><![CDATA[Remove-LocalUser -Name "tempUser"]]></copilot-command>
