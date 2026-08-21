@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE: ask_notification.sound_file points to a missing file. Load-Config must NOT throw (sound falls back to beep at runtime); Send-AskNotification must still fire and log a warning.",
+
+  "global_modifying_strictness": "normal",
+  "log_file_path": "c:\\temp\\pretoolhook-asknotify-testlogs\\",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "ask_notification": {
+    "enabled": true,
+    "sound": true,
+    "sound_file": "c:\\temp\\nonexistent-sound-file-xyz.wav"
+  },
+
+  "commands": {
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove" }
+      ]
+    }
+  }
+}

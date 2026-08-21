@@ -24,7 +24,7 @@
     "level": "complex_remote",
     "base_uri": "http://127.0.0.1:3030",
     "_models_for_pick": "GLM-5.2 , deepseek-v4-flash, deepseek-v4-pro, claude-opus-4.7, gpt-5.6-sol",
-    "model": "GLM-5.2",
+    "model": "GLM-5.3",
     "api_key": "",
     "timeout_ms": 30000,
     "temperature": 0.0,
@@ -38,8 +38,17 @@
       "tiers": ["unclassified", "unregistered_verb", "unregistered_static", "unregistered", "unknown_domain"]
     }
   },
-  
-  
+
+
+  "_comment_ask_notification": "Windows toast popup + sound whenever the hook decides 'ask' (approval needed). Fire-and-forget: never blocks the hook, never changes the decision. Fields: enabled (default true, master switch) | popup (default true, show toast) | sound (default true, play sound) | sound_file (default '', path to .wav file; empty = system beep).",
+  "ask_notification": {
+    "enabled": true,
+    "popup": true,
+    "sound": true,
+    "sound_file": ""
+  },
+
+
   "_comment_trusted_programs": "Programs trusted to run. Matched AFTER decomposition, against the program token of each decomposed sub-command (the & call-target / first token). A match grants 'allow' for that sub-command ONLY IF no modifying command also appears in its arguments or sibling statements (Option B: args are scanned; unknown args ignored). Entry forms: full path, partial path (path-suffix match; '/' and '\\' are equivalent), or bare name (basename match). Case-insensitive. Covers the & path / bare-path invocation forms; pwsh -File is NOT unwrapped (those invocations are already allowed by the pwsh read_only pattern).",
   "trusted_programs": [
 

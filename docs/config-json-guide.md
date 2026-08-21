@@ -319,6 +319,32 @@ attributed JSON contract). Never run these against the ~1000-case main suites.
 gateway, run one in-scope command (e.g. `aws s3 ls && aws s3 cp a b`), then
 check the newest `*.records.jsonl` in your log directory for the `llm` object.
 
+## 10.6 `ask_notification` — toast + sound on ask decisions
+
+**What it does:** pops a Windows toast notification and plays a sound whenever the hook decides `ask` (approval needed). Useful when the IDE is in the background or on another monitor — you hear/see the alert instead of wondering why the agent went quiet.
+
+```json
+"ask_notification": {
+  "enabled": true,
+  "popup": true,
+  "sound": true,
+  "sound_file": ""
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `enabled` | bool | `true` | Master switch. `false` = no notification at all. |
+| `popup` | bool | `true` | Show toast popup. Falls back to NotifyIcon balloon tip if toast fails (RDP/VDI). |
+| `sound` | bool | `true` | Play a sound. |
+| `sound_file` | string | `""` | Path to a `.wav` file. Empty = `[console]::beep(800, 300)`. Missing file = beep fallback. |
+
+- **Absent block = all defaults on.** Setting `enabled: false` alone is enough to disable.
+- **Fire-and-forget:** the notification launches in a detached PowerShell process; it adds ~0ms to the hook's decision path and can never block, delay, or change the decision.
+- Fires on ALL `ask` paths: local classification, LLM veto, LLM-down, check_blindspot, and hard-timeout.
+- Validated at load time: wrong types (`enabled: "yes"`) throw and fail-closed the hook.
+- Testing: env var `PRETOOLHOOK_ASKNOTIFY_MOCK=<dir>` makes the notifier write `<dir>\ask-notified.txt` instead of a real toast (used by `test/config/ask-notification/`).
+
 ## 11. Editing checklist (any config change)
 
 1. Valid JSON (no trailing commas) and valid regex in every pattern.

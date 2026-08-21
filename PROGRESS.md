@@ -3,6 +3,20 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 
 (Prior goal — strictness_gated config section + per-domain strictness — COMPLETE; spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md)
 
+## ask_notification: toast + sound on ask decisions (2026-08-20, DONE, all suites green 1138/1138 + 10/10 new)
+- User request: popup + sound alert whenever the hook decides "ask" so the user notices approval prompts (especially when the IDE is in the background).
+- Config (`ask_notification`): `enabled` (true, master switch), `popup` (true, toast), `sound` (true, play sound), `sound_file` ('' = system beep; path to .wav for custom). Absent block = all defaults on. Validated at load time (wrong types throw).
+- Implementation (`src/Notify-Ask.ps1` — `Send-AskNotification`):
+  - Gates: Decision=ask AND Enabled=true. Fires on ALL ask paths (local, LLM veto, LLM-down, check_blindspot, hard-timeout).
+  - Fire-and-forget: launches a detached `powershell.exe -EncodedCommand` process (base64-encoded script) so the hook's stdout/exit path adds ~0ms. The entire notification is try/catch-wrapped — a failure writes a stderr warning only, never changes the decision or exit code.
+  - Toast: Windows Runtime `Windows.UI.Notifications.ToastNotificationManager` (Win 10+). Falls back to `System.Windows.Forms.NotifyIcon` balloon tip on failure (reliable in RDP/VDI).
+  - Sound: `System.Media.SoundPlayer` (custom .wav) or `[console]::beep(800, 300)` fallback.
+  - Mock mode: env var `PRETOOLHOOK_ASKNOTIFY_MOCK=<dir>` writes `<dir>\ask-notified.txt` instead of a real toast (for testing).
+- Hook integration: `src/Hook.ps1` Step 10b calls `Send-AskNotification` after timeout checks, before logging. Dot-sourced at Step 4.
+- ConfigLoader: validation in `Test-ConfigSchema` (enabled/popup/sound must be bool, sound_file must be string), compilation in `Load-Config` (defaults applied when block absent).
+- Live config.json updated with the new block.
+- Test suite: `test/config/ask-notification/` — 10 checks (3 pre-flight config validation, 5 unit mock-mode, 2 fullpipe). RED confirmed 10/10 fail, GREEN 10/10 pass. All 10 existing suites green: 1138/1138.
+
 ## check_blindspot: LLM second-opinion for local-unknown tiers (2026-08-08, DONE, all suites green 1133/1133, renamed from safetynet)
 - User request: when the local hook can't identify a command (tier = unclassified / unregistered_verb / etc.) AND the normal llm_second_opinion scope gate says out-of-scope (e.g. single command, or complex_remote without a remote indicator), the human still has to approve blind. Safetynet consults the LLM in those cases so the human sees the LLM's per-sub-command verdict at approval time and can reason faster.
 - KEY INVARIANT (user-confirmed): safetynet NEVER changes the decision. Local ask stays ask. The LLM verdict only enriches the reason text. The "LLM never downgrades" rule is untouched.

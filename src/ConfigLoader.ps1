@@ -175,6 +175,33 @@ function Test-ConfigSchema {
         throw "Configuration validation failed: 'intercept_tool_name' key is required"
     }
 
+    # Validate optional "ask_notification" block (toast popup + sound on ask decisions).
+    # OPTIONAL: absent = feature on with defaults. When present it is validated
+    # even with enabled=false so bad values surface at load time.
+    $hasAskNotify = Get-Member -InputObject $Config -Name 'ask_notification' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasAskNotify) {
+        $an = $Config.ask_notification
+        if ($an -isnot [PSCustomObject] -and $an -isnot [hashtable]) {
+            throw "Configuration validation failed: 'ask_notification' must be an object"
+        }
+        if ((Get-Member -InputObject $an -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $an.enabled -isnot [bool]) {
+            throw "Configuration validation failed: 'ask_notification.enabled' must be a boolean"
+        }
+        if ((Get-Member -InputObject $an -Name 'popup' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $an.popup -isnot [bool]) {
+            throw "Configuration validation failed: 'ask_notification.popup' must be a boolean"
+        }
+        if ((Get-Member -InputObject $an -Name 'sound' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $an.sound -isnot [bool]) {
+            throw "Configuration validation failed: 'ask_notification.sound' must be a boolean"
+        }
+        if ((Get-Member -InputObject $an -Name 'sound_file' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $null -ne $an.sound_file -and $an.sound_file -isnot [string]) {
+            throw "Configuration validation failed: 'ask_notification.sound_file' must be a string"
+        }
+    }
+
     # Normalize ignore_tool_name (handle typo "ingore_tool_name")
     $hasIgnore = Get-Member -InputObject $Config -Name 'ignore_tool_name' -MemberType NoteProperty
     $hasIgnoreTypo = Get-Member -InputObject $Config -Name 'ingore_tool_name' -MemberType NoteProperty
@@ -598,6 +625,27 @@ function Load-Config {
         }
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'llmSecondOpinion' -Value $llmCompiled -Force
+
+    # Compile ask_notification (optional): toast popup + sound on ask decisions.
+    # Defaults: enabled=true, popup=true, sound=true, sound_file='' (system beep).
+    $anEnabled = $true
+    $anPopup = $true
+    $anSound = $true
+    $anSoundFile = ''
+    if (Get-Member -InputObject $config -Name 'ask_notification' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $anRaw = $config.ask_notification
+        if (Get-Member -InputObject $anRaw -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $anEnabled = [bool]$anRaw.enabled }
+        if (Get-Member -InputObject $anRaw -Name 'popup' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $anPopup = [bool]$anRaw.popup }
+        if (Get-Member -InputObject $anRaw -Name 'sound' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $anSound = [bool]$anRaw.sound }
+        if (Get-Member -InputObject $anRaw -Name 'sound_file' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $anSoundFile = "$($anRaw.sound_file)" }
+    }
+    $anCompiled = [PSCustomObject]@{
+        Enabled   = $anEnabled
+        Popup     = $anPopup
+        Sound     = $anSound
+        SoundFile = $anSoundFile
+    }
+    $config._compiled | Add-Member -MemberType NoteProperty -Name 'askNotification' -Value $anCompiled -Force
 
     # Compile patterns for each domain's read_only and modifying entries
     $commandKeys = $config.commands.PSObject.Properties.Name

@@ -10,6 +10,7 @@
 . "$PSScriptRoot\Logger.ps1"
 . "$PSScriptRoot\Classifier.ps1"
 . "$PSScriptRoot\LlmReview.ps1"
+. "$PSScriptRoot\Notify-Ask.ps1"
 
 # ----------------------------------------------------
 # Step 1: Read stdin — the IDE writes JSON to the process stdin stream.
@@ -131,8 +132,12 @@ elseif ($elapsed.TotalMilliseconds -gt 500) {
     $classifyResult | Add-Member -MemberType NoteProperty -Name 'PerformanceWarning' -Value "classification took $([math]::Round($elapsed.TotalMilliseconds, 0))ms (>500ms threshold)" -Force
 }
 
+# ----------------------------------------------------# Step 10b: Ask notification (toast + sound on ask decisions)
+# Fire-and-forget; never blocks the hook, never changes the decision.
 # ----------------------------------------------------
-# Step 11: Log (non-fatal) — write record and log entries; warn on failure
+Send-AskNotification -ClassifyResult $classifyResult -Config $config
+
+# ----------------------------------------------------# Step 11: Log (non-fatal) — write record and log entries; warn on failure
 # ----------------------------------------------------
 try {
     $logDir = New-LogDirectory -Config $config
