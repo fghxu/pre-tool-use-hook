@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE: ask_notification.enabled has wrong type (string 'yes'). Load-Config MUST throw.",
+
+  "global_modifying_strictness": "normal",
+  "log_file_path": "c:\\temp\\pretoolhook-asknotify-testlogs\\",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "ask_notification": {
+    "enabled": "yes"
+  },
+
+  "commands": {
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove" }
+      ]
+    }
+  }
+}

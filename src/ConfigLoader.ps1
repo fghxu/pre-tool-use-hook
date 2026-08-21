@@ -73,6 +73,89 @@ function Test-ConfigSchema {
         throw "Configuration validation failed: 'trusted_programs' must be an array"
     }
 
+    # Validate optional "llm_second_opinion" block (second-opinion LLM cross-check).
+    # OPTIONAL: absent = feature off. When present it is validated even with
+    # enabled=false so bad values surface at load time, not at first use.
+    $hasLlm = Get-Member -InputObject $Config -Name 'llm_second_opinion' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasLlm) {
+        $llm = $Config.llm_second_opinion
+        if ($llm -isnot [PSCustomObject] -and $llm -isnot [hashtable]) {
+            throw "Configuration validation failed: 'llm_second_opinion' must be an object"
+        }
+        if ((Get-Member -InputObject $llm -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $llm.enabled -isnot [bool]) {
+            throw "Configuration validation failed: 'llm_second_opinion.enabled' must be a boolean"
+        }
+        if ((Get-Member -InputObject $llm -Name 'attributed_verdicts' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $llm.attributed_verdicts -isnot [bool]) {
+            throw "Configuration validation failed: 'llm_second_opinion.attributed_verdicts' must be a boolean"
+        }
+        if ((Get-Member -InputObject $llm -Name 'json_mode' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $llm.json_mode -isnot [bool]) {
+            throw "Configuration validation failed: 'llm_second_opinion.json_mode' must be a boolean"
+        }
+        if ((Get-Member -InputObject $llm -Name 'level' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $llm.level -notin @('all', 'complex_commands', 'complex_remote')) {
+            throw "Configuration validation failed: 'llm_second_opinion.level' must be 'all', 'complex_commands', or 'complex_remote', got '$($llm.level)'"
+        }
+        $intFields = @('complex_min_subcommands', 'timeout_ms', 'llm_response_max_tokens')
+        foreach ($f in $intFields) {
+            if (Get-Member -InputObject $llm -Name $f -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+                $v = 0
+                if (-not [int]::TryParse("$($llm.$f)", [ref]$v) -or $v -lt 1) {
+                    throw "Configuration validation failed: 'llm_second_opinion.$f' must be an integer >= 1, got '$($llm.$f)'"
+                }
+            }
+        }
+        if (Get-Member -InputObject $llm -Name 'temperature' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $tv = 0.0
+            if (-not [double]::TryParse("$($llm.temperature)", [ref]$tv) -or $tv -lt 0.0 -or $tv -gt 2.0) {
+                throw "Configuration validation failed: 'llm_second_opinion.temperature' must be a number between 0.0 and 2.0, got '$($llm.temperature)'"
+            }
+        }
+        if ((Get-Member -InputObject $llm -Name 'api_key' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $null -ne $llm.api_key -and $llm.api_key -isnot [string]) {
+            throw "Configuration validation failed: 'llm_second_opinion.api_key' must be a string"
+        }
+        if (Get-Member -InputObject $llm -Name 'remote_indicators' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            if ($llm.remote_indicators -isnot [array]) {
+                throw "Configuration validation failed: 'llm_second_opinion.remote_indicators' must be an array of regex strings"
+            }
+            foreach ($p in $llm.remote_indicators) {
+                try { $null = [regex]::new($p.ToString()) }
+                catch { throw "Invalid regex in llm_second_opinion.remote_indicators: $p" }
+            }
+        }
+        # Validate optional "check_blindspot" sub-block (LLM second-opinion for
+        # local-unknown tiers). OPTIONAL: absent = check_blindspot off. When present
+        # it is validated even when the parent feature is disabled, so bad
+        # values surface at load time. CHECK_BLINDSPOT NEVER CHANGES THE DECISION -
+        # it only enriches the reason text the human sees at approval time.
+        if (Get-Member -InputObject $llm -Name 'check_blindspot' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $cb = $llm.check_blindspot
+            if ($cb -isnot [PSCustomObject] -and $cb -isnot [hashtable]) {
+                throw "Configuration validation failed: 'llm_second_opinion.check_blindspot' must be an object"
+            }
+            if ((Get-Member -InputObject $cb -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+                $cb.enabled -isnot [bool]) {
+                throw "Configuration validation failed: 'llm_second_opinion.check_blindspot.enabled' must be a boolean"
+            }
+            if ((Get-Member -InputObject $cb -Name 'tiers' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+                $cb.tiers -isnot [array]) {
+                throw "Configuration validation failed: 'llm_second_opinion.check_blindspot.tiers' must be an array of tier strings"
+            }
+        }
+        # base_uri and model are required only when the feature is enabled
+        if ($llm.enabled -eq $true) {
+            if (-not (Get-Member -InputObject $llm -Name 'base_uri' -MemberType NoteProperty) -or [string]::IsNullOrWhiteSpace($llm.base_uri)) {
+                throw "Configuration validation failed: 'llm_second_opinion.base_uri' is required when enabled is true"
+            }
+            if (-not (Get-Member -InputObject $llm -Name 'model' -MemberType NoteProperty) -or [string]::IsNullOrWhiteSpace($llm.model)) {
+                throw "Configuration validation failed: 'llm_second_opinion.model' is required when enabled is true"
+            }
+        }
+    }
+
     # Normalize intercept_tool_name (handle typo "intecept_tool_name")
     $hasIntercept = Get-Member -InputObject $Config -Name 'intercept_tool_name' -MemberType NoteProperty
     $hasInterceptTypo = Get-Member -InputObject $Config -Name 'intecept_tool_name' -MemberType NoteProperty
@@ -90,6 +173,33 @@ function Test-ConfigSchema {
     }
     else {
         throw "Configuration validation failed: 'intercept_tool_name' key is required"
+    }
+
+    # Validate optional "ask_notification" block (toast popup + sound on ask decisions).
+    # OPTIONAL: absent = feature on with defaults. When present it is validated
+    # even with enabled=false so bad values surface at load time.
+    $hasAskNotify = Get-Member -InputObject $Config -Name 'ask_notification' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasAskNotify) {
+        $an = $Config.ask_notification
+        if ($an -isnot [PSCustomObject] -and $an -isnot [hashtable]) {
+            throw "Configuration validation failed: 'ask_notification' must be an object"
+        }
+        if ((Get-Member -InputObject $an -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $an.enabled -isnot [bool]) {
+            throw "Configuration validation failed: 'ask_notification.enabled' must be a boolean"
+        }
+        if ((Get-Member -InputObject $an -Name 'popup' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $an.popup -isnot [bool]) {
+            throw "Configuration validation failed: 'ask_notification.popup' must be a boolean"
+        }
+        if ((Get-Member -InputObject $an -Name 'sound' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $an.sound -isnot [bool]) {
+            throw "Configuration validation failed: 'ask_notification.sound' must be a boolean"
+        }
+        if ((Get-Member -InputObject $an -Name 'sound_file' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $null -ne $an.sound_file -and $an.sound_file -isnot [string]) {
+            throw "Configuration validation failed: 'ask_notification.sound_file' must be a string"
+        }
     }
 
     # Normalize ignore_tool_name (handle typo "ingore_tool_name")
@@ -439,10 +549,122 @@ function Load-Config {
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'trustedPrograms' -Value $compiledTrustedPrograms -Force
 
+    # Compile llm_second_opinion (optional): normalized runtime block.
+    # $null when the block is absent (feature off; every consumer null-checks).
+    $llmCompiled = $null
+    if (Get-Member -InputObject $config -Name 'llm_second_opinion' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $llmRaw = $config.llm_second_opinion
+        $defaultIndicators = @(
+            '\baws\b', '\bkubectl\b', '\bhelm\b', '\bterraform\b',
+            '\bssh\b', '\bscp\b', '\bsftp\b',
+            '\bdocker\b', '\bcurl\b', '\bwget\b',
+            '\bInvoke-RestMethod\b', '\birm\b',
+            '\bInvoke-WebRequest\b', '\biwr\b',
+            '\bEnter-PSSession\b', '\bNew-PSSession\b',
+            'Invoke-Command.*-ComputerName'
+        )
+        $indicatorSrc = $defaultIndicators
+        if ((Get-Member -InputObject $llmRaw -Name 'remote_indicators' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and $llmRaw.remote_indicators) {
+            $indicatorSrc = @($llmRaw.remote_indicators | ForEach-Object { $_.ToString() })
+        }
+        $indicatorRegexes = @()
+        foreach ($p in $indicatorSrc) {
+            $indicatorRegexes += [regex]::new($p, [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        }
+        # Pre-compute each field (PS 5.1-safe; hashtable values cannot hold if-statements)
+        $llmEnabled = $false
+        if (Get-Member -InputObject $llmRaw -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmEnabled = [bool]$llmRaw.enabled }
+        $llmLevel = 'complex_remote'
+        if (Get-Member -InputObject $llmRaw -Name 'level' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmLevel = "$($llmRaw.level)" }
+        $llmBaseUri = ''
+        if (Get-Member -InputObject $llmRaw -Name 'base_uri' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmBaseUri = "$($llmRaw.base_uri)" }
+        $llmModel = ''
+        if (Get-Member -InputObject $llmRaw -Name 'model' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmModel = "$($llmRaw.model)" }
+        $llmApiKey = ''
+        if (Get-Member -InputObject $llmRaw -Name 'api_key' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmApiKey = "$($llmRaw.api_key)" }
+        $llmTimeoutMs = 12000
+        if (Get-Member -InputObject $llmRaw -Name 'timeout_ms' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmTimeoutMs = [int]$llmRaw.timeout_ms }
+        $llmTemperature = 0.0
+        if (Get-Member -InputObject $llmRaw -Name 'temperature' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmTemperature = [double]$llmRaw.temperature }
+        $llmRespMaxTokens = 16
+        if (Get-Member -InputObject $llmRaw -Name 'llm_response_max_tokens' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmRespMaxTokens = [int]$llmRaw.llm_response_max_tokens }
+        $llmMinSubs = 2
+        if (Get-Member -InputObject $llmRaw -Name 'complex_min_subcommands' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmMinSubs = [int]$llmRaw.complex_min_subcommands }
+        $llmAttributed = $true
+        if (Get-Member -InputObject $llmRaw -Name 'attributed_verdicts' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmAttributed = [bool]$llmRaw.attributed_verdicts }
+        $llmJsonMode = $false
+        if (Get-Member -InputObject $llmRaw -Name 'json_mode' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmJsonMode = [bool]$llmRaw.json_mode }
+        # check_blindspot sub-block (optional). Compiled into a sibling CheckBlindspot
+        # object the scope engine consults after the normal scope gate fails.
+        # Default tiers = all local-unknown tiers. CHECK_BLINDSPOT NEVER CHANGES THE
+        # DECISION; it only enriches the reason text.
+        $cbEnabled = $false
+        $cbTiers = @('unclassified', 'unregistered_verb', 'unregistered_static', 'unregistered', 'unknown_domain')
+        if (Get-Member -InputObject $llmRaw -Name 'check_blindspot' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $cbRaw = $llmRaw.check_blindspot
+            if (Get-Member -InputObject $cbRaw -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $cbEnabled = [bool]$cbRaw.enabled }
+            if ((Get-Member -InputObject $cbRaw -Name 'tiers' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and $cbRaw.tiers) {
+                $cbTiers = @($cbRaw.tiers | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
+            }
+        }
+        $cbCompiled = [PSCustomObject]@{ Enabled = $cbEnabled; Tiers = $cbTiers }
+        $llmCompiled = [PSCustomObject]@{
+            Enabled               = $llmEnabled
+            Level                 = $llmLevel
+            BaseUri               = $llmBaseUri
+            Model                 = $llmModel
+            ApiKey                = $llmApiKey
+            TimeoutMs             = $llmTimeoutMs
+            Temperature           = $llmTemperature
+            LlmResponseMaxTokens  = $llmRespMaxTokens
+            ComplexMinSubcommands = $llmMinSubs
+            AttributedVerdicts      = $llmAttributed
+            JsonMode                = $llmJsonMode
+            RemoteIndicators      = $indicatorRegexes
+            CheckBlindspot        = $cbCompiled
+        }
+    }
+    $config._compiled | Add-Member -MemberType NoteProperty -Name 'llmSecondOpinion' -Value $llmCompiled -Force
+
+    # Compile ask_notification (optional): toast popup + sound on ask decisions.
+    # Defaults: enabled=true, popup=true, sound=true, sound_file='' (system beep).
+    $anEnabled = $true
+    $anPopup = $true
+    $anSound = $true
+    $anSoundFile = ''
+    if (Get-Member -InputObject $config -Name 'ask_notification' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $anRaw = $config.ask_notification
+        if (Get-Member -InputObject $anRaw -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $anEnabled = [bool]$anRaw.enabled }
+        if (Get-Member -InputObject $anRaw -Name 'popup' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $anPopup = [bool]$anRaw.popup }
+        if (Get-Member -InputObject $anRaw -Name 'sound' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $anSound = [bool]$anRaw.sound }
+        if (Get-Member -InputObject $anRaw -Name 'sound_file' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $anSoundFile = "$($anRaw.sound_file)" }
+    }
+    $anCompiled = [PSCustomObject]@{
+        Enabled   = $anEnabled
+        Popup     = $anPopup
+        Sound     = $anSound
+        SoundFile = $anSoundFile
+    }
+    $config._compiled | Add-Member -MemberType NoteProperty -Name 'askNotification' -Value $anCompiled -Force
+
     # Compile patterns for each domain's read_only and modifying entries
     $commandKeys = $config.commands.PSObject.Properties.Name
     foreach ($domainKey in $commandKeys) {
         $domain = $config.commands.$domainKey
+
+        # Regex options are DOMAIN-AWARE: PowerShell is a case-insensitive
+        # language (cmdlet names 'format-table' == 'Format-Table'), so its
+        # patterns compile case-insensitive. Linux/DOS/POSIX-style tools are
+        # genuinely case-sensitive ('cat' != 'CAT'), so they keep the default
+        # case-sensitive match to avoid false allows. (2026-08-03 user report:
+        # lowercase 'convertfrom-json' missed the case-sensitive 'ConvertFrom-Json'
+        # read_only pattern and fell through to 'unregistered PowerShell verb'.)
+        $isPowerShell = ($domainKey -ieq 'PowerShell')
+        $regexOptions = if ($isPowerShell) {
+            [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+        } else {
+            [System.Text.RegularExpressions.RegexOptions]::Compiled
+        }
 
         # Compile read_only entry patterns
         if (Get-Member -InputObject $domain -Name 'read_only' -MemberType NoteProperty) {
@@ -457,7 +679,7 @@ function Load-Config {
                         # Convert glob * to .* only when * follows a non-special character
                         # to avoid breaking patterns that already use proper regex like .*
                         $anchoredPattern = $anchoredPattern -replace '(?<![.*\\])\*(?!\?|\*|\{)', '.*'
-                        $compiledPatterns += [regex]::new($anchoredPattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+                        $compiledPatterns += [regex]::new($anchoredPattern, $regexOptions)
                     }
                 }
                 $entry | Add-Member -MemberType NoteProperty -Name '_compiledPatterns' -Value $compiledPatterns -Force
@@ -474,7 +696,7 @@ function Load-Config {
                         $anchoredPattern = if ($pattern.StartsWith('^')) { $pattern } else { '^' + $pattern }
                         # Convert glob * to .* only when * follows a non-special character
                         $anchoredPattern = $anchoredPattern -replace '(?<![.*\\])\*(?!\?|\*|\{)', '.*'
-                        $compiledPatterns += [regex]::new($anchoredPattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+                        $compiledPatterns += [regex]::new($anchoredPattern, $regexOptions)
                     }
                 }
                 $entry | Add-Member -MemberType NoteProperty -Name '_compiledPatterns' -Value $compiledPatterns -Force
@@ -491,7 +713,7 @@ function Load-Config {
                         $anchoredPattern = if ($pattern.StartsWith('^')) { $pattern } else { '^' + $pattern }
                         # Convert glob * to .* only when * follows a non-special character
                         $anchoredPattern = $anchoredPattern -replace '(?<![.*\\])\*(?!\?|\*|\{)', '.*'
-                        $compiledPatterns += [regex]::new($anchoredPattern, [System.Text.RegularExpressions.RegexOptions]::Compiled)
+                        $compiledPatterns += [regex]::new($anchoredPattern, $regexOptions)
                     }
                 }
                 $entry | Add-Member -MemberType NoteProperty -Name '_compiledPatterns' -Value $compiledPatterns -Force

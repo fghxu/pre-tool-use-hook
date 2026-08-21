@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for ask_notification. Minimal config; exercises the ask-notification feature (toast+sound on 'ask' decisions).",
+
+  "global_modifying_strictness": "normal",
+
+  "_comment_log_file_path": "Fullpipe cases spawn the real Hook.ps1 which ALWAYS logs; keep test records out of the real logs.",
+  "log_file_path": "c:\\temp\\pretoolhook-asknotify-testlogs\\",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash", "run_in_terminal" ],
+
+  "tool_name_mapping": {
+    "Bash": "tool_input.command",
+    "run_in_terminal": "tool_input.command"
+  },
+
+  "ignore_tool_name": [],
+
+  "ask_notification": {
+    "enabled": true,
+    "popup": true,
+    "sound": true,
+    "sound_file": ""
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "description": "Minimal PowerShell domain (verb-based classification).",
+      "read_only_verbs": ["Get-*", "Test-*", "Write-Host", "Write-Output"],
+      "modifying_verbs": {
+        "high":   ["Remove-*", "Stop-*"],
+        "medium": ["Set-*", "New-*"],
+        "low":    []
+      },
+      "read_only": [],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "description": "Minimal Linux domain.",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files" }
+      ]
+    }
+  }
+}

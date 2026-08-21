@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PHASE-II SMALL SUITE - the 10 typical attributed-verdict cases.
+     DEFAULT file for Run-Tests.ps1. Mock values idx:... inject attributed JSON
+     verdicts through the REAL parser; strictness="normal" makes the gated tier
+     allow (the fixture file's global default is strict).
+     Run:  pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -->
+<commands>
+  <category-group name="P2Small">
+
+    <test-case expected="allow" category="P2-GatedBothSuppressed" level="complex_commands" strictness="normal" mock="idx:1,2" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1,2" suppressed="1,2" reason="both gated commands flagged; all suppressed by policy => allow">
+      <description>suppression: git add + git commit flagged, all suppressed</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="P2-MixedVetoOnReadOnly" level="complex_commands" strictness="normal" mock="idx:1,2" in-scope="true" verdict="modifying" effect="veto" flagged="1,2" suppressed="1" reason-contains="curl -o;suppressed as policy" reason="gated flag suppressed, read_only flag vetoes => ask naming the offender">
+      <description>mixed: veto stands only on the read_only sub-command</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; curl -o c:\temp\x http://h/y]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="P2-ReadOnlyFlagVeto" level="complex_commands" strictness="normal" mock="idx:1" in-scope="true" verdict="modifying" effect="veto" flagged="1" suppressed="" reason-contains="git status" reason="read_only tier flagged (git status) => veto, not suppressible">
+      <description>read_only tier flag => veto</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git status && git add .]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="P2-EmptyIdxAgree" level="complex_commands" mock="idx:" in-scope="true" verdict="read-only" effect="agree" reason="empty modifying array = all read-only => agree allow">
+      <description>idx: (empty) => agree</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="P2-BareTrueFallback" level="complex_commands" strictness="normal" mock="modifying" in-scope="true" verdict="modifying" effect="veto" flagged="" suppressed="" reason="bare 'true' is unattributed (P5) => full veto even on a gated block">
+      <description>bare-token fallback: unattributed true => full veto</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="P2-IdxZeroVeto" level="complex_commands" strictness="normal" mock="idx:0" in-scope="true" verdict="modifying" effect="veto" flagged="0" suppressed="" reason="index 0 = unlisted danger (P3) => veto, never suppressible">
+      <description>idx:0 => veto</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="P2-InvalidIdxUnusable" level="complex_commands" strictness="normal" mock="idx:5" in-scope="true" verdict="unusable" effect="forced-ask" reason-contains="*** LLM-UNUSABLE ***" reason="index 5 out of range for 2 sub-commands => unusable => fail-closed ask">
+      <description>out-of-range index => unusable</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="P2-LocalAskAgree" level="complex_commands" strictness="normal" mock="idx:1,2" in-scope="true" verdict="modifying" effect="agree" reason="local already asks (git push is modifying tier) => LLM modifying agrees; LLM never downgrades">
+      <description>local ask + attributed modifying => agree</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git push origin main ; git add .]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="P2-AttributedOffVeto" level="complex_commands" strictness="normal" attributed="false" mock="modifying" in-scope="true" verdict="modifying" effect="veto" reason="attributed_verdicts=false restores the phase-I binary path: gated block vetoes as in phase I">
+      <description>attributed=false => phase-I veto</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m x]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="P2-SingleGatedOutOfScope" level="complex_commands" strictness="normal" mock="idx:1" in-scope="false" verdict="not_called" effect="none" reason="single sub-command below min=2 => not checked (scope rules unchanged)">
+      <description>single gated command at complex_commands => out of scope</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add .]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

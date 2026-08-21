@@ -57,10 +57,15 @@ function Write-RecordEntry {
         [PSCustomObject]$RawInput,
         [PSCustomObject]$ClassifyResult,
         [string]$LogDir,
-        [string]$IDE
+        [string]$IDE,
+        [PSCustomObject]$LlmLog = $null
     )
 
+    # received_at is an instant in time (UTC, denoted by Z suffix).
+    # The daily record FILE is named by LOCAL computer date so that a late-
+    # evening run does not roll over to "tomorrow's" file (user is in EST).
     $utcNow = (Get-Date).ToUniversalTime()
+    $localNow = Get-Date
     $receivedAt = $utcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
 
     # Defensive: ensure log directory exists before writing
@@ -90,10 +95,15 @@ function Write-RecordEntry {
         }
     }
 
+    # Optional second-opinion LLM record (spec section 8)
+    if ($LlmLog) {
+        $record | Add-Member -MemberType NoteProperty -Name 'llm' -Value $LlmLog -Force
+    }
+
     $jsonLine = $record | ConvertTo-Json -Compress -Depth 10
 
     $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } elseif ($IDE -eq 'Codex') { 'codex' } else { 'claude' }
-    $fileName = $utcNow.ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.records.jsonl'
+    $fileName = $localNow.ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.records.jsonl'
     $filePath = Join-Path $LogDir $fileName
 
     # Append single line, close immediately (crash-safe)
@@ -124,6 +134,113 @@ function Write-RecordEntry {
     }
 }
 
+function Format-LlmLogBlock {
+    <#
+    .SYNOPSIS
+        Shared reconciliation formatter (phase-II spec section 7 + P9).
+        Returns the multi-line LLM evidence block for the human-readable .log
+        when a call actually happened (in_scope), a one-line summary when the
+        feature was enabled but out of scope, and '' when $LlmLog is null.
+        Used by Write-LogEntry (production) and by test runners (per-run logs).
+    #>
+    param(
+        [PSCustomObject]$Result,
+        [PSCustomObject]$LlmLog
+    )
+    if ($null -eq $LlmLog) { return '' }
+
+    # Out-of-scope: keep the phase-I one-liner (with the sub-command count, so
+    # threshold tuning for complex_min_subcommands is auditable from the log),
+    # AND carry the level + the scope reason so the log alone explains WHY the
+    # LLM was skipped (user requirement 2026-08-04). level/scope_reason are
+    # null-safe: older Log objects without them just render empty.
+    if (-not $LlmLog.in_scope) {
+        $lvl = ''
+        if (Get-Member -InputObject $LlmLog -Name level -MemberType Properties -ErrorAction SilentlyContinue) { $lvl = "$($LlmLog.level)" }
+        $scopeReason = ''
+        if (Get-Member -InputObject $LlmLog -Name scope_reason -MemberType Properties -ErrorAction SilentlyContinue) { $scopeReason = "$($LlmLog.scope_reason)" }
+        return "  LLM: [ $($LlmLog.sub_command_count) subcommand ] | in_scope=$($LlmLog.in_scope) | level=$lvl | reason=$scopeReason | verdict=$($LlmLog.verdict) effect=$($LlmLog.effect) latency_ms=$($LlmLog.latency_ms)`n"
+    }
+
+    $mockMark = if ($LlmLog.mocked) { ' (mock)' } else { '' }
+
+    # --- LLM-SENT: sub-command count + model + timeout + the numbered list (<=120 chars each)
+    $sentLine = "  LLM-SENT      : [ $($LlmLog.sub_command_count) subcommand ] | model=$($LlmLog.model)"
+    if ($LlmLog.timeout_ms) { $sentLine += " timeout=$($LlmLog.timeout_ms)ms" }
+    if ($LlmLog.sent -and $LlmLog.sent.Count -gt 0) {
+        $parts = @()
+        for ($i = 0; $i -lt $LlmLog.sent.Count; $i++) {
+            $t = "$($LlmLog.sent[$i])"
+            if ($t.Length -gt 120) { $t = $t.Substring(0, 120) }
+            $parts += "[$($i + 1)] $t"
+        }
+        $sentLine += " | " + ($parts -join ' | ')
+    }
+    $sentLine += "`n"
+
+    # --- LLM-RECV: raw response (single line) or the error, latency, recovered, mock
+    $recvLine = "  LLM-RECV      : "
+    if ($LlmLog.verdict -eq 'down') {
+        $err = "$($LlmLog.error)"
+        if ($err.Length -gt 200) { $err = $err.Substring(0, 200) }
+        $recvLine += "ERROR '$err'"
+    }
+    else {
+        $rawDisplay = $LlmLog.raw_full
+        if (-not $rawDisplay) { $rawDisplay = $LlmLog.raw_excerpt }
+        # Collapse to single line for log readability
+        $rawDisplay = ($rawDisplay -replace '\s+', ' ').Trim()
+        $displayLimit = if ($LlmLog.raw_display_limit) { $LlmLog.raw_display_limit } else { 500 }
+        if ($rawDisplay.Length -gt $displayLimit) { $rawDisplay = $rawDisplay.Substring(0, $displayLimit) + '…' }
+        $recvLine += "'$rawDisplay'"
+    }
+    $recvLine += " ($($LlmLog.latency_ms)ms, recovered=$($LlmLog.recovered)$mockMark) -> verdict=$($LlmLog.verdict)"
+    if ($LlmLog.indices) { $recvLine += " indices=[$($LlmLog.indices -join ',')]" }
+    $recvLine += "`n"
+
+    # --- LLM-LOCAL: the pre-merge local decision + per-index tier
+    $localReason = "$($LlmLog.local_reason)"
+    if ($localReason.Length -gt 120) { $localReason = $localReason.Substring(0, 120) }
+    $localLine = "  LLM-LOCAL     : decision=$($LlmLog.local_decision) ($localReason)"
+    if ($LlmLog.tiers -and $LlmLog.tiers.Count -gt 0) {
+        $tierParts = @()
+        for ($i = 0; $i -lt $LlmLog.tiers.Count; $i++) {
+            $tier = "$($LlmLog.tiers[$i])"
+            if (-not $tier) { $tier = 'unlabeled' }
+            $tierParts += "[$($i + 1)]=$tier"
+        }
+        $localLine += "; tiers: " + ($tierParts -join ' ')
+    }
+    $localLine += "`n"
+
+    # --- LLM-RECONCILE: how the final decision was reached
+    $reconLine = "  LLM-RECONCILE : "
+    switch ($LlmLog.effect) {
+        'veto' {
+            $reconLine += "flagged=[$($LlmLog.flagged -join ',')]"
+            if ($LlmLog.suppressed -and $LlmLog.suppressed.Count -gt 0) {
+                $reconLine += " suppressed=[$($LlmLog.suppressed -join ',')](strictness_gated)"
+            }
+            $vetoIdx = @($LlmLog.flagged | Where-Object { $LlmLog.suppressed -notcontains $_ })
+            $reconLine += " veto=[$($vetoIdx -join ',')]"
+            if ($LlmLog.path_guard_denied -and $LlmLog.path_guard_denied.Count -gt 0) {
+                $reconLine += " path-guard denied: [$($LlmLog.path_guard_denied -join ',')]"
+            }
+            $reconLine += " -> FINAL: $($Result.Decision)"
+        }
+        'veto-suppressed-policy' {
+            $reconLine += "flagged=[$($LlmLog.flagged -join ',')] all suppressed (strictness_gated policy) -> FINAL: $($Result.Decision)"
+        }
+        'agree' { $reconLine += "agree -> FINAL: $($Result.Decision)" }
+        'disagree-kept-ask' { $reconLine += "LLM read-only but local ask (LLM never downgrades) -> FINAL: $($Result.Decision)" }
+        'forced-ask' { $reconLine += "fail-closed ($($LlmLog.verdict)) -> FINAL: $($Result.Decision)" }
+        default { $reconLine += "$($LlmLog.effect) -> FINAL: $($Result.Decision)" }
+    }
+    $reconLine += "`n"
+
+    return ($sentLine + $recvLine + $localLine + $reconLine)
+}
+
 function Write-LogEntry {
     <#
     .SYNOPSIS
@@ -144,7 +261,8 @@ function Write-LogEntry {
         [PSCustomObject]$ClassifyResult,
         [TimeSpan]$Elapsed,
         [string]$LogDir,
-        [string]$IDE
+        [string]$IDE,
+        [PSCustomObject]$LlmLog = $null
     )
 
     # Defensive: ensure log directory exists before writing
@@ -246,11 +364,19 @@ function Write-LogEntry {
         $body = "${reasonLine}  Command: ___ [${commandText}] ___`n"
     }
 
+    # Optional second-opinion LLM reconciliation block (phase II)
+    if ($LlmLog) {
+        $body += (Format-LlmLogBlock -Result $ClassifyResult -LlmLog $LlmLog)
+    }
+
     $logEntry = $header + $body + "`n"
 
     # --- Write to file (UTF-8 without BOM, LF line endings) ---
+    # Daily file is named by LOCAL computer date so a late-evening run does
+    # not roll over to "tomorrow's" file (user is in EST; body timestamps
+    # are already local, so the filename should match them).
     $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } elseif ($IDE -eq 'Codex') { 'codex' } else { 'claude' }
-    $logFileName = (Get-Date -AsUTC).ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.log'
+    $logFileName = (Get-Date).ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.log'
     $logFilePath = Join-Path $LogDir $logFileName
 
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)

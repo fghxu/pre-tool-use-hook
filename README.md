@@ -16,6 +16,11 @@ Step 0: Tool name filter      — skip ignored tools, flag unknown tools
 Step 1: Extract command       — pull the command string from the tool input
     │
     ▼
+Step 1.5: Path branch         — file tools (Write/Edit/…) map to PATHS, not commands:
+    │                            every path runs the shared path-policy ladder
+    │                            (temp → system_paths → CWD/editable_paths → strictness),
+    │                            worst-case wins
+    ▼
 Steps 2-3: Trusted/untrusted  — regex gate checks (fast path)
     │
     ▼
@@ -26,11 +31,20 @@ Step 4: Classification engine
     ├── Parameter-aware rules (e.g. Invoke-RestMethod -Method, curl -d)
     ├── Nested command detection (ssh, docker exec, kubectl exec, pwsh -Command)
     ├── Subshell extraction $(…)
-    ├── Redirection target analysis (> file, >> file, editable_paths, CWD)
-    └── Three-tier per-domain match: read_only → strictness_gated → modifying
+    ├── Redirection target analysis (> file, >> file — same path-policy ladder)
+    ├── Three-tier per-domain match: read_only → strictness_gated → modifying
+    │     (every sub-result is annotated with the tier it matched)
+    └── AST-as-arbiter: unknown-only blockers get one whole-line re-parse;
+        conclusive-safe lines allow (wrappers inherit their inner commands' tier)
     │
     ▼
 Aggregate: "allow" only if every sub-command is read-only
+    │
+    ▼
+Step 8b: LLM second opinion (llm_second_opinion, when enabled)
+    — in-scope blocks only; attributed verdict per sub-command;
+      strictness_gated flags suppressed unless the stage-2 path-guard
+      refuses (gated write to a protected path); everything else vetoes
     │
     ▼
 Output JSON (stdout): { permissionDecision, permissionDecisionReason }
@@ -43,6 +57,51 @@ commands (`rm`, `Stop-Process`, `terraform apply`, `kubectl delete`, `Invoke-Res
 triggered the block. In between sits the `strictness_gated` tier: low-risk commands (`git add`,
 `git commit`, `mkdir`, `Set-Content`, `terraform init`, …) auto-allow in `normal`/`loose` mode and
 prompt only when strictness is `strict`.
+
+## LLM Second Opinion (`llm_second_opinion`)
+
+An optional second pair of eyes: **in-scope** command blocks are also classified
+by an LLM via an OpenAI-compatible local gateway, and the two verdicts are
+reconciled. The LLM can only ever *escalate* (force a prompt) — it never
+downgrades a local prompt to an auto-allow, so prompt injection cannot create an
+allow the local engine didn't already produce.
+
+- **Scope** (leveled): `all` / `complex_commands` (≥ N sub-commands) /
+  `complex_remote` (complex AND a remote indicator — aws, kubectl, ssh, curl,
+  docker, …; git is local). Only full-pipeline command results are checked —
+  trusted-pattern hits, file-tool path decisions, and unknown tools never are.
+- **Attributed verdicts** (`attributed_verdicts: true`, the default): the LLM
+  receives the raw block plus the engine's own numbered sub-command list and
+  answers `{"modifying":[indices]}` — it says *which* sub-commands are
+  modifying, not just whether the block is. Bare `true`/`false` stays a
+  fallback (and `attributed_verdicts: false` restores the binary mode for
+  models that can't do indices).
+- **Policy suppression**: a flag that lands on a `strictness_gated`
+  sub-command (the user's accepted low-risk tier) is *suppressed* instead of
+  vetoing — so `git add` doesn't prompt twenty times a day and `normal` mode
+  stays usable. Flags on `read_only`, unknown, or index `0` (unlisted danger)
+  always veto with a `*** LLM-VETO ***` reason naming the offender.
+- **Stage-2 path-guard**: suppression is refused when the flagged gated
+  command writes somewhere your own path policy would reject — e.g.
+  `Set-Content -Path C:\Windows\x.txt` (gated cmdlets' path arguments are not
+  path-checked locally). `printf`/`setx` args are data and skipped;
+  unresolvable variable targets fail closed.
+- **Fail closed**: unreachable/timeout → `*** LLM-DOWN ***` prompt; unparseable
+  or out-of-range answer → `*** LLM-UNUSABLE ***` prompt. Both wordings tell
+  you the feature is on and how to disable it.
+- **Reconciliation logging**: every check writes a four-line block to the
+  `.log` (`LLM-SENT` numbered list → `LLM-RECV` raw response → `LLM-LOCAL`
+  decision + tiers → `LLM-RECONCILE` flagged/suppressed/veto → FINAL, with
+  `path-guard denied: [N]` when the guard fires), and a structured `llm`
+  object to the JSONL record for disagreement statistics.
+
+Ships `enabled: true` in the repo `config.json` (level `complex_remote`, model
+`deepseek-v4-flash`); set `enabled: false` for a complete no-op. Tests inject
+verdicts via a mock env var or a local mock server — no automated suite ever
+touches the network; a small opt-in live suite probes a real model's index
+compliance (~2k tokens, user-run). See `docs/config-json-guide.md` §10.5 and
+`docs/superpowers/CURRENT-DESIGN.md` §8.
+
 
 **Exit-code contract**: the hook exits `0` whenever it produced a decision — the JSON on stdout is
 the verdict (`allow` / `ask`; `deny` for Codex). Exit `2` is reserved for fatal failures (empty
@@ -87,6 +146,7 @@ pretoolhook/
 │   ├── Parser.ps1            # Domain detection, command splitting, AST + redirect analysis
 │   ├── Resolver.ps1          # Pattern matching + parameter-rule engine against config
 │   ├── ConfigLoader.ps1      # JSON config loading, validation, regex compilation
+│   ├── LlmReview.ps1         # Second-opinion LLM: scope engine, verdict client, merge
 │   ├── Logger.ps1            # Daily JSONL record files + human-readable text logs
 │   ├── TestRunner.ps1        # Single-suite test runner (-ConfigPath/-Strictness/-Cwd)
 │   └── Run-AllTests.ps1      # One-shot runner for every suite (verdicts + baselines)
@@ -96,20 +156,23 @@ pretoolhook/
 │   │   ├── config.json                # TEST COPY of repo-root config.json (sync, don't hand-edit)
 │   │   ├── config.strict.json         # strict fixture for the redirect suite (generated)
 │   │   ├── Sync-Fixtures.ps1          # refreshes both configs from repo-root config.json
-│   │   ├── test-cases.xml             # Main classification suite (701 cases)
+│   │   ├── test-cases.xml             # Main classification suite (742 cases)
 │   │   ├── test-cases.strictness-gated.{normal,strict}.xml
 │   │   ├── test-cases.redirect-strict.xml
 │   │   ├── test-cases.trustedpattern.xml
 │   │   ├── test-fullpipe.xml + FullPipeTestRunner.ps1  # Per-IDE full-pipe integration tests
 │   │   └── test-cases.codex.ps1       # Codex IDE detection + output mapping unit tests
 │   └── test-strictness-gate/      # Isolated normal/strict fixture sandbox (+ own Run-Tests.ps1)
+├── test/config/llm-review/     # Isolated llm_second_opinion fixture (mocked verdicts, no network)
 ├── debug/                    # Debug and verification scripts
 ├── README.md                 # This file
 ├── INSTALL.md                # Installation guide
 ├── PROGRESS.md               # Running work log (goals, completed steps, baselines)
 └── docs/
     ├── config-json-guide.md     # Field-by-field config editing guide (read before editing config.json)
-    └── superpowers/{specs,plans}  # Design specs and TDD implementation plans
+    └── superpowers/
+        ├── CURRENT-DESIGN.md    # ★ single current-state design reference (start here)
+        └── {specs,plans}        # Dated design specs and TDD plans (history/rationale)
 ```
 
 ---
@@ -196,7 +259,7 @@ first and overrides everything; then `trusted_pattern`. Both are regex (single-l
 can span a multi-line command).
 
 ```jsonc
-"trusted_pattern":   ["^git status$", "^git diff$", "^docker\\s+exec\\s+(?:-\\S+\\s+)?comfyui\\b"],
+"trusted_pattern":   ["^mytool check$", "^trusted_stuff\\s+$"],
 "untrusted_pattern": ["^rm -rf /$", "^kubectl delete --all"]
 ```
 
@@ -241,7 +304,9 @@ Each domain (`DOS_CMD`, `PowerShell`, `Linux`, `Git`, `Terraform`, `Docker`, `Ku
 - **`strictness_gated`** — allows in `normal`/`loose`, **asks in `strict`**. Since 2026-07-27
   every domain carries this tier and all `risk: "low"` commands live there (the "all-gated"
   policy). Note: gated cmdlet file-writes (`Set-Content`, `Out-File`, …) are **not**
-  path-checked — they allow in normal mode even to system paths; strict mode still asks.
+  path-checked by the local engine — they allow in normal mode even to system paths
+  (strict mode still asks). The LLM feature's stage-2 path-guard covers exactly this
+  gap for in-scope blocks (see **LLM Second Opinion**).
 - **`modifying`** — always asks; the `risk` level (`low` | `medium` | `high`) shows in the prompt.
 
 Entries look like:
@@ -370,12 +435,16 @@ to `dry_run_flags`.
 
 ### Everything at once (`Run-AllTests.ps1`)
 
-Discovers every suite under `test/config/live/`, runs each with its required invocation, and
-reports REGRESSION/OK/IMPROVED against per-suite known-failure baselines (all currently 0):
+Discovers every suite under `test/config/live/`, runs each with its required invocation,
+**plus the three zero-quota `llm-review` suites** (small, phase-I, http-mock — mocked
+verdicts, no network), and reports REGRESSION/OK/IMPROVED against per-suite known-failure
+baselines (all currently 0). Not included: the llm-review 80-check large matrix (opt-in
+`-XmlPath` run) and the live LLM suite (real gateway, ~2k tokens, user-run only):
 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1
 powershell.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1 -Filter strictness   # subset
+powershell.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1 -Filter llm          # LLM suites only
 ```
 
 **Important:** the suites run against `test/config/live/config.json` — a **test copy**, not the
@@ -442,6 +511,24 @@ runner, for experimenting with config changes without touching the live suites:
 powershell.exe -ExecutionPolicy Bypass -File test/config/test-strictness-gate/Run-Tests.ps1
 ```
 
+### Optional: the llm_second_opinion suites
+
+The LLM feature has its own isolated suites under `test/config/llm-review/`
+(details in its README): the scope/merge suite (mocked verdicts, no network —
+a 10-case default file, 24 checks, plus a 64-case opt-in matrix, 78 checks, via
+`-XmlPath`), the `http/` LLM-call suite (27 checks against a local mock server,
+real HTTP path), and a small **opt-in live end-to-end test** against a real
+gateway (`http/Run-LlmLiveTests.ps1` — costs ~2k tokens, run deliberately; its
+`Live-Attr-*` cases probe attributed verdicts and decide per-model
+`attributed_verdicts`):
+
+```powershell
+pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1
+pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.p2.large.xml
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1
+pwsh -NoProfile -File test/config/llm-review/http/Run-LlmLiveTests.ps1   # live, costs quota
+```
+
 ## How Classification Works in Detail
 
 ### PowerShell
@@ -476,8 +563,9 @@ classify the inner command. AWS CLI also classifies by operation prefix (`descri
 ## Test status
 
 All suites are green with zero known-failure baselines — any new failure is a regression by
-definition (tracked in `PROGRESS.md`). Current: 916/916 across the 6 `test/config/live/` suites
-+ 17/17 Codex unit tests; 897/897 in the test-strictness-gate sandbox.
+definition (tracked in `PROGRESS.md`). Current: 1069/1069 in one `src/Run-AllTests.ps1` pass
+(6 `test/config/live/` suites + llm-review small/phase-I/http-mock) + 17/17 Codex unit tests;
+938/938 in the test-strictness-gate sandbox; llm-review large (opt-in) 80/80.
 
 ## License
 

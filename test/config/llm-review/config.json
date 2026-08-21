@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for llm_second_opinion (second-opinion LLM cross-check). Minimal domains; LLM verdicts come from PRETOOLHOOK_LLMREVIEW_MOCK, never the network.",
+  "_comment_fixture": "Isolated fixture for llm_second_opinion. Run via test/config/llm-review/Run-Tests.ps1. Scope is decided from SubResults (engine decomposition); verdicts are injected by the mock env var.",
+
+  "global_modifying_strictness": "strict",
+
+  "_comment_log_file_path": "Fullpipe cases spawn the real Hook.ps1 which ALWAYS logs; keep test records out of the real ~/.pretoolhook logs.",
+  "log_file_path": "c:\\temp\\pretoolhook-llm-review-testlogs\\",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "_comment_system_paths": "Needed by the stage-2 path-guard (Test-GatedInvocationSafe): without system_paths the compiled regex matches NOTHING and Resolve-PathPolicy allows C:\\Windows at normal. Windows entries are regex (not escaped by the loader) -> quadruple backslashes in JSON.",
+  "system_paths": {
+    "linux": ["/etc", "/usr", "/bin", "/sbin"],
+    "windows": ["C:\\\\Windows", "C:\\\\Program Files"]
+  },
+
+  "intercept_tool_name": [ "Bash", "run_in_terminal" ],
+
+  "tool_name_mapping": {
+    "Bash": "tool_input.command",
+    "run_in_terminal": "tool_input.command"
+  },
+
+  "ignore_tool_name": [],
+
+  "llm_second_opinion": {
+    "enabled": true,
+    "level": "complex_remote",
+    "base_uri": "http://127.0.0.1:3030",
+    "model": "glm-5.2",
+    "api_key": "",
+    "timeout_ms": 12000,
+    "temperature": 0.0,
+    "llm_response_max_tokens": 16,
+    "complex_min_subcommands": 2,
+    "attributed_verdicts": true,
+    "json_mode": false,
+    "_comment": "remote_indicators omitted on purpose -> the compiled default list is under test. Verdicts are mocked via PRETOOLHOOK_LLMREVIEW_MOCK; no network call ever happens.",
+    "check_blindspot": {
+      "enabled": false,
+      "_comment": "OFF by default in the fixture; per-case check_blindspot= attribute toggles it. CHECK_BLINDSPOT NEVER CHANGES THE DECISION - it only enriches the reason text the human sees at approval time. Triggers when the normal scope gate says out-of-scope AND any sub-command's Tier is in tiers[].",
+      "tiers": ["unclassified", "unregistered_verb", "unregistered_static", "unregistered", "unknown_domain"]
+    }
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "description": "Minimal PowerShell domain (verb-based classification).",
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Format-*", "Write-Host", "Write-Output"],
+      "modifying_verbs": {
+        "high":   ["Remove-*", "Stop-*"],
+        "medium": ["Set-*", "New-*", "Copy-*", "Move-*", "Rename-*"],
+        "low":    []
+      },
+      "read_only": [],
+      "modifying": [],
+      "strictness_gated": [
+        { "name": "Set-Content", "patterns": ["Set-Content *"], "description": "Write file (gated; known path gap, spec P4)" },
+        { "name": "Copy-Item",   "patterns": ["Copy-Item *"],   "description": "Copy files (gated; stage-2 source+dest coverage)" }
+      ]
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "description": "Minimal Linux domain. curl is treated as read-only here so a curl pipeline is locally ALLOWED (needed to exercise the veto path on a remote command).",
+      "read_only": [
+        { "name": "ls",   "patterns": ["ls *"],   "description": "List directory contents" },
+        { "name": "cat",  "patterns": ["cat *"],  "description": "Print file contents" },
+        { "name": "curl", "patterns": ["curl *"], "description": "HTTP fetch (fixture: read-only)" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ],
+      "strictness_gated": [
+        { "name": "printf", "patterns": ["printf *"], "description": "Format string is DATA (guard skip-list)" },
+        { "name": "mkdir",  "patterns": ["mkdir *"],  "description": "Create directory (gated; stage-2 target)" }
+      ]
+    },
+
+    "Git": {
+      "modifying_strictness": "normal",
+      "description": "Minimal Git domain. git counts as LOCAL for llm_second_opinion (no remote indicator).",
+      "read_only": [
+        { "name": "git status", "patterns": ["git status"], "description": "Working tree status" }
+      ],
+      "modifying": [
+        { "name": "git push", "patterns": ["git push *"], "risk": "medium", "description": "Push refs" }
+      ],
+      "strictness_gated": [
+        { "name": "git add",    "patterns": ["git add *"],    "description": "Stage changes (gated)" },
+        { "name": "git commit", "patterns": ["git commit *"], "description": "Commit (gated)" }
+      ]
+    }
+  }
+}

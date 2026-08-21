@@ -1,17 +1,70 @@
 {
   "version": "1.0",
+  
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
+  
   "_comment_all_gated": "POLICY (promoted 2026-07-27 from the test-strictness-gate experiment): EVERY command domain carries a strictness_gated tier and all risk:low commands live there (allow in normal/loose, ask in strict); modifying holds only medium/high. Trade-off: gated cmdlet file-writes (Set-Content/Out-File/New-Item/...) are NOT path-checked - path policy covers only redirects and file tools. See docs/config-json-guide.md section 10.",
 
   "_readme": "HOW CLASSIFICATION WORKS: every intercepted tool call is decided 'allow' (run without prompting) or 'ask' (prompt the user). Command-running tools (Bash, PowerShell, run_in_terminal, ...) are classified by matching the command string against the per-domain tiers in 'commands' below. File-writing tools (Write, Edit, create_file, ...) are decided by path policy: system_paths always ask; editable_paths and the current working directory subtree auto-approve. Keys starting with '_' are documentation only and are ignored by the loader.",
   "_readme_tiers": "Per-domain tiers: read_only => allow in every strictness mode | strictness_gated => allow in normal/loose, ask in strict | modifying => always ask (the 'risk' level is shown in the prompt).",
   "_readme_strictness_guard": "global_modifying_strictness (top level) / modifying_strictness (per-domain) = strict | normal | loose. A global 'strict' or 'loose' FORCES every domain. A per-domain commands.<domain>.modifying_strictness is consulted only when the global value is 'normal'; domains without one inherit 'normal'.",
 
+
   "log_file_path": "c:\\temp\\logs\\prehook\\",
   "_comment_log_file_path": "Directory where the hook appends decision logs (one record per intercepted call).",
 
+
   "global_modifying_strictness": "normal",
   "_comment_global_modifying_strictness": "strict: more prompts (strictness_gated entries ask; AWS flag-stripping disabled). loose: fewer prompts (unrecognized parameter_commands values auto-allow). normal: default; also the only global value that lets per-domain modifying_strictness take effect (see _readme_strictness_guard).",
+  
+  
+  "_comment_llm_second_opinion": "Second-opinion LLM cross-check. When enabled, in-scope commands are ALSO classified by an LLM (OpenAI-compatible endpoint). A disagreement in the dangerous direction (local=allow, LLM=modifying) forces ask with *** LLM-VETO *** wording. LLM unreachable/timeout/unparseable also forces ask (*** LLM-DOWN *** / *** LLM-UNUSABLE ***).\n\nFIELD REFERENCE:\n- enabled: true|false. Master kill switch for the entire LLM feature (including check_blindspot).\n- level: 'all' | 'complex_commands' | 'complex_remote'. Scope gate. 'all' = every command; 'complex_commands' = only commands with >= complex_min_subcommands decomposed sub-commands; 'complex_remote' = complex_commands + must also match a remote_indicators regex (aws/kubectl/ssh/docker/curl/etc; git is LOCAL).\n- base_uri: string. OpenAI-compatible API base URL (e.g. http://127.0.0.1:3030). Required when enabled=true.\n- model: string. Model name sent to the API (e.g. 'deepseek-v4-pro', 'GLM-5.2'). Required when enabled=true.\n- api_key: string (optional). Bearer token for the API; omit for local gateways.\n- timeout_ms: integer (>=1). HTTP timeout in milliseconds. Hard cap becomes timeout_ms + 2000 when enabled.\n- temperature: number (0.0-2.0). LLM sampling temperature; 0.0 for deterministic answers.\n- max_tokens: integer (>=1). Maximum tokens in the LLM response (V1: 16; V2: 64 typical).\n- complex_min_subcommands: integer (>=1). Minimum decomposed sub-commands needed for 'complex_commands' and 'complex_remote' levels.\n- attributed_verdicts: true|false. When true (V2 prompt), the LLM receives the numbered sub-command list and answers {\"modifying\":[N]}; flags on strictness_gated sub-commands are SUPPRESSED as policy (veto-suppressed-policy). When false (V1 prompt), bare true/false => full veto on the whole block.\n- json_mode: true|false. When true (V2 only), adds response_format:json_object to the API call (constrains response to valid JSON).\n- remote_indicators: array of regex strings (optional). Custom remote-indicator patterns for the 'complex_remote' level. Omit to use compiled defaults (aws, kubectl, helm, terraform, ssh, scp, sftp, docker, curl, wget, Invoke-RestMethod, irm, Invoke-WebRequest, iwr, Enter-PSSession, New-PSSession, Invoke-Command+ComputerName). git is always LOCAL.\n- check_blindspot: object { enabled: true|false, tiers: [string...] }. When the normal scope gate says out-of-scope AND any sub-command's local Tier is in tiers[], the LLM is still consulted so the human sees its per-sub-command verdict at approval time. CHECK_BLINDSPOT NEVER CHANGES THE DECISION - local ask stays ask. Only enriches the reason text. Default tiers: ['unclassified','unregistered_verb','unregistered_static','unregistered','unknown_domain']. See docs/config-json-guide.md.",
+  "llm_second_opinion": {
+    "enabled": true,
+    "level": "complex_remote",
+    "base_uri": "http://127.0.0.1:3030",
+    "_models_for_pick": "GLM-5.2 , deepseek-v4-flash, deepseek-v4-pro, claude-opus-4.7, gpt-5.6-sol",
+    "model": "GLM-5.3",
+    "api_key": "",
+    "timeout_ms": 30000,
+    "temperature": 0.0,
+    "llm_response_max_tokens": 256,
+    "complex_min_subcommands": 2,
+    "attributed_verdicts": true,
+    "json_mode": true,
+    "_comment_check_blindspot": "check_blindspot (2026-08-08): LLM second-opinion for local-unknown tiers. When the normal scope gate says out-of-scope AND any sub-command's local Tier is in tiers[], the LLM is still consulted so the human sees its per-sub-command verdict at approval time. CHECK_BLINDSPOT NEVER CHANGES THE DECISION - local ask stays ask; the LLM verdict only enriches the reason text. Master kill switch: llm_second_opinion.enabled=false disables check_blindspot too. Default tiers = all 5 local-unknown tiers.",
+    "check_blindspot": {
+      "enabled": true,
+      "tiers": ["unclassified", "unregistered_verb", "unregistered_static", "unregistered", "unknown_domain"]
+    }
+  },
+
+
+  "_comment_ask_notification": "Windows toast popup + sound whenever the hook decides 'ask' (approval needed). Fire-and-forget: never blocks the hook, never changes the decision. Fields: enabled (default true, master switch) | popup (default true, show toast) | sound (default true, play sound) | sound_file (default '', path to .wav file; empty = system beep).",
+  "ask_notification": {
+    "enabled": true,
+    "popup": true,
+    "sound": true,
+    "sound_file": ""
+  },
+
+
+  "_comment_trusted_programs": "Programs trusted to run. Matched AFTER decomposition, against the program token of each decomposed sub-command (the & call-target / first token). A match grants 'allow' for that sub-command ONLY IF no modifying command also appears in its arguments or sibling statements (Option B: args are scanned; unknown args ignored). Entry forms: full path, partial path (path-suffix match; '/' and '\\' are equivalent), or bare name (basename match). Case-insensitive. Covers the & path / bare-path invocation forms; pwsh -File is NOT unwrapped (those invocations are already allowed by the pwsh read_only pattern).",
+  "trusted_programs": [
+
+    
+	"TestRunner.ps1",
+	"src\\Parser.ps1",
+	"src\\Resolver.ps1",
+	"live\\Sync-Fixtures.ps1",
+	"llm-review\\Run-Tests.ps1",
+	"test-strictness-gate\\Run-Tests.ps1",
+	"src\\Run-AllTests.ps1",
+	"src\\ConfigLoader.ps1",
+	"Classifier.ps1",
+	"temp\\Classify.ps1"
+  ],
+
 
   "editable_paths": {
     "description": "Parent directories where file writes (shell redirects > / >> and file tools like Write/Edit/create_file) are auto-approved when modifying_strictness is normal or loose. The current working directory and its subdirectories are always editable, in every mode.",
@@ -26,6 +79,8 @@
       "D:\\\\temp\\\\"
     ]
   },
+  
+  
   "system_paths": {
     "description": "Parent directories where file writes (redirects and file tools) always require approval, in every strictness mode including loose. All subdirectories under these paths are also blocked.",
     "linux": [
@@ -46,61 +101,8 @@
       "%ProgramFiles(x86)%\\\\"
     ]
   },
-  "safe_expressions": {
-    "description": "INSTANCE-style .NET method allowlist for the safe-expression certifier (AST arbiter + zero-command fallback): name-only, case-insensitive, applies ONLY to non-static calls ($obj.Name(...) + intrinsic array .Where/.ForEach). Static [Type]::Method calls are governed by dotnet_static_method_allowlist below. Every name is read-only BY NAME on every type that defines it (reflection collision scan 2026-07-31, temp/verify-instance-list.ps1). Mutator-colliding names deliberately EXCLUDED: Add, Insert, Remove, Reverse, Sort, Copy, CopyTo, Save, Load, Write*, Append*, Delete, Move, Create, Open, Start, Stop, Kill, Dispose, Close, Flush, Set*, Push, Pop, Enqueue, Dequeue, Intern, GetTempFileName, Serialize, Deserialize.",
-    "dotnet_method_allowlist": [
-      "ReadAllText", "ReadAllLines", "ReadLines", "OpenRead",
-      "Substring", "Split", "Replace", "ToString", "ToUpper", "ToLower",
-      "Trim", "TrimStart", "TrimEnd", "Contains", "StartsWith", "EndsWith",
-      "IndexOf", "LastIndexOf", "PadLeft", "PadRight",
-      "Max", "Min", "Abs", "Round", "Floor", "Ceiling", "Sqrt", "Pow",
-      "Compare", "Equals", "GetHashCode", "GetType",
-      "Where", "ForEach", "ToCharArray", "ToLowerInvariant", "ToUpperInvariant",
-      "Normalize", "CompareTo", "Clone", "Join",
-      "GetEnumerator", "ContainsKey", "ContainsValue", "TryGetValue", "GetRange",
-      "AsReadOnly", "BinarySearch", "Find", "FindAll", "FindIndex", "FindLast",
-      "FindLastIndex", "Exists", "TrueForAll", "ConvertAll", "Peek",
-      "GetValue", "GetLength", "GetLongLength", "GetLowerBound", "GetUpperBound", "ToArray",
-      "GetFiles", "GetDirectories", "GetFileSystemInfos", "EnumerateFiles",
-      "EnumerateDirectories", "EnumerateFileSystemInfos",
-      "AddDays", "AddHours", "AddMinutes", "AddSeconds", "AddMilliseconds",
-      "AddMicroseconds", "AddTicks", "AddMonths", "AddYears", "Subtract",
-      "ToUniversalTime", "ToLocalTime", "ToShortDateString", "ToLongDateString",
-      "ToShortTimeString", "ToLongTimeString", "ToOADate", "ToBinary", "Negate", "Duration",
-      "GetBytes", "GetString", "GetChars", "GetByteCount", "GetCharCount",
-      "GetMaxByteCount", "GetMaxCharCount", "GetEncoder", "GetDecoder",
-      "Match", "Matches", "IsMatch",
-      "SelectNodes", "SelectSingleNode", "GetElementsByTagName", "GetElementById",
-      "ReadLine", "ReadToEnd", "Next", "NextDouble", "GetTypeCode"
-    ],
-    "_comment_dotnet_static_method_allowlist": "Type-qualified allowlist for STATIC .NET method calls ([Type]::Method(...)) in expression position, used by the safe-expression certifier + AST arbiter (Test-SafeAst InvokeMemberExpressionAst). Entry form 'TypeName::Method' matched case-insensitively against the type AS WRITTEN (e.g. regex::Matches) AND its reflected full name (e.g. System.Text.RegularExpressions.Regex::Matches). 183 entries, ALL verified via .NET reflection (public static, 2026-07-31, temp/verify-static-list.ps1). Only provably read-only statics: pure computations, conversions, parses, searches, and filesystem READS. Deliberately EXCLUDED (still ask): writers/mutators (File::Write*/Append*/Delete/Copy/Move/Create/SetAttributes, Directory::Create/Delete/Move, Array::Sort/Reverse/Clear/Copy, Environment::SetEnvironmentVariable, Path::GetTempFileName [creates a file], String::Intern, Process::Start). Distinct from dotnet_method_allowlist above (name-only, covers instance-style calls).",
-    "dotnet_static_method_allowlist": [
-      "regex::Matches", "regex::Match", "regex::IsMatch", "regex::Replace", "regex::Split", "regex::Escape", "regex::Unescape",
-      "System.Management.Automation.PSParser::Tokenize", "System.Management.Automation.Language.Parser::ParseInput",
-      "System.IO.Path::Combine", "System.IO.Path::Join", "System.IO.Path::GetFileName", "System.IO.Path::GetFileNameWithoutExtension", "System.IO.Path::GetExtension", "System.IO.Path::GetDirectoryName", "System.IO.Path::GetFullPath", "System.IO.Path::ChangeExtension", "System.IO.Path::HasExtension", "System.IO.Path::IsPathRooted", "System.IO.Path::GetPathRoot", "System.IO.Path::GetRandomFileName", "System.IO.Path::GetRelativePath", "System.IO.Path::TrimEndingDirectorySeparator", "System.IO.Path::GetInvalidPathChars", "System.IO.Path::GetInvalidFileNameChars", "System.IO.Path::GetTempPath",
-      "System.IO.File::ReadAllText", "System.IO.File::ReadAllBytes", "System.IO.File::ReadAllLines", "System.IO.File::ReadLines", "System.IO.File::OpenRead", "System.IO.File::Exists", "System.IO.File::GetAttributes", "System.IO.File::GetCreationTime", "System.IO.File::GetCreationTimeUtc", "System.IO.File::GetLastAccessTime", "System.IO.File::GetLastAccessTimeUtc", "System.IO.File::GetLastWriteTime", "System.IO.File::GetLastWriteTimeUtc",
-      "System.IO.Directory::Exists", "System.IO.Directory::GetFiles", "System.IO.Directory::GetDirectories", "System.IO.Directory::GetFileSystemEntries", "System.IO.Directory::EnumerateFiles", "System.IO.Directory::EnumerateDirectories", "System.IO.Directory::EnumerateFileSystemEntries", "System.IO.Directory::GetCurrentDirectory", "System.IO.Directory::GetDirectoryRoot", "System.IO.Directory::GetLogicalDrives", "System.IO.Directory::GetParent", "System.IO.Directory::GetCreationTime", "System.IO.Directory::GetLastWriteTime", "System.IO.Directory::GetLastAccessTime",
-      "math::Abs", "math::Acos", "math::Asin", "math::Atan", "math::Atan2", "math::Ceiling", "math::Cos", "math::Cosh", "math::Exp", "math::Floor", "math::Log", "math::Log10", "math::Max", "math::Min", "math::Pow", "math::Round", "math::Sign", "math::Sin", "math::Sinh", "math::Sqrt", "math::Tan", "math::Tanh", "math::Truncate", "math::DivRem", "math::IEEERemainder", "math::Clamp", "math::BigMul", "math::Cbrt", "math::Log2",
-      "Convert::ToBase64String", "Convert::FromBase64String", "Convert::ToHexString", "Convert::FromHexString", "Convert::ToInt32", "Convert::ToInt64", "Convert::ToDouble", "Convert::ToBoolean", "Convert::ToByte", "Convert::ToChar", "Convert::ToDateTime", "Convert::ToDecimal", "Convert::ToString", "Convert::ChangeType", "Convert::ToBase64CharArray",
-      "System.BitConverter::ToString", "System.BitConverter::GetBytes", "System.BitConverter::ToInt16", "System.BitConverter::ToInt32", "System.BitConverter::ToInt64", "System.BitConverter::ToUInt16", "System.BitConverter::ToUInt32", "System.BitConverter::ToUInt64", "System.BitConverter::ToSingle", "System.BitConverter::ToDouble", "System.BitConverter::ToBoolean", "System.BitConverter::ToChar", "System.BitConverter::DoubleToInt64Bits", "System.BitConverter::Int64BitsToDouble", "System.BitConverter::SingleToInt32Bits", "System.BitConverter::Int32BitsToSingle",
-      "string::Format", "string::Join", "string::Concat", "string::IsNullOrEmpty", "string::IsNullOrWhiteSpace", "string::Compare", "string::CompareOrdinal", "string::Equals", "string::Copy",
-      "guid::NewGuid", "guid::Parse", "guid::TryParse", "guid::ParseExact",
-      "System.DateTime::Parse", "System.DateTime::ParseExact", "System.DateTime::TryParse", "System.DateTime::TryParseExact", "System.DateTime::FromBinary", "System.DateTime::FromFileTime", "System.DateTime::FromFileTimeUtc", "System.DateTime::FromOADate", "System.DateTime::IsLeapYear", "System.DateTime::DaysInMonth", "System.DateTime::Compare",
-      "System.DateTimeOffset::Parse", "System.DateTimeOffset::ParseExact", "System.DateTimeOffset::TryParse", "System.DateTimeOffset::TryParseExact", "System.DateTimeOffset::FromFileTime", "System.DateTimeOffset::FromUnixTimeSeconds", "System.DateTimeOffset::FromUnixTimeMilliseconds",
-      "System.TimeSpan::Parse", "System.TimeSpan::TryParse", "System.TimeSpan::FromDays", "System.TimeSpan::FromHours", "System.TimeSpan::FromMinutes", "System.TimeSpan::FromSeconds", "System.TimeSpan::FromMilliseconds", "System.TimeSpan::FromTicks",
-      "System.Version::Parse", "System.Version::TryParse",
-      "System.Array::BinarySearch", "System.Array::IndexOf", "System.Array::LastIndexOf", "System.Array::Find", "System.Array::FindAll", "System.Array::FindIndex", "System.Array::FindLast", "System.Array::FindLastIndex", "System.Array::Exists", "System.Array::TrueForAll", "System.Array::ConvertAll", "System.Array::Empty", "System.Array::AsReadOnly",
-      "System.Environment::GetEnvironmentVariable", "System.Environment::GetFolderPath", "System.Environment::ExpandEnvironmentVariables", "System.Environment::GetCommandLineArgs",
-      "int::Parse", "int::TryParse", "long::Parse", "long::TryParse", "double::Parse", "double::TryParse", "byte::Parse", "byte::TryParse", "bool::Parse", "bool::TryParse",
-      "System.Net.IPAddress::Parse", "System.Net.IPAddress::TryParse",
-      "System.Linq.Enumerable::Where", "System.Linq.Enumerable::Select", "System.Linq.Enumerable::SelectMany", "System.Linq.Enumerable::OrderBy", "System.Linq.Enumerable::OrderByDescending", "System.Linq.Enumerable::ThenBy", "System.Linq.Enumerable::ThenByDescending", "System.Linq.Enumerable::GroupBy", "System.Linq.Enumerable::GroupJoin", "System.Linq.Enumerable::Join", "System.Linq.Enumerable::Distinct", "System.Linq.Enumerable::DistinctBy", "System.Linq.Enumerable::Union", "System.Linq.Enumerable::UnionBy", "System.Linq.Enumerable::Intersect", "System.Linq.Enumerable::IntersectBy", "System.Linq.Enumerable::Except", "System.Linq.Enumerable::ExceptBy", "System.Linq.Enumerable::Concat", "System.Linq.Enumerable::Zip", "System.Linq.Enumerable::Take", "System.Linq.Enumerable::TakeLast", "System.Linq.Enumerable::TakeWhile", "System.Linq.Enumerable::Skip", "System.Linq.Enumerable::SkipLast", "System.Linq.Enumerable::SkipWhile", "System.Linq.Enumerable::Chunk", "System.Linq.Enumerable::First", "System.Linq.Enumerable::FirstOrDefault", "System.Linq.Enumerable::Last", "System.Linq.Enumerable::LastOrDefault", "System.Linq.Enumerable::Single", "System.Linq.Enumerable::SingleOrDefault", "System.Linq.Enumerable::ElementAt", "System.Linq.Enumerable::ElementAtOrDefault", "System.Linq.Enumerable::Any", "System.Linq.Enumerable::All", "System.Linq.Enumerable::Count", "System.Linq.Enumerable::LongCount", "System.Linq.Enumerable::Sum", "System.Linq.Enumerable::Average", "System.Linq.Enumerable::Aggregate", "System.Linq.Enumerable::SequenceEqual", "System.Linq.Enumerable::Cast", "System.Linq.Enumerable::OfType", "System.Linq.Enumerable::ToArray", "System.Linq.Enumerable::ToList", "System.Linq.Enumerable::ToDictionary", "System.Linq.Enumerable::ToLookup", "System.Linq.Enumerable::ToHashSet", "System.Linq.Enumerable::DefaultIfEmpty", "System.Linq.Enumerable::MinBy", "System.Linq.Enumerable::MaxBy",
-      "System.Diagnostics.Process::GetProcesses", "System.Diagnostics.Process::GetProcessById", "System.Diagnostics.Process::GetCurrentProcess",
-      "System.ServiceProcess.ServiceController::GetServices",
-      "System.Console::ReadLine",
-      "System.Enum::GetNames", "System.Enum::GetValues", "System.Enum::GetName", "System.Enum::IsDefined"
-    ]
-  },
-
+  
+  
   "_comment_known_command_prefixes": "First-token lookup used for domain routing: a command starting with one of these tokens is routed to the matching domain's rules (docker -> Docker, kubectl -> Kubernetes, aws -> AWS_CLI, git -> Git, ...). Shell launchers (pwsh, powershell, cmd, bash, sh) unwrap and re-classify the inner command. Unlisted tokens fall back to shell heuristics (PowerShell markers, then DOS markers, else Linux).",
   "known_command_prefixes": [
     "docker", "kubectl", "aws", "npm", "git", "terraform", "helm", "gh", "az", "gcloud",
@@ -120,18 +122,14 @@
 	  "^untrusted_stuff\\s+$",
 	  "^[A-Za-z]:[/\\\\](?!.*(?i:System32|Program Files)).*(?i:\\.(exe|bat|cmd|com|msi|scr))\\b.*$"
   ],
+  
+  
   "_comment_trusted_pattern": "Regexes matched against the WHOLE command string, checked after untrusted_pattern and before all per-command tiers. Any match => allow immediately, bypassing every command rule below. Keep entries tight: anything matching is never prompted.",
   "trusted_pattern": [
-	  "^trusted_stuff\\s+$"
+	
+	"^trusted_stuff\\s+$"
   ],
-
-  "_comment_trusted_programs": "Programs trusted to run. Matched AFTER decomposition, against the program token of each decomposed sub-command (the & call-target / first token). A match grants 'allow' for that sub-command ONLY IF no modifying command also appears in its arguments or sibling statements (Option B: args are scanned; unknown args ignored). Entry forms: full path, partial path (path-suffix match; '/' and '\\' are equivalent), or bare name (basename match). Case-insensitive. Covers the & path / bare-path invocation forms; pwsh -File is NOT unwrapped (those invocations are already allowed by the pwsh read_only pattern).",
-  "trusted_programs": [
-	  "TestRunner.ps1",
-	  "src/Classifier.ps1",
-	  "test-strictness-gate/Run-Tests.ps1",
-	  "C:/git/cc/pretoolhook/src/Run-AllTests.ps1"
-  ],
+ 
 
   "_comment_intercept_tool_name": "Tool names the hook inspects. Each intercepted tool is classified via tool_name_mapping (command tools) or path_tool_mapping (file tools) below; an intercepted tool with no mapping asks by default. Tools in neither list also ask by default.",
   "intercept_tool_name": [
@@ -142,6 +140,7 @@
 		"github_repo",
 		"run_vscode_command",
 		"run_in_terminal",
+		"kill_terminal",
 		"create_and_run_task",
 		"run_task",
 		"edit_files",
@@ -166,6 +165,8 @@
 		"Edit",
 		"MultiEdit"
   ],
+  
+  
   "_comment_ignore_tool_name": "Tool names the hook passes through without inspection (read-only or non-executing tools: file reading, search, web fetch, task management, ...).",
   "ignore_tool_name": [
 
@@ -243,6 +244,7 @@
 
   ],
 
+
   "_comment_tool_name_mapping": "Command-running tools: tool name => JSON dot-path into the hook payload that yields the shell command string to classify (e.g. tool_input.command).",
   "tool_name_mapping": {
     "run_in_terminal": "tool_input.command",
@@ -250,6 +252,7 @@
     "Bash": "tool_input.command",
 	"PowerShell": "tool_input.command"
   },
+
 
   "_comment_path_tool_mapping": "File-writing tools: tool name => JSON dot-path into the hook payload that yields the target file/directory path. These are decided by path policy (system_paths / editable_paths / current working directory subtree), NOT by the command tiers.",
   "path_tool_mapping": {
@@ -266,6 +269,7 @@
 	"create_directory": "tool_input.dirPath",
 	"create_new_workspace": "tool_input.workspacePath"
   },
+
 
   "_comment_dry_run_flags": "Base-command + flag combinations that are simulations only; treated as read-only even when the base command is normally modifying.",
   "dry_run_flags": {
@@ -285,11 +289,73 @@
     "aws cloudformation estimate-template-cost": "read-only"
   },
 
+
   "risk_legend": {
     "low": "Changes that are easily reversible or localized (creating files, copying data, setting env vars)",
     "medium": "Changes that affect system configuration, service state, or persistent storage but are generally recoverable",
     "high": "Destructive operations causing irreversible data loss, permanent resource deletion, or security-compromising changes"
   },
+  
+  
+  "safe_expressions": {
+    "description": "INSTANCE-style .NET method allowlist for the safe-expression certifier (AST arbiter + zero-command fallback): name-only, case-insensitive, applies ONLY to non-static calls ($obj.Name(...) + intrinsic array .Where/.ForEach). Static [Type]::Method calls are governed by dotnet_static_method_allowlist below. Every name is read-only BY NAME on every type that defines it (reflection collision scan 2026-07-31, temp/verify-instance-list.ps1). Mutator-colliding names deliberately EXCLUDED: Add, Insert, Remove, Reverse, Sort, Copy, CopyTo, Save, Load, Write*, Append*, Delete, Move, Create, Open, Start, Stop, Kill, Dispose, Close, Flush, Set*, Push, Pop, Enqueue, Dequeue, Intern, GetTempFileName, Serialize, Deserialize.",
+    "dotnet_method_allowlist": [
+      "ReadAllText", "ReadAllLines", "ReadLines", "OpenRead",
+      "Substring", "Split", "Replace", "ToString", "ToUpper", "ToLower",
+      "Trim", "TrimStart", "TrimEnd", "Contains", "StartsWith", "EndsWith",
+      "IndexOf", "LastIndexOf", "PadLeft", "PadRight",
+      "Max", "Min", "Abs", "Round", "Floor", "Ceiling", "Sqrt", "Pow",
+      "Compare", "Equals", "GetHashCode", "GetType",
+      "Where", "ForEach", "ToCharArray", "ToLowerInvariant", "ToUpperInvariant",
+      "Normalize", "CompareTo", "Clone", "Join",
+      "GetEnumerator", "ContainsKey", "ContainsValue", "TryGetValue", "GetRange",
+      "AsReadOnly", "BinarySearch", "Find", "FindAll", "FindIndex", "FindLast",
+      "FindLastIndex", "Exists", "TrueForAll", "ConvertAll", "Peek",
+      "GetValue", "GetLength", "GetLongLength", "GetLowerBound", "GetUpperBound", "ToArray",
+      "GetFiles", "GetDirectories", "GetFileSystemInfos", "EnumerateFiles",
+      "EnumerateDirectories", "EnumerateFileSystemInfos",
+      "AddDays", "AddHours", "AddMinutes", "AddSeconds", "AddMilliseconds",
+      "AddMicroseconds", "AddTicks", "AddMonths", "AddYears", "Subtract",
+      "ToUniversalTime", "ToLocalTime", "ToShortDateString", "ToLongDateString",
+      "ToShortTimeString", "ToLongTimeString", "ToOADate", "ToBinary", "Negate", "Duration",
+      "GetBytes", "GetString", "GetChars", "GetByteCount", "GetCharCount",
+      "GetMaxByteCount", "GetMaxCharCount", "GetEncoder", "GetDecoder",
+      "Match", "Matches", "IsMatch",
+      "SelectNodes", "SelectSingleNode", "GetElementsByTagName", "GetElementById",
+      "ReadLine", "ReadToEnd", "Next", "NextDouble", "GetTypeCode"
+    ],
+    "_comment_dotnet_static_method_allowlist": "Type-qualified allowlist for STATIC .NET method calls ([Type]::Method(...)) in expression position, used by the safe-expression certifier + AST arbiter (Test-SafeAst InvokeMemberExpressionAst). Entry form 'TypeName::Method' matched case-insensitively against the type AS WRITTEN (e.g. regex::Matches) AND its reflected full name (e.g. System.Text.RegularExpressions.Regex::Matches). 183 entries, ALL verified via .NET reflection (public static, 2026-07-31, temp/verify-static-list.ps1). Only provably read-only statics: pure computations, conversions, parses, searches, and filesystem READS. Deliberately EXCLUDED (still ask): writers/mutators (File::Write*/Append*/Delete/Copy/Move/Create/SetAttributes, Directory::Create/Delete/Move, Array::Sort/Reverse/Clear/Copy, Environment::SetEnvironmentVariable, Path::GetTempFileName [creates a file], String::Intern, Process::Start). Distinct from dotnet_method_allowlist above (name-only, covers instance-style calls).",
+    
+	
+	"dotnet_static_method_allowlist": [
+      "regex::Matches", "regex::Match", "regex::IsMatch", "regex::Replace", "regex::Split", "regex::Escape", "regex::Unescape",
+      "System.Management.Automation.PSParser::Tokenize", "System.Management.Automation.Language.Parser::ParseInput","System.Management.Automation.Language.Parser::ParseFile",
+      "System.IO.Path::Combine", "System.IO.Path::Join", "System.IO.Path::GetFileName", "System.IO.Path::GetFileNameWithoutExtension", "System.IO.Path::GetExtension", "System.IO.Path::GetDirectoryName", "System.IO.Path::GetFullPath", "System.IO.Path::ChangeExtension", "System.IO.Path::HasExtension", "System.IO.Path::IsPathRooted", "System.IO.Path::GetPathRoot", "System.IO.Path::GetRandomFileName", "System.IO.Path::GetRelativePath", "System.IO.Path::TrimEndingDirectorySeparator", "System.IO.Path::GetInvalidPathChars", "System.IO.Path::GetInvalidFileNameChars", "System.IO.Path::GetTempPath",
+      "System.IO.File::ReadAllText", "System.IO.File::ReadAllBytes", "System.IO.File::ReadAllLines", "System.IO.File::ReadLines", "System.IO.File::OpenRead", "System.IO.File::Exists", "System.IO.File::GetAttributes", "System.IO.File::GetCreationTime", "System.IO.File::GetCreationTimeUtc", "System.IO.File::GetLastAccessTime", "System.IO.File::GetLastAccessTimeUtc", "System.IO.File::GetLastWriteTime", "System.IO.File::GetLastWriteTimeUtc",
+      "System.IO.Directory::Exists", "System.IO.Directory::GetFiles", "System.IO.Directory::GetDirectories", "System.IO.Directory::GetFileSystemEntries", "System.IO.Directory::EnumerateFiles", "System.IO.Directory::EnumerateDirectories", "System.IO.Directory::EnumerateFileSystemEntries", "System.IO.Directory::GetCurrentDirectory", "System.IO.Directory::GetDirectoryRoot", "System.IO.Directory::GetLogicalDrives", "System.IO.Directory::GetParent", "System.IO.Directory::GetCreationTime", "System.IO.Directory::GetLastWriteTime", "System.IO.Directory::GetLastAccessTime",
+      "math::Abs", "math::Acos", "math::Asin", "math::Atan", "math::Atan2", "math::Ceiling", "math::Cos", "math::Cosh", "math::Exp", "math::Floor", "math::Log", "math::Log10", "math::Max", "math::Min", "math::Pow", "math::Round", "math::Sign", "math::Sin", "math::Sinh", "math::Sqrt", "math::Tan", "math::Tanh", "math::Truncate", "math::DivRem", "math::IEEERemainder", "math::Clamp", "math::BigMul", "math::Cbrt", "math::Log2",
+      "Convert::ToBase64String", "Convert::FromBase64String", "Convert::ToHexString", "Convert::FromHexString", "Convert::ToInt32", "Convert::ToInt64", "Convert::ToDouble", "Convert::ToBoolean", "Convert::ToByte", "Convert::ToChar", "Convert::ToDateTime", "Convert::ToDecimal", "Convert::ToString", "Convert::ChangeType", "Convert::ToBase64CharArray",
+      "System.BitConverter::ToString", "System.BitConverter::GetBytes", "System.BitConverter::ToInt16", "System.BitConverter::ToInt32", "System.BitConverter::ToInt64", "System.BitConverter::ToUInt16", "System.BitConverter::ToUInt32", "System.BitConverter::ToUInt64", "System.BitConverter::ToSingle", "System.BitConverter::ToDouble", "System.BitConverter::ToBoolean", "System.BitConverter::ToChar", "System.BitConverter::DoubleToInt64Bits", "System.BitConverter::Int64BitsToDouble", "System.BitConverter::SingleToInt32Bits", "System.BitConverter::Int32BitsToSingle",
+      "string::Format", "string::Join", "string::Concat", "string::IsNullOrEmpty", "string::IsNullOrWhiteSpace", "string::Compare", "string::CompareOrdinal", "string::Equals", "string::Copy",
+      "guid::NewGuid", "guid::Parse", "guid::TryParse", "guid::ParseExact",
+      "System.DateTime::Parse", "System.DateTime::ParseExact", "System.DateTime::TryParse", "System.DateTime::TryParseExact", "System.DateTime::FromBinary", "System.DateTime::FromFileTime", "System.DateTime::FromFileTimeUtc", "System.DateTime::FromOADate", "System.DateTime::IsLeapYear", "System.DateTime::DaysInMonth", "System.DateTime::Compare",
+      "System.DateTimeOffset::Parse", "System.DateTimeOffset::ParseExact", "System.DateTimeOffset::TryParse", "System.DateTimeOffset::TryParseExact", "System.DateTimeOffset::FromFileTime", "System.DateTimeOffset::FromUnixTimeSeconds", "System.DateTimeOffset::FromUnixTimeMilliseconds",
+      "System.TimeSpan::Parse", "System.TimeSpan::TryParse", "System.TimeSpan::FromDays", "System.TimeSpan::FromHours", "System.TimeSpan::FromMinutes", "System.TimeSpan::FromSeconds", "System.TimeSpan::FromMilliseconds", "System.TimeSpan::FromTicks",
+      "System.Version::Parse", "System.Version::TryParse",
+      "System.Array::BinarySearch", "System.Array::IndexOf", "System.Array::LastIndexOf", "System.Array::Find", "System.Array::FindAll", "System.Array::FindIndex", "System.Array::FindLast", "System.Array::FindLastIndex", "System.Array::Exists", "System.Array::TrueForAll", "System.Array::ConvertAll", "System.Array::Empty", "System.Array::AsReadOnly",
+      "System.Environment::GetEnvironmentVariable", "System.Environment::GetFolderPath", "System.Environment::ExpandEnvironmentVariables", "System.Environment::GetCommandLineArgs",
+      "int::Parse", "int::TryParse", "long::Parse", "long::TryParse", "double::Parse", "double::TryParse", "byte::Parse", "byte::TryParse", "bool::Parse", "bool::TryParse",
+      "System.Net.IPAddress::Parse", "System.Net.IPAddress::TryParse",
+      "System.Uri::EscapeDataString", "System.Uri::EscapeUriString", "System.Uri::UnescapeDataString", "System.Uri::CheckHostName", "System.Uri::CheckSchemeName", "System.Uri::IsWellFormedUriString", "System.Uri::IsHexDigit", "System.Uri::IsHexEncoding", "System.Uri::HexUnescape", "System.Uri::HexEscape",
+      "System.Linq.Enumerable::Where", "System.Linq.Enumerable::Select", "System.Linq.Enumerable::SelectMany", "System.Linq.Enumerable::OrderBy", "System.Linq.Enumerable::OrderByDescending", "System.Linq.Enumerable::ThenBy", "System.Linq.Enumerable::ThenByDescending", "System.Linq.Enumerable::GroupBy", "System.Linq.Enumerable::GroupJoin", "System.Linq.Enumerable::Join", "System.Linq.Enumerable::Distinct", "System.Linq.Enumerable::DistinctBy", "System.Linq.Enumerable::Union", "System.Linq.Enumerable::UnionBy", "System.Linq.Enumerable::Intersect", "System.Linq.Enumerable::IntersectBy", "System.Linq.Enumerable::Except", "System.Linq.Enumerable::ExceptBy", "System.Linq.Enumerable::Concat", "System.Linq.Enumerable::Zip", "System.Linq.Enumerable::Take", "System.Linq.Enumerable::TakeLast", "System.Linq.Enumerable::TakeWhile", "System.Linq.Enumerable::Skip", "System.Linq.Enumerable::SkipLast", "System.Linq.Enumerable::SkipWhile", "System.Linq.Enumerable::Chunk", "System.Linq.Enumerable::First", "System.Linq.Enumerable::FirstOrDefault", "System.Linq.Enumerable::Last", "System.Linq.Enumerable::LastOrDefault", "System.Linq.Enumerable::Single", "System.Linq.Enumerable::SingleOrDefault", "System.Linq.Enumerable::ElementAt", "System.Linq.Enumerable::ElementAtOrDefault", "System.Linq.Enumerable::Any", "System.Linq.Enumerable::All", "System.Linq.Enumerable::Count", "System.Linq.Enumerable::LongCount", "System.Linq.Enumerable::Sum", "System.Linq.Enumerable::Average", "System.Linq.Enumerable::Aggregate", "System.Linq.Enumerable::SequenceEqual", "System.Linq.Enumerable::Cast", "System.Linq.Enumerable::OfType", "System.Linq.Enumerable::ToArray", "System.Linq.Enumerable::ToList", "System.Linq.Enumerable::ToDictionary", "System.Linq.Enumerable::ToLookup", "System.Linq.Enumerable::ToHashSet", "System.Linq.Enumerable::DefaultIfEmpty", "System.Linq.Enumerable::MinBy", "System.Linq.Enumerable::MaxBy",
+      "System.Diagnostics.Process::GetProcesses", "System.Diagnostics.Process::GetProcessById", "System.Diagnostics.Process::GetCurrentProcess",
+      "System.ServiceProcess.ServiceController::GetServices",
+      "System.Console::ReadLine",
+      "System.Enum::GetNames", "System.Enum::GetValues", "System.Enum::GetName", "System.Enum::IsDefined"
+    ]
+  },
+
+
 
   "commands": {
 
@@ -374,6 +440,7 @@
       ]
     },
 
+
     "PowerShell": {
       "modifying_strictness": "normal",
       "description": "PowerShell cmdlets — classified primarily by approved verb",
@@ -399,6 +466,7 @@
         { "name": "Select-String",      "patterns": ["Select-String *", "sls *"],                  "description": "Search text patterns in files" },
         { "name": "ConvertFrom-Json",   "patterns": ["ConvertFrom-Json", "ConvertFrom-Json *"],    "description": "Convert from Json format" },
         { "name": "ConvertTo-Json",     "patterns": ["ConvertTo-Json", "ConvertTo-Json *"],        "description": "Convert to Json format" },
+        { "name": "ConvertTo-SecureString", "patterns": ["ConvertTo-SecureString", "ConvertTo-SecureString *"], "description": "Convert to SecureString" },
         { "name": "Test-Connection",    "patterns": ["Test-Connection *"],                         "description": "Ping test" },
         { "name": "Test-NetConnection", "patterns": ["Test-NetConnection *"],                      "description": "check port" },
         { "name": "Test-Path",          "patterns": ["Test-Path *"],                               "description": "Check if path exists" },
@@ -409,7 +477,7 @@
         { "name": "Set-Variable",   "patterns": ["Set-Variable *"],                        "description": "Set-Variable" },
         { "name": "Invoke-Command",     "patterns": ["Invoke-Command *", "icm *"],                 "description": "Execute commands remotely (ScriptBlock classified separately)" },
         { "name": "Remove-PSRemoting",  "patterns": ["Remove-PSRemoting *"],                       "description": "Remove PowerShell remoting" },
-        { "name": "pwsh",               "patterns": ["pwsh *", "powershell *"],                    "description": "PowerShell wrapper (inner commands classified separately)" }
+        { "name": "pwsh",               "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"],  "description": "PowerShell wrapper (inner commands classified separately); .exe suffix tolerated so the outer wrapper does not fall to 'unknown command' on decomposed commands" }
       ],
       "strictness_gated": [
         { "name": "Export File",        "patterns": ["Export-Csv *","Export-Clixml *", "Tee-Object *","Out-Printer"],                                "description": "Export" },
@@ -460,6 +528,7 @@
       }
     },
 
+
     "Linux": {
       "modifying_strictness": "normal",
       "description": "Linux / Bash / Zsh commands",
@@ -475,6 +544,7 @@
         { "name": "sort",     "patterns": ["sort *", "sort"],                  "description": "Sort lines of text" },
         { "name": "sed",      "patterns": ["sed (?!-i|--in-place).*"],         "description": "Stream editor (read-only, excludes in-place editing)" },
         { "name": "uniq",     "patterns": ["uniq", "uniq *"],                  "description": "Report or omit repeated lines" },
+        { "name": "jq",       "patterns": ["jq (?!.*(-i|--inplace)).*"],        "description": "JSON query (read-only; -i/--inplace in-place edit excluded)" },
         { "name": "wc",       "patterns": ["wc *"],                            "description": "Word/line/byte count" },
         { "name": "ps",       "patterns": ["ps *"],                            "description": "List processes" },
         { "name": "top",      "patterns": ["top -b *", "top -n *", "top -bn*"],            "description": "System monitor (batch mode)" },
@@ -616,6 +686,7 @@
       }
     },
 
+
     "Git": {
       "modifying_strictness": "normal",
       "description": "Git version control commands",
@@ -623,8 +694,10 @@
       "_comment_gated": "strictness_gated below: git add, pull, commit, switch, init, clone, tag -d, tag create, worktree add/remove/prune/move/lock/unlock, remote modify, rev-parse, stash — allow in normal/loose, ask in strict.",
       "read_only": [
         { "name": "git status",    "patterns": ["git status*", "git status *"],                  "description": "Show working tree status" },
+		{ "name": "git blame",       "patterns": ["git blame*", "git blame *"],                  "description": "inspect commit data" },
         { "name": "git log",       "patterns": ["git log*", "git log *"],                        "description": "Show commit logs" },
         { "name": "git ls-remote", "patterns": ["git ls-remote*", "git ls-remote *"],            "description": "Show remote" },
+        { "name": "git ls-tree", "patterns": ["git ls-tree*", "git ls-tree *"],            "description": "Show tree" },
 		{ "name": "git ls-files", "patterns": ["git ls-files*", "git ls-files *"],            "description": "Show file logs" },
         { "name": "git diff",      "patterns": ["git diff*", "git diff *"],                      "description": "Show changes" },
 		{ "name": "git check-ignore", "patterns": ["git check-ignore*", "git check-ignore *"],                      "description": "Show whether specific files or directories are ignored" },
@@ -633,6 +706,7 @@
         { "name": "git tag",       "patterns": ["^git tag$", "git tag -l*", "git tag --list*", "git tag --sort*", "git tag -n*"],  "description": "List tags (no write)" },
         { "name": "git remote",    "patterns": ["^git remote$", "git remote -v*", "git remote --verbose*"], "description": "List remotes (no write)" },
         { "name": "git fetch",     "patterns": ["git fetch*", "git fetch *"],                    "description": "Download objects and refs" },
+        { "name": "git rev-parse",   "patterns": ["git rev-parse*", "git rev-parse *"],                "risk": "medium", "description": "rev-parse working tree files" },
         { "name": "git worktree list", "patterns": ["git worktree list*", "git worktree list *"], "description": "List worktrees (no write)" }
       ],
       "strictness_gated": [
@@ -642,9 +716,9 @@
         { "name": "git clone",     "patterns": ["git clone*", "git clone *"],                    "risk": "low",    "description": "Clone repository" },
         { "name": "git tag -d",    "patterns": ["git tag -d*", "git tag --delete*"],             "risk": "low",    "description": "Delete tag" },
         { "name": "git add",       "patterns": ["git add*", "git add *"],                        "risk": "low",    "description": "Stage file changes" },
+        
         { "name": "git worktree add", "patterns": ["git worktree add*", "git worktree add *"], "risk": "low",    "description": "Add a linked worktree" },
         { "name": "git commit",    "patterns": ["git commit*", "git commit *"],                  "risk": "low",    "description": "Record changes to repository" },
-        { "name": "git rev-parse",   "patterns": ["git rev-parse*", "git rev-parse *"],                "risk": "medium", "description": "rev-parse working tree files" },
         { "name": "git stash",     "patterns": ["git stash*", "git stash *"],                    "risk": "low",    "description": "Stash changes" },
         { "name": "git tag create",      "patterns": ["git tag -a*", "git tag -s *", "git tag -m *"], "risk": "low", "description": "Create annotated/signed tag" },
         { "name": "git remote modify", "patterns": ["git remote add*", "git remote remove*", "git remote set-url*", "git remote rename*"], "risk": "low", "description": "Modify remote configuration" },
@@ -665,6 +739,7 @@
         { "name": "git branch -D", "patterns": ["git branch -D*", "git branch --delete*", "git branch -d*", "git branch -m*", "git branch --move*"], "risk": "medium", "description": "Delete or rename branch" }
       ]
     },
+
 
     "Terraform": {
       "modifying_strictness": "normal",
@@ -707,6 +782,7 @@
         { "name": "terraform refresh",       "patterns": ["terraform *refresh*"],                  "risk": "medium", "description": "Refresh state against real resources" }
       ]
     },
+
 
     "Docker": {
       "modifying_strictness": "normal",
@@ -764,6 +840,7 @@
       ]
     },
 
+
     "Kubernetes": {
       "modifying_strictness": "normal",
       "description": "Kubernetes kubectl and Helm commands",
@@ -818,6 +895,7 @@
       ]
     },
 
+
     "AWS_CLI": {
       "modifying_strictness": "normal",
       "description": "AWS CLI commands — classified by service and operation verb",
@@ -825,7 +903,7 @@
       "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-"],
       "modifying_prefixes": {
         "high":   ["delete-", "terminate-", "remove-", "detach-", "deactivate-", "disable-", "revoke-", "deregister-", "execute-"],
-        "medium": ["create-", "put-", "update-", "modify-", "attach-", "enable-", "activate-", "register-", "import-", "copy-", "sync", "cp ", "mv ", "start-"]
+        "medium": ["create-", "put-", "update-", "modify-", "attach-", "enable-", "activate-", "register-", "import-", "copy-", "sync", "cp ", "mv ", "start-", "provision-"]
       },
       "read_only": [
         { "name": "aws s3 ls",                     "patterns": ["aws s3 ls*"],                      "description": "List S3 buckets/objects" },

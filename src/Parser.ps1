@@ -16,7 +16,7 @@
 # Regex constants
 # =============================================================================
 
-$script:VerbNounRegex = [regex]::new('^[A-Z]\w+-[A-Z]\w+', 'Compiled')
+$script:VerbNounRegex = [regex]::new('^[A-Z]\w+-[A-Z]\w+', 'Compiled,IgnoreCase')
 
 $script:PowershellMarkerRegex = [regex]::new(
     '(_|PSItem|ForEach-Object|Where-Object)|(\$\(|@\(|\$\{)',
@@ -92,12 +92,23 @@ function Get-CommandDomain {
     # 1. PowerShell markers (strongest signal)
     # -------------------------------------------------
 
-    # Check for Verb-Noun pattern (e.g., Get-ChildItem, Remove-Item)
+    # Check for Verb-Noun pattern (e.g., Get-ChildItem, Remove-Item).
+    # PowerShell cmdlet names are CASE-INSENSITIVE, so 'format-table' /
+    # 'convertfrom-json' typed lowercase are still PowerShell. The regex uses
+    # the ExplicitCapture + IgnoreCase options (case-insensitive) so lowercase
+    # Verb-Noun cmdlets are not mis-routed to the linux domain (2026-08-03 user
+    # report: 'format-table -autosize' / 'convertfrom-json' fell to linux and
+    # resolved as generic 'unknown command').
     if ($script:VerbNounRegex.IsMatch($trimmed)) {
         return 'powershell'
     }
 
     # Check for $_, $PSItem, | ForEach-Object, | Where-Object, @(), ${}
+    # NOTE: a stray $_ in a KNOWN BINARY command's arguments must NOT override
+    # the leading binary (2026-08-03 user report: 'aws ... --arn $_' was
+    # hijacked into the PowerShell domain, hiding the aws 'describe-' read-only
+    # prefix). Known binaries (aws/git/docker/kubectl/terraform/helm) are
+    # routed by their HEAD token first; $_ inside their args is just data.
     # NOTE: $( is deliberately excluded — it is valid in both Bash (command
     # substitution) and PowerShell (subexpression). Treating it as a
     # PowerShell-only marker causes false positives for awk '{print $(NF-3)}'
@@ -105,11 +116,16 @@ function Get-CommandDomain {
     # NOTE: ${ is also excluded — bash uses ${var} for parameter expansion
     # which is NOT a PowerShell-only pattern. False positive example:
     # echo "Waiting... (${elapsed}s/${timeout}s)".
-    if ($trimmed -match '\$_' -or
-        $trimmed -match '\$PSItem\b' -or
-        $trimmed -match '\|\s*ForEach-Object\b' -or
-        $trimmed -match '\|\s*Where-Object\b' -or
-        $trimmed -match '@\(') {
+    $startsKnownBinary = $false
+    foreach ($prefix in $script:KnownBinaryPrefixes) {
+        if ($trimmed -match $prefix.Pattern) { $startsKnownBinary = $true; break }
+    }
+    if (-not $startsKnownBinary -and
+        ($trimmed -match '\$_' -or
+         $trimmed -match '\$PSItem\b' -or
+         $trimmed -match '\|\s*ForEach-Object\b' -or
+         $trimmed -match '\|\s*Where-Object\b' -or
+         $trimmed -match '@\(')) {
         return 'powershell'
     }
 
@@ -252,12 +268,13 @@ function Split-Commands {
 
                         # --------------------------------------------
                         # Step 4 (inside newline split): Split on pipeline
-                        # operator | for shell domains.  Skip this for
-                        # case-arm lines because | is a pattern separator
-                        # there, not a pipeline.
+                        # operator | for ALL domains (aws/git/docker/kubectl/
+                        # terraform included - a pipe is a pipe regardless of
+                        # the leading command; the splitter is quote+paren
+                        # aware so pipes inside "( ... )" stay put). Skip
+                        # case-arm lines: | is a pattern separator there.
                         # --------------------------------------------
-                        if ($segmentDomain -in @('powershell', 'linux', 'dos_cmd') -and
-                            $effectiveLine -match '\|' -and
+                        if ($effectiveLine -match '\|' -and
                             -not $inCaseBlock) {
                             $pipeParts = Split-NotInQuotes -Text $effectiveLine -Delimiter '|'
                             $isPipeChain = ($pipeParts.Count -gt 1)
@@ -290,9 +307,12 @@ function Split-Commands {
                     $segmentDomain = Get-CommandDomain -Command $trimmed
 
                     # --------------------------------------------
-                    # Step 4: Split on pipeline operator | for shell domains
+                    # Step 4: Split on pipeline operator | for ALL domains
+                    # (2026-08-02 hole: an aws_cli pipeline was classified as
+                    # ONE segment; the splitter is quote+paren aware so pipes
+                    # inside "( ... )" stay put).
                     # --------------------------------------------
-                    if ($segmentDomain -in @('powershell', 'linux', 'dos_cmd') -and $trimmed -match '\|') {
+                    if ($trimmed -match '\|') {
                         $pipeParts = Split-NotInQuotes -Text $trimmed -Delimiter '|'
                         $isPipeChain = ($pipeParts.Count -gt 1)
 
@@ -322,7 +342,90 @@ function Split-Commands {
         }
     }
 
+    # ---------------------------------------------------------------------
+    # Step 5: paren-group extraction (non-PowerShell segments only).
+    # PowerShell-style subexpressions like  --request-id (aws ... ).Property
+    # hide whole commands inside flag arguments; regex domains never saw
+    # inside the parens (2026-08-02 user-reported hole: a modifying
+    # provision-permission-set inside an aws describe- call auto-allowed).
+    # A group is extracted only when its content is command-shaped (maps to
+    # a known domain, or contains a top-level operator) - data groups like
+    # (status.phase=Running) stay put. PowerShell segments are covered by
+    # the AST walk and are skipped here.
+    # ---------------------------------------------------------------------
+    $extra = @()
+    foreach ($seg in $segments) {
+        if ($seg.Domain -eq 'powershell') { continue }
+        foreach ($g in @(Get-ParenGroupContents -Text $seg.CommandText)) {
+            if (Test-ParenContentIsCommand -Inner $g) {
+                $gt = $g.Trim()
+                $extra += [PSCustomObject]@{
+                    CommandText   = $gt
+                    Domain        = (Get-CommandDomain -Command $gt)
+                    IsPipeline    = $false
+                    ParentCommand = $seg.CommandText
+                }
+                # One nested level: parens inside the extracted content.
+                foreach ($g2 in @(Get-ParenGroupContents -Text $gt)) {
+                    if (Test-ParenContentIsCommand -Inner $g2) {
+                        $g2t = $g2.Trim()
+                        $extra += [PSCustomObject]@{
+                            CommandText   = $g2t
+                            Domain        = (Get-CommandDomain -Command $g2t)
+                            IsPipeline    = $false
+                            ParentCommand = $gt
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if ($extra.Count -gt 0) { $segments += $extra }
+
     return $segments
+}
+
+# Get-ParenGroupContents: quote-aware scan returning the contents of every
+# balanced TOP-LEVEL "( ... )" group in the text (without the parens).
+# Unbalanced opens are discarded; nesting is handled by the caller recursing
+# into extracted contents.
+function Get-ParenGroupContents {
+    param([string]$Text)
+    $groups = @()
+    $inS = $false; $inD = $false; $pd = 0; $start = -1
+    for ($i = 0; $i -lt $Text.Length; $i++) {
+        $ch = $Text[$i]
+        if ($inS) { if ($ch -eq "'") { $inS = $false }; continue }
+        if ($inD) { if ($ch -eq '"') { $inD = $false }; continue }
+        if ($ch -eq "'") { $inS = $true; continue }
+        if ($ch -eq '"') { $inD = $true; continue }
+        if ($ch -eq '(') { if ($pd -eq 0) { $start = $i + 1 }; $pd++; continue }
+        if ($ch -eq ')') {
+            $pd--
+            if ($pd -eq 0 -and $start -ge 0) {
+                $groups += $Text.Substring($start, $i - $start)
+                $start = -1
+            }
+            if ($pd -lt 0) { $pd = 0 }
+        }
+    }
+    return ,$groups
+}
+
+# Test-ParenContentIsCommand: is a paren group's content command-shaped?
+# Yes when it maps to a known (non-linux-fallback) domain, or when it has a
+# top-level pipe/semicolon/&& /|| operator. Data groups (field selectors,
+# filter values, bare words like "hello world") return false.
+function Test-ParenContentIsCommand {
+    param([string]$Inner)
+    $t = $Inner.Trim()
+    if (-not $t) { return $false }
+    if ((Get-CommandDomain -Command $t) -ne 'linux') { return $true }
+    if (@(Split-NotInQuotes -Text $t -Delimiter ';').Count -gt 1) { return $true }
+    if (@(Split-NotInQuotes -Text $t -Delimiter '|').Count -gt 1) { return $true }
+    if (@(Split-OperatorNotInQuotes -Text $t -Operator '&&').Count -gt 1) { return $true }
+    if (@(Split-OperatorNotInQuotes -Text $t -Operator '||').Count -gt 1) { return $true }
+    return $false
 }
 
 # =============================================================================
@@ -469,7 +572,7 @@ function Split-OperatorNotInQuotes {
 # Detected wrappers:
 #   - pwsh/powershell[.exe] [flags...] -Command "<inner>" / -c "<inner>"
 #   - pwsh/powershell[.exe] [flags...] -ScriptBlock { <inner> }
-#   (-File is deliberately NOT unwrapped: script content is opaque -> plain ask)
+#   - pwsh/powershell[.exe] [flags...] -File <path> (extracts script path for trusted_programs check)
 #   - bash -c '<inner>'
 #   - sh -c '<inner>'
 #   - cmd /c "<inner>"
@@ -496,6 +599,16 @@ function Find-NestedCommands {
     $nested = @()
     $trimmed = $Command.Trim()
 
+    # Normalize: strip & call operator and resolve full-path pwsh.exe/powershell.exe
+    # so patterns below can match regardless of invocation form:
+    #   pwsh -File x.ps1           → pwsh -File x.ps1
+    #   & 'C:\...\pwsh.exe' -File  → pwsh -File ...
+    $trimmed = $trimmed -replace '^\s*&\s+', ''
+    if ($trimmed -match '^[''"]([A-Za-z]:\\(?:.*\\)?(?:pwsh|powershell)(?:\.exe)?)[''"]') {
+        $restAfterPath = $trimmed.Substring($Matches[0].Length)
+        $trimmed = "pwsh$restAfterPath"
+    }
+
     # -------------------------------------------------
     # Detect wrapper patterns and extract quoted/supplied inner command
     # -------------------------------------------------
@@ -503,7 +616,18 @@ function Find-NestedCommands {
     # pwsh/powershell[.exe] [flags...] -Command "<inner>" / -c "<inner>"
     # Flags between the binary and -Command (e.g. -ExecutionPolicy Bypass,
     # -NoProfile) are skipped via lazy .*? — Claude Code always emits them.
-    if ($trimmed -match '^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-(?:Command|c)\s+["''](.+)["'']\s*$') {
+    # GUARD: skip this branch when -File precedes -Command. With -File <script>,
+    # powershell passes everything after the script path to the SCRIPT as $args,
+    # so a later -Command belongs to the script, not to powershell (otherwise
+    # 'powershell -File trusted.ps1 -Command "Remove-Item x"' mis-extracts
+    # Remove-Item as a modifying inner). Let it fall through to the -File branch.
+    $hasFileBeforeCommand = $false
+    $m = [regex]::Match($trimmed, '(?i)-File\b')
+    if ($m.Success) {
+        $cMatch = [regex]::Match($trimmed, '(?i)-(?:Command|c)\s+["'']')
+        if ($cMatch.Success -and $m.Index -lt $cMatch.Index) { $hasFileBeforeCommand = $true }
+    }
+    if (-not $hasFileBeforeCommand -and $trimmed -match '^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-(?:Command|c)\s+["''](.+)["'']\s*$') {
 
         $innerCommand = $Matches[1]
         $innerDomain = Get-CommandDomain -Command $innerCommand
@@ -558,6 +682,28 @@ function Find-NestedCommands {
             $nested += $in
         }
 
+        return $nested
+    }
+
+    # pwsh/powershell[.exe] [flags...] -File <path>
+    # Script file content is opaque, but the script PATH can be checked against
+    # trusted_programs. Extract the path as a sub-command so the Resolver's
+    # Step 0f-trust (Test-TrustedProgram) can match it. If the path is NOT in
+    # trusted_programs, the Resolver treats it as unknown/unclassified → ask.
+    # Handles quoted and unquoted paths.
+    if ($trimmed -match '(?i)^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-File\s+(?:"([^"]+)"|''([^'']+)''|(\S+))') {
+        $filePath = if ($Matches[1]) { $Matches[1] } elseif ($Matches[2]) { $Matches[2] } else { $Matches[3] }
+        if ($filePath) {
+            # Route as PowerShell domain — the path is a PowerShell script,
+            # and the Resolver's full-path stripping + Test-TrustedProgram
+            # will handle it.
+            $nested += [PSCustomObject]@{
+                CommandText   = $filePath
+                Domain        = 'powershell'
+                IsPipeline    = $false
+                ParentCommand = $trimmed
+            }
+        }
         return $nested
     }
 
@@ -1565,7 +1711,13 @@ function Get-AstCommands {
             if ($isTopLevel -and ($trimmedStr -match '[;&|]' -or $trimmedStr -match "`n") -and ($trimmedStr -match '\S\s+\S')) {
                 $isCommandLike = $true
             }
-            elseif ($trimmedStr -match '^(aws|docker|kubectl|helm|terraform|git|npm|yarn|python|node|pwsh|powershell|bash|sh|cmd|ssh|scp|make|go|cargo|dotnet|java|perl|ruby|php)\s') {
+            elseif ($isTopLevel -and ($trimmedStr -match '^(aws|docker|kubectl|helm|terraform|git|npm|yarn|python|node|pwsh|powershell|bash|sh|cmd|ssh|scp|make|go|cargo|dotnet|java|perl|ruby|php)\s')) {
+                # Known-prefix branch MUST also require $isTopLevel: otherwise a
+                # string ARGUMENT that happens to start with a known binary
+                # (e.g. powershell -File trusted.ps1 -Command "python somescript.py",
+                # where the python string is a phantom script arg) is wrongly
+                # extracted as a standalone command. Genuine 'pwsh -Command "docker run x"'
+                # unwrapping is handled by Get-AstWrapperInnerCommands, not here.
                 $isCommandLike = $true
             }
         }
@@ -1652,12 +1804,38 @@ function Get-AstWrapperInnerCommands {
     $elementCount = $commandElements.Count
 
     # =========================================================================
-    # pwsh / powershell  —  -Command, -c, -ScriptBlock
+    # pwsh / powershell  —  -Command, -c, -ScriptBlock, -File
     # =========================================================================
     if ($CommandName -match '^(pwsh|powershell)(\.exe)?$') {
         for ($i = 1; $i -lt $elementCount; $i++) {
             $arg = $commandElements[$i]
             $argText = $arg.Extent.Text
+
+            # -File <path>  — TERMINAL. powershell.exe -File consumes the script
+            # and passes everything AFTER it to the script as $args. So any later
+            # -Command/-ConfigPath/-X belongs to the SCRIPT, not to powershell.exe,
+            # and must NOT be unwrapped as powershell's own -Command (otherwise a
+            # script arg like '-Command Remove-Item ...' is mis-extracted as a
+            # modifying inner command). Extract the script path as the inner
+            # command (routed to powershell domain so Test-TrustedProgram can match
+            # it) and stop. Mirrors Find-NestedCommands' -File handling.
+            if ($argText -match '^-(File|f)$' -and ($i + 1) -lt $elementCount) {
+                $nextArg = $commandElements[$i + 1]
+                if ($nextArg -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                    $filePath = $nextArg.Value
+                }
+                else {
+                    $filePath = $nextArg.Extent.Text
+                }
+                if ($filePath) {
+                    $null = $results.Add([PSCustomObject]@{
+                        CommandText = $filePath
+                        Domain      = 'powershell'
+                        IsPipeline  = $false
+                    })
+                }
+                return $results.ToArray()
+            }
 
             # -Command "inner"  or  -c "inner"
             if ($argText -match '^-(Command|c)$' -and ($i + 1) -lt $elementCount) {

@@ -15,7 +15,9 @@
             per Get-EffectiveStrictness)
       2. Explicit "modifying" entries (compiled regex)
       3. Verb-based classification (PowerShell / AWS domains only)
-      4. Fallback: ask with reason "unknown command"
+      4. Fallback: ask with reason "unknown command" (or "static method not on
+         allowlist: [Type]::Method (...)" when the command is an unallowlisted
+         static .NET method call)
 #>
 
 function Get-EffectiveStrictness {
@@ -103,13 +105,14 @@ function Resolve-Command {
     # Helper: build the standard return object
     # -------------------------------------------------
     function New-ResolutionResult {
-        param([string]$Decision, [string]$Reason, [string]$MatchedPattern, [string]$Risk)
+        param([string]$Decision, [string]$Reason, [string]$MatchedPattern, [string]$Risk, [string]$Tier = '')
         return [PSCustomObject]@{
             Command        = $Command
             Decision       = $Decision
             Reason         = $Reason
             MatchedPattern = $MatchedPattern
             Risk           = $Risk
+            Tier           = $Tier
         }
     }
 
@@ -117,7 +120,7 @@ function Resolve-Command {
     # Safe-expression synthetic marker from Parser.ps1
     # -------------------------------------------------
     if ($Command -eq '(safe expression)') {
-        return New-ResolutionResult -Decision "allow" -Reason "safe expression" -MatchedPattern $null -Risk "none"
+        return New-ResolutionResult -Decision "allow" -Reason "safe expression" -MatchedPattern $null -Risk "none" -Tier "safe_expr"
     }
 
     # -------------------------------------------------
@@ -133,7 +136,7 @@ function Resolve-Command {
     }
 
     if (-not $domainKey) {
-        return New-ResolutionResult -Decision "ask" -Reason "unknown domain: $Domain" -MatchedPattern $null -Risk "unknown"
+        return New-ResolutionResult -Decision "ask" -Reason "unknown domain: $Domain" -MatchedPattern $null -Risk "unknown" -Tier "unknown_domain"
     }
 
     $domainConfig = $Config.commands.$domainKey
@@ -225,8 +228,12 @@ function Resolve-Command {
                     # --flag=value, value is embedded, skip this token
                     $i++
                 }
-                elseif (($i + 1) -lt $awsTokens.Count -and -not $awsTokens[$i + 1].StartsWith('-')) {
-                    # --flag value, skip both the flag and its value
+                elseif (($i + 1) -lt $awsTokens.Count -and -not $awsTokens[$i + 1].StartsWith('-') -and -not $awsTokens[$i + 1].StartsWith('(')) {
+                    # --flag value, skip both the flag and its value.
+                    # A value starting with '(' is a PowerShell subexpression
+                    # (e.g. --request-id (aws ... ).Prop), NOT a flag value -
+                    # consuming it mangles the command and hides the inner
+                    # command from classification (2026-08-02 hole).
                     $i += 2
                 }
                 else {
@@ -260,10 +267,19 @@ function Resolve-Command {
     # Strip PowerShell call operator & (e.g., & "C:\tools\tool.exe" args)
     $trimmedForPath = $trimmedForPath -replace '^\s*&\s+', ''
 
-    # Extract first token (handling quoted paths with spaces)
+    # Strip PowerShell dot-source operator . (e.g., . 'C:\scripts\helper.ps1' args)
+    # The dot-source operator runs a script in the current scope; it is not a
+    # command itself — the script path is the real program token.
+    $trimmedForPath = $trimmedForPath -replace '^\s*\.\s+', ''
+
+    # Extract first token (handling quoted paths with spaces, both " and ')
     $firstToken = $null
     $rest = ''
     if ($trimmedForPath -match '^"([^"]+)"\s*(.*)$') {
+        $firstToken = $matches[1]
+        $rest = $matches[2]
+    }
+    elseif ($trimmedForPath -match "^'([^']+)'\s*(.*)`$") {
         $firstToken = $matches[1]
         $rest = $matches[2]
     }
@@ -292,10 +308,10 @@ function Resolve-Command {
             if ($modToken) {
                 return New-ResolutionResult -Decision "ask" `
                     -Reason "trusted program '$trustedProg' invoked with modifying arg '$modToken'" `
-                    -MatchedPattern $trustedProg -Risk "unknown"
+                    -MatchedPattern $trustedProg -Risk "unknown" -Tier "trusted_program"
             }
             return New-ResolutionResult -Decision "allow" `
-                -Reason "trusted program: $trustedProg" -MatchedPattern "trusted-program:$trustedProg" -Risk "none"
+                -Reason "trusted program: $trustedProg" -MatchedPattern "trusted-program:$trustedProg" -Risk "none" -Tier "trusted_program"
         }
     }
 
@@ -402,7 +418,7 @@ function Resolve-Command {
             if (Get-Member -InputObject $entry -Name '_compiledPatterns' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
                 foreach ($regex in $entry._compiledPatterns) {
                     if ($regex.IsMatch($Command)) {
-                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (read-only)" -MatchedPattern $entry.name -Risk "none"
+                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (read-only)" -MatchedPattern $entry.name -Risk "none" -Tier "read_only"
                     }
                 }
             }
@@ -426,9 +442,9 @@ function Resolve-Command {
                             if (Get-Member -InputObject $entry -Name 'risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
                                 $risk = $entry.risk
                             }
-                            return New-ResolutionResult -Decision "ask" -Reason "$($entry.name)" -MatchedPattern $entry.name -Risk $risk
+                            return New-ResolutionResult -Decision "ask" -Reason "$($entry.name)" -MatchedPattern $entry.name -Risk $risk -Tier "strictness_gated"
                         }
-                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (strictness-gated)" -MatchedPattern $entry.name -Risk "none"
+                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (strictness-gated)" -MatchedPattern $entry.name -Risk "none" -Tier "strictness_gated"
                     }
                 }
             }
@@ -448,7 +464,7 @@ function Resolve-Command {
                         if (Get-Member -InputObject $entry -Name 'risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
                             $risk = $entry.risk
                         }
-                        return New-ResolutionResult -Decision "ask" -Reason "$($entry.name)" -MatchedPattern $entry.name -Risk $risk
+                        return New-ResolutionResult -Decision "ask" -Reason "$($entry.name)" -MatchedPattern $entry.name -Risk $risk -Tier "modifying"
                     }
                 }
             }
@@ -509,11 +525,11 @@ function Resolve-Command {
 
         # -- Two-word check (exact cmdlet name match) --
         if ($roExact.ContainsKey($cmdlet)) {
-            return New-ResolutionResult -Decision "allow" -Reason "$cmdlet (read-only verb)" -MatchedPattern $cmdlet -Risk "none"
+            return New-ResolutionResult -Decision "allow" -Reason "$cmdlet (read-only verb)" -MatchedPattern $cmdlet -Risk "none" -Tier "read_only"
         }
         if ($modExact.ContainsKey($cmdlet)) {
             $risk = $modExact[$cmdlet]
-            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (modifying verb)" -MatchedPattern $cmdlet -Risk $risk
+            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (modifying verb)" -MatchedPattern $cmdlet -Risk $risk -Tier "modifying"
         }
 
         # -- Single-word verb prefix check --
@@ -526,11 +542,20 @@ function Resolve-Command {
         }
 
         if ($roPrefix.ContainsKey($verbPrefix)) {
-            return New-ResolutionResult -Decision "allow" -Reason "$cmdlet (read-only verb: $verbPrefix)" -MatchedPattern $verbPrefix -Risk "none"
+            return New-ResolutionResult -Decision "allow" -Reason "$cmdlet (read-only verb: $verbPrefix)" -MatchedPattern $verbPrefix -Risk "none" -Tier "read_only"
         }
         if ($modPrefix.ContainsKey($verbPrefix)) {
             $risk = $modPrefix[$verbPrefix]
-            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (modifying verb: $verbPrefix)" -MatchedPattern $verbPrefix -Risk $risk
+            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (modifying verb: $verbPrefix)" -MatchedPattern $verbPrefix -Risk $risk -Tier "modifying"
+        }
+
+        # Verb-Noun shape but no verb tier claimed it: the cmdlet presented
+        # like a real PowerShell command, but its verb is unregistered. Fail
+        # closed with a precise reason (mirrors the AWS unregistered-verb
+        # fallback) instead of the generic "unknown command". MatchedPattern/
+        # Tier stay empty - identical downstream treatment.
+        if ($cmdlet -match '^[A-Za-z][\w]*-') {
+            return New-ResolutionResult -Decision "ask" -Reason "$cmdlet (unregistered PowerShell verb: $verbPrefix - fail-closed)" -MatchedPattern "" -Risk "medium" -Tier "unregistered_verb"
         }
     }
 
@@ -587,7 +612,7 @@ function Resolve-Command {
             # Check read-only prefixes
             foreach ($readPrefix in $roPrefixLookup.Keys) {
                 if ($verb -like "$readPrefix*") {
-                    return New-ResolutionResult -Decision "allow" -Reason "aws $service $verb (read-only verb: $readPrefix)" -MatchedPattern $readPrefix -Risk "none"
+                    return New-ResolutionResult -Decision "allow" -Reason "aws $service $verb (read-only verb: $readPrefix)" -MatchedPattern $readPrefix -Risk "none" -Tier "read_only"
                 }
             }
 
@@ -595,9 +620,18 @@ function Resolve-Command {
             foreach ($modPrefix in $modPrefixLookup.Keys) {
                 if ($verb -like "$modPrefix*") {
                     $risk = $modPrefixLookup[$modPrefix]
-                    return New-ResolutionResult -Decision "ask" -Reason "aws $service $verb (modifying verb: $modPrefix)" -MatchedPattern $modPrefix -Risk $risk
+                    return New-ResolutionResult -Decision "ask" -Reason "aws $service $verb (modifying verb: $modPrefix)" -MatchedPattern $modPrefix -Risk $risk -Tier "modifying"
                 }
             }
+
+            # Parsed service+verb but no prefix matched: this IS an aws command
+            # whose verb is simply unregistered. Fail closed (ask) but say so
+            # precisely - the generic "unknown command" fallback hides that the
+            # engine recognized the service and verb (2026-08-02 user report:
+            # "aws sso-admin provision-permission-set" said 'unknown command').
+            # MatchedPattern/Tier stay empty so downstream (arbiter gate, LLM
+            # merge) treats it exactly like the generic unknown fallback.
+            return New-ResolutionResult -Decision "ask" -Reason "aws $service $verb (unregistered AWS verb - fail-closed)" -MatchedPattern "" -Risk "medium" -Tier "unregistered_verb"
         }
     }
 
@@ -678,7 +712,7 @@ function Resolve-Command {
         # [Type]::Method(...), $var.Method(), $proc.Kill() — which must fall
         # through to normal classification.
         $bareToken = $Command.Trim()
-        if ($bareToken -notmatch '\s' -and $bareToken -notmatch '[()]' -and $bareToken -notmatch '::') {
+        if ($bareToken -notmatch '\s' -and $bareToken -notmatch '[()]' -and $bareToken -notmatch '::' -and $bareToken -notmatch '\.') {
             return New-ResolutionResult -Decision "allow" -Reason "$firstWord (heredoc delimiter or marker)" -MatchedPattern $firstWord -Risk "none"
         }
 
@@ -747,8 +781,31 @@ function Resolve-Command {
     # -------------------------------------------------
     # Step 3: Fallback — no pattern matched
     # -------------------------------------------------
+    # If the unknown command is a STATIC .NET method call ([Type]::Method(...)),
+    # say so precisely and point at the allowlist rather than the generic
+    # 'unknown command'. These reach the fallback when a static call leads a
+    # ;-chain or stands alone -> detected as linux -> regex-split -> unknown.
+    if ($Command -match '^\s*\[([^\]]+)\]\s*::\s*([A-Za-z_]\w*)\s*\(') {
+        $staticType = $Matches[1].Trim()
+        $staticMethod = $Matches[2]
+        return New-ResolutionResult -Decision "ask" `
+            -Reason "static method not on allowlist: [$staticType]::$staticMethod (see safe_expressions.dotnet_static_method_allowlist)" `
+            -MatchedPattern $null -Risk "unknown" -Tier "unregistered_static"
+    }
+
+    # Known first-token tool (docker/kubectl/terraform/git) whose subcommand
+    # is not in the config lists: name the tool AND the subcommand instead of
+    # the generic wording. Up to 3 leading global flags are skipped when
+    # locating the subcommand (e.g. terraform -chdir=x frobnicate). Decision/
+    # tier unchanged: fail-closed ask, empty tier (mirrors the AWS fallback).
+    if ($domainLower -in @('docker', 'kubernetes', 'terraform', 'git') -and
+        $Command -match '^\s*([a-zA-Z][\w-]*)\s+(?:-\S+\s+){0,3}([^\s-][\w-]*)') {
+        $toolName = $Matches[1]
+        $subName = $Matches[2]
+        return New-ResolutionResult -Decision "ask" -Reason "$toolName subcommand '$subName' not registered (fail-closed)" -MatchedPattern "" -Risk "unknown" -Tier "unregistered"
+    }
     $truncatedCommand = $Command.Substring(0, [Math]::Min(80, $Command.Length))
-    return New-ResolutionResult -Decision "ask" -Reason "unknown command: $truncatedCommand" -MatchedPattern $null -Risk "unknown"
+    return New-ResolutionResult -Decision "ask" -Reason "unknown command: $truncatedCommand" -MatchedPattern $null -Risk "unknown" -Tier "unclassified"
 }
 
 # =============================================================================
@@ -1052,7 +1109,7 @@ function Evaluate-ParameterRules {
             if (Get-Member -InputObject $rule -Name 'risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $risk = $rule.risk }
             return [PSCustomObject]@{
                 Command = $Command; Decision = 'ask'
-                Reason = "$DisplayName (parameter rule: modifying)"; MatchedPattern = $DisplayName; Risk = $risk
+                Reason = "$DisplayName (parameter rule: modifying)"; MatchedPattern = $DisplayName; Risk = $risk; Tier = 'modifying'
             }
         }
     }
@@ -1061,7 +1118,7 @@ function Evaluate-ParameterRules {
         if ($rule.decision -eq 'read-only' -and (Test-ParamRule $rule $ParamMap)) {
             return [PSCustomObject]@{
                 Command = $Command; Decision = 'allow'
-                Reason = "$DisplayName (parameter rule: read-only)"; MatchedPattern = $DisplayName; Risk = 'none'
+                Reason = "$DisplayName (parameter rule: read-only)"; MatchedPattern = $DisplayName; Risk = 'none'; Tier = 'param_rule'
             }
         }
     }
@@ -1080,7 +1137,7 @@ function Evaluate-ParameterRules {
     if ($unrecognized -and (Get-EffectiveStrictness -Config $Config -Domain $Domain) -ne 'loose') {
         return [PSCustomObject]@{
             Command = $Command; Decision = 'ask'
-            Reason = "$DisplayName (unrecognized parameter value)"; MatchedPattern = $DisplayName; Risk = 'unknown'
+            Reason = "$DisplayName (unrecognized parameter value)"; MatchedPattern = $DisplayName; Risk = 'unknown'; Tier = 'param_rule'
         }
     }
     # default (absent param, OR unrecognized in loose mode)
@@ -1089,11 +1146,11 @@ function Evaluate-ParameterRules {
         if (Get-Member -InputObject $Entry -Name 'default_risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $dr = $Entry.default_risk }
         return [PSCustomObject]@{
             Command = $Command; Decision = 'ask'
-            Reason = "$DisplayName (parameter rule: default modifying)"; MatchedPattern = $DisplayName; Risk = $dr
+            Reason = "$DisplayName (parameter rule: default modifying)"; MatchedPattern = $DisplayName; Risk = $dr; Tier = 'modifying'
         }
     }
     return [PSCustomObject]@{
         Command = $Command; Decision = 'allow'
-        Reason = "$DisplayName (parameter rule: default read-only)"; MatchedPattern = $DisplayName; Risk = 'none'
+        Reason = "$DisplayName (parameter rule: default read-only)"; MatchedPattern = $DisplayName; Risk = 'none'; Tier = 'param_rule'
     }
 }

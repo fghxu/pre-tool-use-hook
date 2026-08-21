@@ -196,6 +196,155 @@ All suites live in `test/config/live/` (see its README); run them with
   DOS-marker list, so they fall to the `linux` fallback domain and hit
   "unknown command" (ask) regardless of the DOS_CMD gated entries. Pre-existing.
 
+## 10.5 `llm_second_opinion` — second-opinion LLM cross-check
+
+Optional block. **Absent or `enabled: false` = the feature is a complete no-op**
+(the hook performs one null check per invocation). When enabled, in-scope
+commands are *also* classified by an LLM (OpenAI-compatible endpoint) and the
+two verdicts are compared. The LLM can only ever **escalate** an `allow` to
+`ask` — it never downgrades a local `ask`.
+
+```jsonc
+"llm_second_opinion": {
+  "enabled": false,
+  "level": "complex_remote",
+  "base_uri": "http://127.0.0.1:3030",
+  "model": "glm-5.2",
+  "api_key": "",
+  "timeout_ms": 12000,
+  "temperature": 0.0,
+  "max_tokens": 16,
+ complex_min_subcommands": 2,
+  "attributed_verdicts": true,
+  "json_mode": false
+  // "remote_indicators": [ ... ]  // optional; compiled defaults used when omitted
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `enabled` | Master switch (bool). When true, `base_uri` and `model` are required (loader throws otherwise). |
+| `level` | `all` = check every command · `complex_commands` = check only blocks with ≥ `complex_min_subcommands` decomposed sub-commands (a pipe implies 2+) · `complex_remote` = the `complex_commands` rule AND a `remote_indicators` match. Unknown value → loader throws (fail-closed). |
+| `base_uri` / `model` | OpenAI-compatible gateway; the hook POSTs to `{base_uri}/v1/chat/completions`. |
+| `api_key` | Optional; sent as `Authorization: Bearer …` only when non-empty. Empty for a local gateway. |
+| `timeout_ms` | LLM wait budget (default 12000). When the feature is enabled, the hook's hard cap becomes `timeout_ms + 2000` (3000 ms otherwise). |
+| `temperature` / `max_tokens` | Sampling parameters (defaults 0.0 / 64 — raised from 16 in phase II because attributed JSON answers are longer; a token cap is never a target, a well-behaved model stops after the closing `}`). |
+| `complex_min_subcommands` | Integer ≥ 1 (default 2). What "complex" means for the two complex levels. |
+| `attributed_verdicts` | Bool (default true; non-bool → loader throws). Phase II: the LLM also receives the numbered sub-command list and answers `{"modifying":[indices]}`; see the suppression table below. `false` restores the phase-I binary prompt/veto. |
+| `json_mode` | Bool (default false; non-bool → loader throws). Phase III (2026-08-03): send `response_format: {"type":"json_object"}` on **attributed** calls, constraining the model to emit valid JSON — the hard fix for reasoning-leaning models that ignore the output contract and answer with analysis prose (→ unusable → fail-closed ask). Requires gateway support (the local gateway documents it). Ignored for the V1 binary contract (a bare token is not JSON). Pair with the hardened V2 prompt (negative example + first-character rule). |
+| `remote_indicators` | Optional array of regex (case-insensitive), matched against every sub-command AND the full original command text. Defaults: `\baws\b`, `\bkubectl\b`, `\bhelm\b`, `\bterraform\b`, `\bssh\b`, `\bscp\b`, `\bsftp\b`, `\bdocker\b`, `\bcurl\b`, `\bwget\b`, `\bInvoke-RestMethod\b`, `\birm\b`, `\bInvoke-WebRequest\b`, `\biwr\b`, `\bEnter-PSSession\b`, `\bNew-PSSession\b`, `Invoke-Command.*-ComputerName`. **git is deliberately absent (local).** |
+
+**Outcome matrix** (in-scope results only; all forced asks keep exit code 0):
+
+| Local | LLM | Final | Reason prefix |
+|-------|-----|-------|---------------|
+| allow | modifying | **ask** | `*** LLM-VETO ***` |
+| allow | read-only | allow | (unchanged) |
+| ask | modifying | ask | (unchanged — agree) |
+| ask | read-only | ask | (unchanged — the LLM never downgrades) |
+| any | unreachable / timeout / HTTP error | **ask** | `*** LLM-DOWN ***` (tells you the feature is on but the LLM is down, and how to disable it) |
+| any | unparseable response | **ask** | `*** LLM-UNUSABLE ***` |
+
+**Attributed verdicts (phase II, `attributed_verdicts: true`).** The LLM
+receives the raw block *plus* the engine's own numbered sub-command list and
+answers `{"modifying":[indices]}`. Each flagged index is then reconciled
+against the tier the local engine recorded for that sub-command:
+
+| Flagged sub-command's local tier | Result |
+|----------------------------------|--------|
+| `strictness_gated` (risk:low, allows in normal mode) | **suppressed as policy** — no veto, *unless* the stage-2 path-guard refuses (below); if every flag suppresses, the final decision stays the local one (`effect=veto-suppressed-policy`) |
+| `read_only` | **veto** → ask, reason names the offender with its index |
+| unknown / untiered | **veto** (never suppressible) |
+| index `0` ("something modifying not in the list") | **veto** (never suppressible) |
+
+**Stage-2 path-guard (phase III).** Before a gated flag is suppressed, the
+guard (`Test-GatedInvocationSafe`) checks *where* the gated command writes —
+closing the documented gap where `Set-Content -Path C:\Windows\x.txt` (gated,
+args never path-checked locally) had its LLM flag suppressed. The guard scans
+every token of the flagged command: any absolute path (drive / UNC / POSIX)
+goes through the same `Resolve-PathPolicy` ladder redirects use, and an `ask`
+there **denies suppression** (veto). Three refinements keep the noise out:
+`printf`/`setx` are skip-listed (their arguments are data, not targets);
+relative paths are not scanned (CWD is writable in every mode); and a known
+writer cmdlet whose target is an *unresolvable variable* fails closed —
+unless a literal path token is present (`Set-Content C:\temp\a.txt $content`
+suppresses; `Set-Content $reportPath x` vetoes; `%SystemRoot%\x` always
+vetoes). Guard denials are reconciled in the `.log`
+(`path-guard denied: [N]` on the LLM-RECONCILE line) and in the JSONL `llm`
+object (`path_guard_denied`). Known residual: source and destination are not
+distinguished — `Copy-Item` *from* a system dir vetoes even though it only
+reads (rare; the reason names the path).
+
+A bare `true`/`false` answer is the *unattributed fallback* (P5): it vetoes
+exactly like phase I, even on a gated block. Out-of-range, non-integer, or
+negative indices make the response **unusable** (fail-closed ask). Veto
+reasons list both the offenders and the suppressed
+(`*** LLM-VETO *** ... [sub-command N] ... | suppressed as policy: ...`).
+Every in-scope check writes a four-line reconciliation block to the `.log`
+(`LLM-SENT` numbered list → `LLM-RECV` raw response → `LLM-LOCAL` decision +
+tiers → `LLM-RECONCILE` flagged/suppressed/veto → FINAL), and the JSONL `llm`
+object gains `indices`, `flagged`, `suppressed`, `tiers`, `local_decision`,
+`path_guard_denied`.
+
+**Never checked** (even at level `all`… `all` means "all full-pipeline command
+results"): ignore-listed tools, unknown tools, `trusted_pattern` /
+`untrusted_pattern` gate hits, file-tool path decisions (Write/Edit — paths, not
+commands), unextractable commands.
+
+Every check is recorded in the JSONL record's `llm` object (`in_scope`,
+`verdict`, `effect`, `latency_ms`, `model`, `raw_excerpt`, …) — use it for
+disagreement statistics before trusting the feature.
+
+**Testing the feature:** with `attributed_verdicts: true` (the default),
+`normal` strictness is fully usable — gated-tier flags are suppressed as
+policy instead of vetoing, so the two classifiers no longer fight over
+risk:low commands. If you set `attributed_verdicts: false` (phase-I binary
+mode), expect many vetoes on gated commands in normal mode; temporarily set
+`global_modifying_strictness: "strict"` so the gated tier asks locally and the
+classifiers mostly agree.
+
+**Automated tests never call the LLM.** The `PRETOOLHOOK_LLMREVIEW_MOCK` env var
+(`modifying` | `read-only` | `garbage` | `down` | `idx:2` | `idx:1,2` | `idx:0`
+| `idx:`) short-circuits before any HTTP — the `idx:` forms inject attributed
+JSON through the REAL parser (mirrors `PRETOOLHOOK_CONFIG_PATH`). See
+`test/config/llm-review/` for the isolated fixture — a 10-case default suite
+(`Run-Tests.ps1`, 24 checks incl. pre-flights) and a 50-case opt-in matrix
+(`-XmlPath test/config/llm-review/test-cases.p2.large.xml`, 64 checks), plus
+the mock-HTTP suite (`http/Run-LlmCallTests.ps1`) and the opt-in LIVE suite
+(`http/Run-LlmLiveTests.ps1`, real gateway, costs ~2k tokens — user-run only;
+its two `Live-Attr-*` cases decide whether a model complies with the
+attributed JSON contract). Never run these against the ~1000-case main suites.
+
+**Recipe — enable it:** set `enabled: true`, point `base_uri`/`model` at your
+gateway, run one in-scope command (e.g. `aws s3 ls && aws s3 cp a b`), then
+check the newest `*.records.jsonl` in your log directory for the `llm` object.
+
+## 10.6 `ask_notification` — toast + sound on ask decisions
+
+**What it does:** pops a Windows toast notification and plays a sound whenever the hook decides `ask` (approval needed). Useful when the IDE is in the background or on another monitor — you hear/see the alert instead of wondering why the agent went quiet.
+
+```json
+"ask_notification": {
+  "enabled": true,
+  "popup": true,
+  "sound": true,
+  "sound_file": ""
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `enabled` | bool | `true` | Master switch. `false` = no notification at all. |
+| `popup` | bool | `true` | Show toast popup. Falls back to NotifyIcon balloon tip if toast fails (RDP/VDI). |
+| `sound` | bool | `true` | Play a sound. |
+| `sound_file` | string | `""` | Path to a `.wav` file. Empty = `[console]::beep(800, 300)`. Missing file = beep fallback. |
+
+- **Absent block = all defaults on.** Setting `enabled: false` alone is enough to disable.
+- **Fire-and-forget:** the notification launches in a detached PowerShell process; it adds ~0ms to the hook's decision path and can never block, delay, or change the decision.
+- Fires on ALL `ask` paths: local classification, LLM veto, LLM-down, check_blindspot, and hard-timeout.
+- Validated at load time: wrong types (`enabled: "yes"`) throw and fail-closed the hook.
+- Testing: env var `PRETOOLHOOK_ASKNOTIFY_MOCK=<dir>` makes the notifier write `<dir>\ask-notified.txt` instead of a real toast (used by `test/config/ask-notification/`).
+
 ## 11. Editing checklist (any config change)
 
 1. Valid JSON (no trailing commas) and valid regex in every pattern.

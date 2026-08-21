@@ -963,9 +963,29 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
       <description>powershell.exe -NoProfile -Command wrapping cross-domain modifying (docker run)</description>
       <copilot-command><![CDATA[powershell.exe -NoProfile -Command "docker run -d redis"]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="unknown: script file execution is opaque (pinned accepted behavior)" category="PSWrapper-FlagSkipping">
-      <description>powershell.exe -ExecutionPolicy Bypass -File stays ask — script content not inspectable</description>
+    <test-case expected="allow" reason="trusted_programs: -File path matches trusted entry (partial-path suffix)" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -ExecutionPolicy Bypass -File "src/Run-AllTests.ps1" — script in trusted_programs => allow</description>
       <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -File "src/Run-AllTests.ps1"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="-File path NOT in trusted_programs => ask (untrusted script)" category="PSWrapper-FlagSkipping">
+      <description>pwsh -NoProfile -File C:\temp\untrusted.ps1 — script NOT in trusted_programs => ask</description>
+      <copilot-command><![CDATA[pwsh -NoProfile -File C:\temp\untrusted.ps1]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: -File with single-quoted path matching trusted entry" category="PSWrapper-FlagSkipping">
+      <description>pwsh -File 'src/Run-AllTests.ps1' — single-quoted path, trusted => allow</description>
+      <copilot-command><![CDATA[pwsh -File 'src/Run-AllTests.ps1']]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: &amp; full-path pwsh with -File trusted script" category="PSWrapper-FlagSkipping">
+      <description>&amp; "C:\Program Files\PowerShell\7\pwsh.exe" -File "src/Run-AllTests.ps1" — &amp; full-path + trusted script => allow</description>
+      <copilot-command><![CDATA[& "C:\Program Files\PowerShell\7\pwsh.exe" -File "src/Run-AllTests.ps1"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="untrusted: &amp; full-path pwsh with -File untrusted script => ask" category="PSWrapper-FlagSkipping">
+      <description>&amp; 'C:\Program Files\PowerShell\7\pwsh.exe' -File C:\temp\untrusted.ps1 — &amp; single-quoted full-path + untrusted script => ask</description>
+      <copilot-command><![CDATA[& 'C:\Program Files\PowerShell\7\pwsh.exe' -File C:\temp\untrusted.ps1]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="untrusted: -File with trailing arguments => ask" category="PSWrapper-FlagSkipping">
+      <description>pwsh -File C:\temp\untrusted.ps1 -OtherFlag value — trailing args after -File must not block extraction</description>
+      <copilot-command><![CDATA[pwsh -File C:\temp\untrusted.ps1 -OtherFlag value]]></copilot-command>
     </test-case>
     <test-case expected="allow" reason="read-only: -c short form + flag skipped, inner Get-ChildItem" category="PSWrapper-FlagSkipping">
       <description>powershell.exe -NoProfile -c "Get-ChildItem" (short -c form must unwrap like -Command)</description>
@@ -986,6 +1006,34 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
     <test-case expected="allow" reason="read-only: wrapper as pipeline head, both segments read-only" category="PSWrapper-FlagSkipping">
       <description>powershell.exe -NoProfile -Command piped to Select-Object (unwrap first segment, pipe second segment read-only)</description>
       <copilot-command><![CDATA[powershell.exe -NoProfile -Command "Get-Process" | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
+    <!-- -File + -Command coexistence (2026-08-13): when powershell is invoked with
+         -File <script>, everything after the script path (including any -Command)
+         is passed to the SCRIPT as $args — it is NOT powershell.exe's -Command.
+         The wrapper must treat -File as terminal: extract the script path for the
+         trusted_programs check and NOT mis-attribute a later -Command to powershell.
+         Also: the .exe suffix must not make the outer wrapper fall to 'unknown command'.
+         T1 isolates the -File/-Command fix (no .exe); T2/T3 also require .exe tolerance. -->
+    <test-case expected="allow" reason="trusted_programs: -File script trusted; trailing -Command is a script arg, not powershell's -Command" category="PSWrapper-FlagSkipping">
+      <description>powershell -File src/Run-AllTests.ps1 -Command Remove-Item C:\temp\x — Remove-Item is a phantom script arg, trusted script => allow</description>
+      <copilot-command><![CDATA[powershell -File src/Run-AllTests.ps1 -Command Remove-Item C:\temp\x]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: -File script trusted; .exe wrapper read-only; trailing -Command not mis-attributed" category="PSWrapper-FlagSkipping">
+      <description>powershell.exe -File src/Run-AllTests.ps1 -Command Remove-Item C:\temp\x — .exe outer + -File terminal => allow</description>
+      <copilot-command><![CDATA[powershell.exe -File src/Run-AllTests.ps1 -Command Remove-Item C:\temp\x]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: -File script trusted; pwsh.exe + flags + -Command not mis-attributed" category="PSWrapper-FlagSkipping">
+      <description>pwsh.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1 -Command Stop-Service Spooler — .exe + flags + -File terminal => allow</description>
+      <copilot-command><![CDATA[pwsh.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1 -Command Stop-Service Spooler]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: -File script trusted; QUOTED -Command value is a script arg, not powershell's -Command (regex path must honor -File terminal)" category="PSWrapper-FlagSkipping">
+      <description>powershell -File src/Run-AllTests.ps1 -Command "Remove-Item C:\temp\x" — quoted -Command after -File is a script arg => allow</description>
+      <copilot-command><![CDATA[powershell -File src/Run-AllTests.ps1 -Command "Remove-Item C:\temp\x"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="trusted_programs: -File script trusted; a known-prefix string arg (-Command 'python ...') after -File is a script arg, not a standalone command" category="PSWrapper-FlagSkipping">
+      <description>powershell -File src/Run-AllTests.ps1 -Command "python somescript.py --batch 1k" — python is a phantom script arg => allow</description>
+      <copilot-command><![CDATA[powershell -File src/Run-AllTests.ps1 -Command "python somescript.py --batch 1k"]]></copilot-command>
     </test-case>
 
     <test-case expected="ask" reason="modifying: Remove-LocalUser" category="PowerShell-UserManagement">
@@ -4139,6 +4187,18 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <copilot-command><![CDATA[& src\Classifier.ps1 somerandomtoken c:\temp]]></copilot-command>
     </test-case>
 
+    <test-case expected="allow" reason="trusted_programs: dot-source (. path) match (partial-path suffix)" category="TrustedPrograms">
+      <description>. 'C:\git\cc\pretoolhook\src\Classifier.ps1' - dot-source trusted program, single-quoted path</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[. 'C:\git\cc\pretoolhook\src\Classifier.ps1']]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="trusted_programs: dot-source (. path) match, double-quoted path" category="TrustedPrograms">
+      <description>. "C:\git\cc\pretoolhook\src\Classifier.ps1" - dot-source trusted program, double-quoted path</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[. "C:\git\cc\pretoolhook\src\Classifier.ps1"]]></copilot-command>
+    </test-case>
+
   </category-group>
 
   <category-group name="SafeStaticMethods">
@@ -4207,6 +4267,48 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <description>$null = [System.IO.File]::Delete(...) ; Get-ChildItem - must stay ask</description>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[$null = [System.IO.File]::Delete("c:\temp\x.txt"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- System.Uri static string ops (EscapeDataString/EscapeUriString/UnescapeDataString +
+         validators CheckSchemeName/IsWellFormedUriString): pure String->String / ->Bool,
+         no I/O. Covers the reported over-block ([uri]::EscapeDataString in a ;-chain with
+         Invoke-RestMethod -Method Get). Entry form is the FULL name System.Uri::Method;
+         reflection resolves the [uri] accelerator to System.Uri so BOTH spellings match. -->
+
+    <test-case expected="allow" reason="safe static: [uri]::EscapeDataString in ;-chain with read-only cmdlet (arbiter path)" category="SafeStaticMethods">
+      <description>$enc = [uri]::EscapeDataString("solr-oa/oa-search") ; Get-ChildItem - reported over-block case</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$enc = [uri]::EscapeDataString("solr-oa/oa-search"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: [uri]::EscapeDataString pure expression (certifier path)" category="SafeStaticMethods">
+      <description>$z = @(); $null = [uri]::EscapeDataString(...) - zero cmdlets, safe-expression certifier</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null = [uri]::EscapeDataString("a b/c")]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: [System.Uri]::EscapeDataString full-name spelling (reflection resolves accelerator too)" category="SafeStaticMethods">
+      <description>$null = [System.Uri]::EscapeDataString(...) ; Get-ChildItem - full-name spelling</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.Uri]::EscapeDataString("a b/c"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: sibling Uri encoders EscapeUriString + UnescapeDataString" category="SafeStaticMethods">
+      <description>$a = [uri]::EscapeUriString(...); $b = [uri]::UnescapeDataString($a) - pure String ops</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$a = [uri]::EscapeUriString("https://x/a b"); $b = [uri]::UnescapeDataString($a)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="safe static: Uri validator CheckSchemeName (String->Bool)" category="SafeStaticMethods">
+      <description>$ok = [uri]::CheckSchemeName("https") ; Get-ChildItem - pure validator</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$ok = [uri]::CheckSchemeName("https"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="integration: [uri]::EscapeDataString + Invoke-RestMethod -Method Get + format pipeline (reported case, clean form)" category="SafeStaticMethods">
+      <description>URL-encode + HTTP GET (parameter_commands read-only) + format output - the cleaned reported pipeline</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$enc = [uri]::EscapeDataString("solr-oa/oa-search"); $r = Invoke-RestMethod -Method Get -Uri "https://example.com/api"; $r | Select-Object -First 5 | Format-Table -AutoSize]]></copilot-command>
     </test-case>
 
   </category-group>
@@ -4337,6 +4439,166 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
       <description>Process.Start('cmd.exe') - must stay ask</description>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[$null = [System.Diagnostics.Process]::Start('cmd.exe'); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <!-- =================================================================== -->
+  <!-- Decomp-ParenPipeline: paren-group extraction + pipe split for ALL     -->
+  <!-- domains (2026-08-02, user-reported hole): an aws_cli pipeline was     -->
+  <!-- classified as ONE segment (pipes only split for powershell/linux/     -->
+  <!-- dos_cmd), and the AWS flag-stripper ate '(aws' as a flag value, so    -->
+  <!-- a modifying command hidden in a parenthesized subexpression and a     -->
+  <!-- pipeline tail were silently auto-allowed.                             -->
+  <!-- =================================================================== -->
+  <category-group name="Decomp-ParenPipeline">
+
+    <test-case expected="ask" reason="paren-wrapped aws provision command + pipeline tail must be seen: provision- is not a read-only prefix (unknown => ask) and Set-Object is a modifying verb" category="Decomp-ParenPipeline">
+      <description>the exact user-reported log line - hidden provision-permission-set + Set-Object tail</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws sso-admin describe-permission-set-provisioning-status --instance-arn arn:aws:sso:::instance/ssoins-000000 --provisioning-request-id (aws sso-admin provision-permission-set --instance-arn arn:aws:sso:::instance/ssoins-000000 --permission-set-arn arn:aws:sso:::instance/ssoins-000000 --target-type ALL_PROVISIONED_ACCOUNTS --no-cli-pager --output json | ConvertFrom-Json).PermissionSetProvissioningStatus.RequestId --no-cli-pager 2>&1 | Set-Object -First 3]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="aws pipeline tail is a modifying cmdlet (Remove-Item) - pipe split now applies to aws_cli" category="Decomp-ParenPipeline">
+      <description>aws read piped into a modifying cmdlet</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws s3 ls | Remove-Item c:\temp\x.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="docker pipeline tail is a modifying cmdlet - pipe split now applies to docker domain" category="Decomp-ParenPipeline">
+      <description>docker read piped into a modifying cmdlet</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[docker ps | Remove-Item c:\temp\x.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="terraform pipeline tail is a modifying cmdlet - pipe split now applies to terraform domain" category="Decomp-ParenPipeline">
+      <description>terraform read piped into a modifying cmdlet</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[terraform plan | Remove-Item c:\temp\x.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: aws read piped into a read cmdlet stays allow (no over-ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws s3 ls | Select-Object -First 2]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: kubectl read piped into a read cmdlet stays allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[kubectl get pods | Select-String nginx]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: git read piped into a read cmdlet stays allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git log --oneline -5 | Select-Object -First 3]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: unquoted kubectl field-selector paren group is NOT a command - not extracted, no over-ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[kubectl get pods --field-selector (status.phase=Running)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: quoted JMESPath query with brackets/parens is not extracted</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws ec2 describe-instances --query 'Reservations[*].Instances[].[InstanceId,State]']]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: bare non-command paren text is not extracted</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[echo (hello world)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">
+      <description>guard: jq is read-only in pipelines (config gap-fill after the pipe split exposed it)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[kubectl get pods -o json | jq '.items[*].metadata.name']]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="jq -i edits the file in place - excluded from the read-only entry (unknown => ask)" category="Decomp-ParenPipeline">
+      <description>jq in-place edit asks</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[jq -i '.a = 1' c:\temp\cfg.json]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="provision- is a registered modifying AWS verb (medium) - precise reason instead of generic unknown" category="Decomp-ParenPipeline">
+      <description>aws provision-permission-set asks as a known modifying verb</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws sso-admin provision-permission-set --instance-arn arn:aws:sso:::instance/ssoins-000000 --permission-set-arn arn:aws:sso:::instance/ssoins-000000 --target-type ALL_PROVISIONED_ACCOUNTS]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="unregistered AWS verb fails closed with a precise reason (not generic unknown command)" category="Decomp-ParenPipeline">
+      <description>aws unregistered verb asks (fail-closed wording)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws sso-admin frobnicate-permission-set --instance-arn arn:aws:sso:::instance/ssoins-000000]]></copilot-command>
+    </test-case>
+
+    <!-- RED case for the 2026-08-03 user report: the exact pipeline block    -->
+    <!-- from the live log. Should be allow (assignment + aws describe-* +    -->
+    <!-- read-only cmdlets), but every sub-command after [1] resolves unknown  -->
+    <!-- because: (a) the '$_' in the aws args hijacks it into the PowerShell  -->
+    <!-- domain (Get-CommandDomain checks $_ markers BEFORE the ^aws prefix), -->
+    <!-- so 'describe-' is never matched; (b) lowercase 'convertfrom-json' /   -->
+    <!-- 'format-table' fail the case-sensitive VerbNounRegex and fall to the  -->
+    <!-- linux domain -> generic 'unknown command'.                            -->
+    <test-case expected="allow" reason="read-only: $var = ...; aws describe-* is read-only; ConvertFrom-Json / Format-Table are read-only cmdlets (the $_ and lowercase cmdlet names must not re-route the segments into the wrong domain)" category="Decomp-ParenPipeline">
+      <description>user-reported log line: aws describe-permission-set piped through ConvertFrom-Json / Format-Table inside ForEach-Object (read-only, $_ must not shadow the aws prefix; lowercase cmdlets must stay PowerShell)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$sso = "arn:sso:::instance/ssoins-0000"
+$ps | foreach-object {
+$d = aws sso-admin describe-permission-set --instance-arn $sso --permission-set-arn $_ --output json| convertfrom-json
+} | format-table -autosize]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <!-- =================================================================== -->
+  <!-- Unregistered-Wording: recognized tool + unregistered operation must   -->
+  <!-- fail closed (ask) with a PRECISE reason (unregistered verb /          -->
+  <!-- subcommand not registered), not the generic "unknown command".        -->
+  <!-- Decisions were already ask; these pin the coverage of the new         -->
+  <!-- fallbacks (wording verified by probe).                                -->
+  <!-- =================================================================== -->
+  <category-group name="Unregistered-Wording">
+
+    <test-case expected="ask" reason="unregistered PowerShell verb: Frobnicate- (fail-closed)" category="Unregistered-Wording">
+      <description>PowerShell Verb-Noun matching no verb tier</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Frobnicate-Widget -Name x]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="docker subcommand 'frobnicate' not registered (fail-closed)" category="Unregistered-Wording">
+      <description>docker unregistered subcommand</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[docker frobnicate mycontainer]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="git subcommand 'frobnicate' not registered (fail-closed)" category="Unregistered-Wording">
+      <description>git unregistered subcommand</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git frobnicate --all]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="kubectl subcommand 'frobnicate' not registered (fail-closed)" category="Unregistered-Wording">
+      <description>kubectl unregistered subcommand</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[kubectl frobnicate pods]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="terraform subcommand 'frobnicate' not registered (fail-closed)" category="Unregistered-Wording">
+      <description>terraform unregistered subcommand</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[terraform frobnicate -target=x]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="leading global flags are skipped when naming the subcommand (terraform -chdir)" category="Unregistered-Wording">
+      <description>terraform unregistered subcommand behind a global flag</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[terraform -chdir=prod frobnicate]]></copilot-command>
     </test-case>
 
   </category-group>

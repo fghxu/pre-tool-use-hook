@@ -1,0 +1,74 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for llm_second_opinion (second-opinion LLM cross-check). Minimal domains; LLM verdicts come from PRETOOLHOOK_LLMREVIEW_MOCK, never the network.",
+  "_comment_fixture": "Isolated fixture for llm_second_opinion. Run via test/config/llm-review/Run-Tests.ps1. Scope is decided from SubResults (engine decomposition); verdicts are injected by the mock env var.",
+
+  "global_modifying_strictness": "normal",
+
+  "_comment_log_file_path": "Fullpipe cases spawn the real Hook.ps1 which ALWAYS logs; keep test records out of the real ~/.pretoolhook logs.",
+  "log_file_path": "c:\\temp\\pretoolhook-llm-review-testlogs\\",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash", "run_in_terminal" ],
+
+  "tool_name_mapping": {
+    "Bash": "tool_input.command",
+    "run_in_terminal": "tool_input.command"
+  },
+
+  "ignore_tool_name": [],
+
+  "llm_second_opinion": {
+    "enabled": true,
+    "level": "bogus",
+    "base_uri": "http://127.0.0.1:3030",
+    "model": "glm-5.2",
+    "api_key": "",
+    "timeout_ms": 12000,
+    "temperature": 0.0,
+    "llm_response_max_tokens": 16,
+    "complex_min_subcommands": 2,
+    "_comment": "remote_indicators omitted on purpose -> the compiled default list is under test. Verdicts are mocked via PRETOOLHOOK_LLMREVIEW_MOCK; no network call ever happens."
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "description": "Minimal PowerShell domain (verb-based classification).",
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Format-*", "Write-Host", "Write-Output"],
+      "modifying_verbs": {
+        "high":   ["Remove-*", "Stop-*"],
+        "medium": ["Set-*", "New-*", "Copy-*", "Move-*", "Rename-*"],
+        "low":    []
+      },
+      "read_only": [],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "description": "Minimal Linux domain. curl is treated as read-only here so a curl pipeline is locally ALLOWED (needed to exercise the veto path on a remote command).",
+      "read_only": [
+        { "name": "ls",   "patterns": ["ls *"],   "description": "List directory contents" },
+        { "name": "cat",  "patterns": ["cat *"],  "description": "Print file contents" },
+        { "name": "curl", "patterns": ["curl *"], "description": "HTTP fetch (fixture: read-only)" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ]
+    },
+
+    "Git": {
+      "modifying_strictness": "normal",
+      "description": "Minimal Git domain. git counts as LOCAL for llm_second_opinion (no remote indicator).",
+      "read_only": [
+        { "name": "git status", "patterns": ["git status"], "description": "Working tree status" }
+      ],
+      "modifying": [
+        { "name": "git push", "patterns": ["git push *"], "risk": "medium", "description": "Push refs" }
+      ]
+    }
+  }
+}

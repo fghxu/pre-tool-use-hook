@@ -9,6 +9,8 @@
 . "$PSScriptRoot\ConfigLoader.ps1"
 . "$PSScriptRoot\Logger.ps1"
 . "$PSScriptRoot\Classifier.ps1"
+. "$PSScriptRoot\LlmReview.ps1"
+. "$PSScriptRoot\Notify-Ask.ps1"
 
 # ----------------------------------------------------
 # Step 1: Read stdin — the IDE writes JSON to the process stdin stream.
@@ -86,14 +88,32 @@ $ide = Detect-IDE -InputObject $parsedInput
 $classifyResult = Invoke-Classify -RawInput $parsedInput -IDE $ide -Config $config
 
 # ----------------------------------------------------
+# Step 8b: Second-opinion LLM cross-check (no-op unless
+# llm_second_opinion.enabled is true in config). The LLM can
+# only escalate an allow to ask - never downgrade.
+# ----------------------------------------------------
+$llmLog = $null
+if ($config._compiled.llmSecondOpinion -and $config._compiled.llmSecondOpinion.Enabled) {
+    $llmOutcome = Invoke-LlmReview -ClassifyResult $classifyResult -Config $config
+    $classifyResult = $llmOutcome.Result
+    $llmLog = $llmOutcome.Log
+}
+
+# ----------------------------------------------------
 # Step 9: Calculate elapsed time
 # ----------------------------------------------------
 $elapsed = (Get-Date) - $startTime
 
 # ----------------------------------------------------
-# Step 10: Timeout checks — 500ms warning, 3000ms hard override
+# Step 10: Timeout checks — 500ms warning, hard-cap override
 # ----------------------------------------------------
-if ($elapsed.TotalMilliseconds -gt 3000) {
+# Hard cap: 3000ms normally; timeout_ms + 2000 headroom when the LLM
+# second opinion is enabled (its wait budget dwarfs local classification).
+$hardCapMs = 3000
+if ($config._compiled.llmSecondOpinion -and $config._compiled.llmSecondOpinion.Enabled) {
+    $hardCapMs = $config._compiled.llmSecondOpinion.TimeoutMs + 2000
+}
+if ($elapsed.TotalMilliseconds -gt $hardCapMs) {
     # Hard timeout: force "ask" regardless of classification result
     $classifyResult = [PSCustomObject]@{
         Decision    = "ask"
@@ -112,13 +132,17 @@ elseif ($elapsed.TotalMilliseconds -gt 500) {
     $classifyResult | Add-Member -MemberType NoteProperty -Name 'PerformanceWarning' -Value "classification took $([math]::Round($elapsed.TotalMilliseconds, 0))ms (>500ms threshold)" -Force
 }
 
+# ----------------------------------------------------# Step 10b: Ask notification (toast + sound on ask decisions)
+# Fire-and-forget; never blocks the hook, never changes the decision.
 # ----------------------------------------------------
-# Step 11: Log (non-fatal) — write record and log entries; warn on failure
+Send-AskNotification -ClassifyResult $classifyResult -Config $config
+
+# ----------------------------------------------------# Step 11: Log (non-fatal) — write record and log entries; warn on failure
 # ----------------------------------------------------
 try {
     $logDir = New-LogDirectory -Config $config
-    Write-RecordEntry -RawInput $parsedInput -ClassifyResult $classifyResult -LogDir $logDir -IDE $ide
-    Write-LogEntry -RawInput $parsedInput -ClassifyResult $classifyResult -Elapsed $elapsed -LogDir $logDir -IDE $ide
+    Write-RecordEntry -RawInput $parsedInput -ClassifyResult $classifyResult -LogDir $logDir -IDE $ide -LlmLog $llmLog
+    Write-LogEntry -RawInput $parsedInput -ClassifyResult $classifyResult -Elapsed $elapsed -LogDir $logDir -IDE $ide -LlmLog $llmLog
 }
 catch {
     [Console]::Error.WriteLine("Hook: Warning: Logging failed: $($_.Exception.Message)")

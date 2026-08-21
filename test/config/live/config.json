@@ -1,4 +1,4 @@
-{
+﻿{
   "version": "1.0",
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
   "_comment_test_copy": "TEST COPY of the repo-root config.json - refresh with Sync-Fixtures.ps1 after editing the root config. Suites in this folder run against THIS file, not the root config.",
@@ -74,7 +74,7 @@
       "SelectNodes", "SelectSingleNode", "GetElementsByTagName", "GetElementById",
       "ReadLine", "ReadToEnd", "Next", "NextDouble", "GetTypeCode"
     ],
-    "_comment_dotnet_static_method_allowlist": "Type-qualified allowlist for STATIC .NET method calls ([Type]::Method(...)) in expression position, used by the safe-expression certifier + AST arbiter (Test-SafeAst InvokeMemberExpressionAst). Entry form 'TypeName::Method' matched case-insensitively against the type AS WRITTEN (e.g. regex::Matches) AND its reflected full name (e.g. System.Text.RegularExpressions.Regex::Matches). 183 entries, ALL verified via .NET reflection (public static, 2026-07-31, temp/verify-static-list.ps1). Only provably read-only statics: pure computations, conversions, parses, searches, and filesystem READS. Deliberately EXCLUDED (still ask): writers/mutators (File::Write*/Append*/Delete/Copy/Move/Create/SetAttributes, Directory::Create/Delete/Move, Array::Sort/Reverse/Clear/Copy, Environment::SetEnvironmentVariable, Path::GetTempFileName [creates a file], String::Intern, Process::Start). Distinct from dotnet_method_allowlist above (name-only, covers instance-style calls).",
+    "_comment_dotnet_static_method_allowlist": "Type-qualified allowlist for STATIC .NET method calls ([Type]::Method(...)) in expression position, used by the safe-expression certifier + AST arbiter (Test-SafeAst InvokeMemberExpressionAst). Entry form 'TypeName::Method' matched case-insensitively against the type AS WRITTEN (e.g. regex::Matches) AND its reflected full name (e.g. System.Text.RegularExpressions.Regex::Matches). 183 entries, ALL verified via .NET reflection (public static, 2026-07-31, temp/verify-static-list.ps1). Only provably read-only statics: pure computations, conversions, parses, searches, URI string ops (System.Uri::EscapeDataString/EscapeUriString/UnescapeDataString + validators, added 2026-08-05), and filesystem READS. Deliberately EXCLUDED (still ask): writers/mutators (File::Write*/Append*/Delete/Copy/Move/Create/SetAttributes, Directory::Create/Delete/Move, Array::Sort/Reverse/Clear/Copy, Environment::SetEnvironmentVariable, Path::GetTempFileName [creates a file], String::Intern, Process::Start). Distinct from dotnet_method_allowlist above (name-only, covers instance-style calls).",
     "dotnet_static_method_allowlist": [
       "regex::Matches", "regex::Match", "regex::IsMatch", "regex::Replace", "regex::Split", "regex::Escape", "regex::Unescape",
       "System.Management.Automation.PSParser::Tokenize", "System.Management.Automation.Language.Parser::ParseInput",
@@ -94,6 +94,7 @@
       "System.Environment::GetEnvironmentVariable", "System.Environment::GetFolderPath", "System.Environment::ExpandEnvironmentVariables", "System.Environment::GetCommandLineArgs",
       "int::Parse", "int::TryParse", "long::Parse", "long::TryParse", "double::Parse", "double::TryParse", "byte::Parse", "byte::TryParse", "bool::Parse", "bool::TryParse",
       "System.Net.IPAddress::Parse", "System.Net.IPAddress::TryParse",
+      "System.Uri::EscapeDataString", "System.Uri::EscapeUriString", "System.Uri::UnescapeDataString", "System.Uri::CheckHostName", "System.Uri::CheckSchemeName", "System.Uri::IsWellFormedUriString", "System.Uri::IsHexDigit", "System.Uri::IsHexEncoding", "System.Uri::HexUnescape", "System.Uri::HexEscape",
       "System.Linq.Enumerable::Where", "System.Linq.Enumerable::Select", "System.Linq.Enumerable::SelectMany", "System.Linq.Enumerable::OrderBy", "System.Linq.Enumerable::OrderByDescending", "System.Linq.Enumerable::ThenBy", "System.Linq.Enumerable::ThenByDescending", "System.Linq.Enumerable::GroupBy", "System.Linq.Enumerable::GroupJoin", "System.Linq.Enumerable::Join", "System.Linq.Enumerable::Distinct", "System.Linq.Enumerable::DistinctBy", "System.Linq.Enumerable::Union", "System.Linq.Enumerable::UnionBy", "System.Linq.Enumerable::Intersect", "System.Linq.Enumerable::IntersectBy", "System.Linq.Enumerable::Except", "System.Linq.Enumerable::ExceptBy", "System.Linq.Enumerable::Concat", "System.Linq.Enumerable::Zip", "System.Linq.Enumerable::Take", "System.Linq.Enumerable::TakeLast", "System.Linq.Enumerable::TakeWhile", "System.Linq.Enumerable::Skip", "System.Linq.Enumerable::SkipLast", "System.Linq.Enumerable::SkipWhile", "System.Linq.Enumerable::Chunk", "System.Linq.Enumerable::First", "System.Linq.Enumerable::FirstOrDefault", "System.Linq.Enumerable::Last", "System.Linq.Enumerable::LastOrDefault", "System.Linq.Enumerable::Single", "System.Linq.Enumerable::SingleOrDefault", "System.Linq.Enumerable::ElementAt", "System.Linq.Enumerable::ElementAtOrDefault", "System.Linq.Enumerable::Any", "System.Linq.Enumerable::All", "System.Linq.Enumerable::Count", "System.Linq.Enumerable::LongCount", "System.Linq.Enumerable::Sum", "System.Linq.Enumerable::Average", "System.Linq.Enumerable::Aggregate", "System.Linq.Enumerable::SequenceEqual", "System.Linq.Enumerable::Cast", "System.Linq.Enumerable::OfType", "System.Linq.Enumerable::ToArray", "System.Linq.Enumerable::ToList", "System.Linq.Enumerable::ToDictionary", "System.Linq.Enumerable::ToLookup", "System.Linq.Enumerable::ToHashSet", "System.Linq.Enumerable::DefaultIfEmpty", "System.Linq.Enumerable::MinBy", "System.Linq.Enumerable::MaxBy",
       "System.Diagnostics.Process::GetProcesses", "System.Diagnostics.Process::GetProcessById", "System.Diagnostics.Process::GetCurrentProcess",
       "System.ServiceProcess.ServiceController::GetServices",
@@ -131,8 +132,24 @@
 	  "TestRunner.ps1",
 	  "src/Classifier.ps1",
 	  "test-strictness-gate/Run-Tests.ps1",
-	  "C:/git/cc/pretoolhook/src/Run-AllTests.ps1"
+	  "test-strictness-gate\\Run-Tests.ps1",
+	  "src/Run-AllTests.ps1",
+	  "src\\Run-AllTests.ps1",
+	  "live\\Sync-Fixtures.ps1"
   ],
+
+  "_comment_llm_second_opinion": "Second-opinion LLM cross-check. OFF by default; when enabled, in-scope commands are ALSO classified by an LLM (OpenAI-compatible endpoint) and a disagreement in the dangerous direction (local=allow, LLM=modifying) forces ask with *** LLM-VETO *** wording. LLM unreachable/timeout/unparseable also forces ask (*** LLM-DOWN *** / *** LLM-UNUSABLE ***). Levels: all | complex_commands | complex_remote (complex_commands needs >= complex_min_subcommands decomposed sub-commands; complex_remote additionally requires a remote_indicators match: aws/kubectl/helm/terraform/ssh/scp/sftp/docker/curl/wget/Invoke-RestMethod/irm/Invoke-WebRequest/iwr/Enter-PSSession/New-PSSession/Invoke-Command+ComputerName; git is LOCAL). remote_indicators omitted -> compiled defaults. When enabled, the hook hard cap becomes timeout_ms + 2000. See docs/config-json-guide.md.",
+  "llm_second_opinion": {
+    "enabled": true,
+    "level": "complex_remote",
+    "base_uri": "http://127.0.0.1:3030",
+    "model": "deepseek-v4-flash",
+    "api_key": "",
+    "timeout_ms": 12000,
+    "temperature": 0.0,
+    "llm_response_max_tokens": 16,
+    "complex_min_subcommands": 2
+  },
 
   "_comment_intercept_tool_name": "Tool names the hook inspects. Each intercepted tool is classified via tool_name_mapping (command tools) or path_tool_mapping (file tools) below; an intercepted tool with no mapping asks by default. Tools in neither list also ask by default.",
   "intercept_tool_name": [
@@ -377,7 +394,7 @@
 
     "PowerShell": {
       "modifying_strictness": "normal",
-      "description": "PowerShell cmdlets — classified primarily by approved verb",
+      "description": "PowerShell cmdlets â€” classified primarily by approved verb",
       "_comment_tiers": "Explicit read_only/modifying pattern entries (if present) decide first; otherwise the cmdlet verb decides: read_only_verbs => allow, modifying_verbs => ask by risk tier (low/medium/high). strictness_gated covers explicit command patterns only, not verb tiers. Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Compare-*", "Group-*", "Format-*", "ForEach-*", "Out-GridView", "Out-Null", "Out-String", "Out-Host", "Out-Default", "Write-Host", "Write-Output", "Write-Information", "Write-Verbose", "Write-Debug", "Write-Warning", "Read-Host", "Show-*", "Trace-*", "Wait-*", "Connect-*", "Disconnect-*", "Receive-*", "Start-Sleep"],
       "modifying_verbs": {
@@ -410,7 +427,7 @@
         { "name": "Set-Variable",   "patterns": ["Set-Variable *"],                        "description": "Set-Variable" },
         { "name": "Invoke-Command",     "patterns": ["Invoke-Command *", "icm *"],                 "description": "Execute commands remotely (ScriptBlock classified separately)" },
         { "name": "Remove-PSRemoting",  "patterns": ["Remove-PSRemoting *"],                       "description": "Remove PowerShell remoting" },
-        { "name": "pwsh",               "patterns": ["pwsh *", "powershell *"],                    "description": "PowerShell wrapper (inner commands classified separately)" }
+        { "name": "pwsh",               "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"],  "description": "PowerShell wrapper (inner commands classified separately); .exe suffix tolerated so the outer wrapper does not fall to 'unknown command' on decomposed commands" }
       ],
       "strictness_gated": [
         { "name": "Export File",        "patterns": ["Export-Csv *","Export-Clixml *", "Tee-Object *","Out-Printer"],                                "description": "Export" },
@@ -476,6 +493,7 @@
         { "name": "sort",     "patterns": ["sort *", "sort"],                  "description": "Sort lines of text" },
         { "name": "sed",      "patterns": ["sed (?!-i|--in-place).*"],         "description": "Stream editor (read-only, excludes in-place editing)" },
         { "name": "uniq",     "patterns": ["uniq", "uniq *"],                  "description": "Report or omit repeated lines" },
+        { "name": "jq",       "patterns": ["jq (?!.*(-i|--inplace)).*"],        "description": "JSON query (read-only; -i/--inplace in-place edit excluded)" },
         { "name": "wc",       "patterns": ["wc *"],                            "description": "Word/line/byte count" },
         { "name": "ps",       "patterns": ["ps *"],                            "description": "List processes" },
         { "name": "top",      "patterns": ["top -b *", "top -n *", "top -bn*"],            "description": "System monitor (batch mode)" },
@@ -621,7 +639,7 @@
       "modifying_strictness": "normal",
       "description": "Git version control commands",
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
-      "_comment_gated": "strictness_gated below: git add, pull, commit, switch, init, clone, tag -d, tag create, worktree add/remove/prune/move/lock/unlock, remote modify, rev-parse, stash — allow in normal/loose, ask in strict.",
+      "_comment_gated": "strictness_gated below: git add, pull, commit, switch, init, clone, tag -d, tag create, worktree add/remove/prune/move/lock/unlock, remote modify, rev-parse, stash â€” allow in normal/loose, ask in strict.",
       "read_only": [
         { "name": "git status",    "patterns": ["git status*", "git status *"],                  "description": "Show working tree status" },
         { "name": "git log",       "patterns": ["git log*", "git log *"],                        "description": "Show commit logs" },
@@ -821,12 +839,12 @@
 
     "AWS_CLI": {
       "modifying_strictness": "normal",
-      "description": "AWS CLI commands — classified by service and operation verb",
+      "description": "AWS CLI commands â€” classified by service and operation verb",
       "_comment_tiers": "The operation verb is matched against read_only_prefixes => allow, modifying_prefixes => ask by risk tier; unmatched operations ask. In normal strictness, --flags are stripped before classification so only service + operation decide (disabled in strict mode). Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-"],
       "modifying_prefixes": {
         "high":   ["delete-", "terminate-", "remove-", "detach-", "deactivate-", "disable-", "revoke-", "deregister-", "execute-"],
-        "medium": ["create-", "put-", "update-", "modify-", "attach-", "enable-", "activate-", "register-", "import-", "copy-", "sync", "cp ", "mv ", "start-"]
+        "medium": ["create-", "put-", "update-", "modify-", "attach-", "enable-", "activate-", "register-", "import-", "copy-", "sync", "cp ", "mv ", "start-", "provision-"]
       },
       "read_only": [
         { "name": "aws s3 ls",                     "patterns": ["aws s3 ls*"],                      "description": "List S3 buckets/objects" },

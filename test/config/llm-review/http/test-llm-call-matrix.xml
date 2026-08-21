@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LLM-CALL MATRIX SUITE - 20 cases pinning the exact request the hook sends
+     and the response/failure handling of Get-LlmReviewVerdict, all against the
+     local mock server (no quota). Cases 1-14 assert properties of the outgoing
+     request (method, path, headers, JSON body fields, payload guard); 15-18
+     assert response-parsing variants; 19-20 assert failure paths.
+     Run:
+       pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1 -XmlPath test/config/llm-review/http/test-llm-call-matrix.xml -->
+<commands>
+  <category-group name="LlmCallMatrix">
+
+    <!-- ===== Outgoing request shape (server answers 'true' in all of these) ===== -->
+
+    <test-case name="M-Method-Post" server="true" expect-verdict="modifying" check="method-post">
+      <description>request method is POST</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Path-Completions" server="true" expect-verdict="modifying" check="path-completions">
+      <description>request path is /v1/chat/completions</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-ContentType-Json" server="true" expect-verdict="modifying" check="ct-json">
+      <description>Content-Type header is application/json</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Body-Model" server="true" expect-verdict="modifying" check="model">
+      <description>body.model equals the configured model name</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-System-Role" server="true" expect-verdict="modifying" check="sys-role">
+      <description>messages[0] is the system prompt (role=system, non-trivial content)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-User-Role" server="true" expect-verdict="modifying" check="user-role">
+      <description>messages[1].role is 'user'</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-CommandBlock-Tags" server="true" expect-verdict="modifying" check="cmdblock-tags">
+      <description>user content wraps the command in &lt;command_block&gt; tags</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Command-Text" server="true" expect-verdict="modifying" check="cmd-text">
+      <description>user content carries the exact command string</description>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Temperature-Zero" server="true" expect-verdict="modifying" check="temp-0">
+      <description>body.temperature is 0 (deterministic)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-MaxTokens-16" server="true" expect-verdict="modifying" check="maxtok-16">
+      <description>body.max_tokens is 16 (one-token answer budget)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Seed-Zero" server="true" expect-verdict="modifying" check="seed-0">
+      <description>body.seed is 0 (fixed seed)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Auth-Present" server="true" api-key="tok123" expect-verdict="modifying" check="auth-present">
+      <description>api_key set => Authorization: Bearer tok123 header arrives</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Auth-Absent" server="true" expect-verdict="modifying" check="auth-absent">
+      <description>api_key empty => NO Authorization header is sent</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Truncate-8000" server="true" expect-verdict="modifying" check="truncated-8000">
+      <description>9000-char command is truncated to the 8000-char payload guard (user content &lt;= 8033 incl. wrapper)</description>
+      <copilot-command>{{X9000}}</copilot-command>
+    </test-case>
+
+    <!-- ===== Response parsing variants ===== -->
+
+    <test-case name="M-Resp-UpperTrue" server="upper-true" expect-verdict="modifying">
+      <description>response 'TRUE' (uppercase) still parses => modifying (case tolerance)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Resp-SpacedFalse" server="spaced-false" expect-verdict="read-only">
+      <description>response '  false\n' (whitespace) still parses => read-only</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Resp-JsonVerdict" server="json-verdict" expect-verdict="read-only">
+      <description>response content is a JSON verdict object => parsed via the JSON layer => read-only</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Resp-RambleRecovered" server="ramble-true" expect-verdict="modifying" expect-recovered="true">
+      <description>response rambles but ends with a bare 'true' line => modifying, flagged recovered</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <!-- ===== Failure paths ===== -->
+
+    <test-case name="M-DeadPort-Down" server="dead" expect-verdict="down">
+      <description>nothing listens on the port => connection refused => down (catch path, fast)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Timeout-Down" server="slow3000" timeout-ms="1000" expect-verdict="down" expect-hit="1">
+      <description>server delays 3s but the client budget is 1s => client-side timeout => down (the request DID arrive)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Attr-SubCommandsPresent" server="true" subcommands="Get-Date;Get-ChildItem c:\temp" expect-verdict="modifying" check="subcmds-tags">
+      <description>attributed mode: user message carries the numbered sub_commands block</description>
+      <copilot-command><![CDATA[Get-Date ; Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-AttrOff-NoSubCommands" server="true" attributed="false" subcommands="Get-Date" expect-verdict="modifying" check="nosubcmds-tags">
+      <description>attributed=false: user message stays phase-I shape (no sub_commands block)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

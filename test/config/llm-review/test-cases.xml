@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LLM-REVIEW SUITE - isolated fixture (test/config/llm-review/config.json).
+     Proves llm_second_opinion: leveled scope (all/complex_commands/complex_remote),
+     veto/agree/disagree-kept-ask/down/unusable merge matrix, disabled no-op,
+     bad-level config rejection, and end-to-end Hook.ps1 wiring (fullpipe).
+     LLM verdicts are injected via PRETOOLHOOK_LLMREVIEW_MOCK - NO network.
+     Run:
+       pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -->
+<commands>
+  <category-group name="LlmScope">
+
+    <test-case expected="ask" category="LlmScope-All-SingleChecked" level="all" mock="modifying" in-scope="true" verdict="modifying" effect="veto" reason-contains="*** LLM-VETO ***" reason="level all checks even a single command; local allow + LLM modifying => veto ask">
+      <description>level=all: single read-only command is LLM-checked; veto applies</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="LlmScope-Complex-SingleSkipped" level="complex_commands" mock="modifying" in-scope="false" verdict="not_called" effect="none" reason="single command below min => not checked; mock never consulted">
+      <description>level=complex_commands: single command NOT checked</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="LlmScope-Complex-PipeChecked" level="complex_commands" mock="modifying" in-scope="true" verdict="modifying" effect="veto" reason-contains="*** LLM-VETO ***" reason="2-stage pipe meets min=2 => checked; veto applies">
+      <description>level=complex_commands: read-only pipe checked; veto applies</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="LlmScope-Min3-PipeSkipped" level="complex_commands" min="3" mock="modifying" in-scope="false" verdict="not_called" effect="none" reason="2 sub-commands &lt; min=3 => not checked">
+      <description>complex_min_subcommands=3: 2-stage pipe NOT checked</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="LlmScope-Remote-LocalPipeSkipped" level="complex_remote" mock="modifying" in-scope="false" verdict="not_called" effect="none" reason="complex but local-only (no remote indicator) => not checked">
+      <description>level=complex_remote: local pipe NOT checked</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="LlmScope-Remote-AwsChecked" level="complex_remote" mock="read-only" in-scope="true" verdict="read-only" effect="disagree-kept-ask" reason-contains="unknown domain" reason="aws chain is complex+remote => checked; local ask (no AWS domain in fixture) + LLM read-only => stays ask">
+      <description>level=complex_remote: aws chain checked; disagreement keeps ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[aws s3 ls && aws s3 cp f s3://b/k]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="LlmScope-Remote-DockerChecked" level="complex_remote" mock="read-only" in-scope="true" verdict="read-only" effect="disagree-kept-ask" reason-contains="unknown domain" reason="docker chain is complex+remote => checked; local ask kept">
+      <description>level=complex_remote: docker chain checked; disagreement keeps ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[docker ps && docker rm c1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="LlmScope-Remote-LocalICSkipped" level="complex_remote" mock="modifying" in-scope="false" verdict="not_called" effect="none" reason="Invoke-Command WITHOUT -ComputerName is local => not checked">
+      <description>level=complex_remote: local Invoke-Command NOT checked</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { Get-Process }; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="LlmScope-Remote-RemoteICChecked" level="complex_remote" mock="modifying" in-scope="true" verdict="modifying" effect="veto" reason-contains="*** LLM-VETO ***" reason="Invoke-Command with -ComputerName matches the remote indicator via the ORIGINAL command text (wrapper is unwrapped in SubResults) => checked; local allow + LLM modifying => veto">
+      <description>level=complex_remote: Invoke-Command -ComputerName checked; veto applies</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName srv01 -ScriptBlock { Get-Process }; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="LlmScope-Remote-GitLocalSkipped" level="complex_remote" mock="read-only" in-scope="false" verdict="not_called" effect="none" reason="git is LOCAL (no indicator) => not checked; local ask (git push) stands">
+      <description>level=complex_remote: git chain NOT checked (git is local)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git status && git push origin main]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="LlmMerge">
+
+    <test-case expected="ask" category="LlmMerge-Veto" level="complex_commands" mock="modifying" in-scope="true" verdict="modifying" effect="veto" reason-contains="*** LLM-VETO ***" reason="local allow + LLM modifying => forced ask with veto wording">
+      <description>merge: veto escalates allow to ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="LlmMerge-AgreeAllow" level="complex_commands" mock="read-only" in-scope="true" verdict="read-only" effect="agree" reason-contains="read-only" reason="local allow + LLM read-only => allow; reason unchanged">
+      <description>merge: agree keeps allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="LlmMerge-DisagreeKeptAsk" level="complex_commands" mock="read-only" in-scope="true" verdict="read-only" effect="disagree-kept-ask" reason-contains="Remove-" reason="local ask (Remove-Item) + LLM read-only => stays ask; local reason preserved (LLM never downgrades)">
+      <description>merge: LLM read-only never downgrades a local ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; Remove-Item c:\temp\x.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="LlmMerge-Down" level="complex_commands" mock="down" in-scope="true" verdict="down" effect="forced-ask" reason-contains="*** LLM-DOWN ***" reason="LLM unreachable => fail-closed ask with down wording">
+      <description>merge: LLM down forces ask with notification wording</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="LlmMerge-Unusable" level="complex_commands" mock="garbage" in-scope="true" verdict="unusable" effect="forced-ask" reason-contains="*** LLM-UNUSABLE ***" reason="unparseable LLM response => fail-closed ask with unusable wording">
+      <description>merge: garbage response forces ask with unusable wording</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="LlmMerge-Disabled" level="complex_commands" enabled="false" mock="modifying" reason="enabled=false => feature no-op; local allow stands; mock never consulted">
+      <description>merge: disabled feature is a complete no-op</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp | Select-Object -First 5]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="LlmFullPipe" mode="fullpipe">
+
+    <test-case expected="ask" category="LlmFullPipe-Veto" mode="fullpipe" mock="modifying" reason-contains="*** LLM-VETO ***" reason="end-to-end through Hook.ps1: remote curl pipe (fixture level=complex_remote) + mock modifying => permissionDecision ask with veto wording, exit 0">
+      <description>fullpipe: veto flows through the real hook process</description>
+      <tool-name>run_in_terminal</tool-name>
+      <copilot-command><![CDATA[curl -s http://example.com | cat]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="LlmFullPipe-OutOfScope" mode="fullpipe" mock="modifying" reason="end-to-end through Hook.ps1: single local command out of scope at fixture level=complex_remote => allow, exit 0 (mock set but never consulted)">
+      <description>fullpipe: out-of-scope command passes through unchanged</description>
+      <tool-name>run_in_terminal</tool-name>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

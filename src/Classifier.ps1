@@ -393,10 +393,10 @@ function Invoke-Classify {
     # Combine all commands to classify.
     # Prefer AST-extracted commands for PowerShell; fall back to regex split.
     if ($astCommands.Count -gt 0) {
-        $allCommands = $astCommands
+        $allCommands = $astCommands + $nestedCommands + $subshellCommands
     }
     elseif ($safeExpressions.Count -gt 0) {
-        $allCommands = $safeExpressions
+        $allCommands = $safeExpressions + $nestedCommands + $subshellCommands
     }
     elseif ($nestedCommands.Count -gt 0) {
         $parentTexts = [System.Collections.Generic.HashSet[string]]::new()
@@ -476,6 +476,27 @@ function Invoke-Classify {
         if ($knownBlockers.Count -eq 0) {
             $arbiterResult = Invoke-PowerShellArbitration -Command $command -Config $Config
             if ($arbiterResult.Conclusive) {
+                # Tier stamp-back (G5 fix): arbitration just proved every
+                # statement safe, but the SubResults emitted BEFORE it ran
+                # still carry the unknown-command fallback's empty tier
+                # (e.g. the Invoke-Command -ScriptBlock { ... } wrapper).
+                # Stamp the arbiter-resolved tiers onto those entries so
+                # downstream consumers (the LLM second-opinion merge) see the
+                # truthful tier. Existing non-empty tiers are never touched;
+                # empty stamps are skipped.
+                if ($arbiterResult.TierMap) {
+                    foreach ($sr in $subResults) {
+                        if ($sr.MatchedPattern -eq 'redirection-target') { continue }
+                        $hasTierProp = $null -ne $sr.PSObject.Properties['Tier']
+                        if ($hasTierProp -and -not [string]::IsNullOrEmpty($sr.Tier)) { continue }
+                        $key = "$($sr.Command)".Trim()
+                        $stamped = $arbiterResult.TierMap[$key]
+                        if ($stamped) {
+                            if ($hasTierProp) { $sr.Tier = $stamped }
+                            else { $sr | Add-Member -NotePropertyName Tier -NotePropertyValue $stamped }
+                        }
+                    }
+                }
                 return (Repair-ResultProperties ([PSCustomObject]@{
                     Decision    = "allow"
                     Reason      = "read-only (PowerShell AST arbitration)"
@@ -569,6 +590,9 @@ function Invoke-Classify {
 #     whose extracted inner commands all allow), and
 #   - every remaining node passes Test-SafeAst with those allowed commands.
 # Any gap => NOT conclusive => caller keeps the original ask unchanged.
+# On conclusive allow, TierMap carries the arbiter-resolved tier per command
+# extent text (worst-tier-wins across a wrapper's inner commands) so the
+# caller can stamp truthful tiers back onto the pre-arbitration sub-results.
 # =============================================================================
 
 function Invoke-PowerShellArbitration {
@@ -577,7 +601,7 @@ function Invoke-PowerShellArbitration {
         [PSCustomObject]$Config
     )
 
-    $result = [PSCustomObject]@{ Conclusive = $false }
+    $result = [PSCustomObject]@{ Conclusive = $false; TierMap = $null }
 
     $astType = 'System.Management.Automation.Language.Parser' -as [type]
     if (-not $astType) { return $result }
@@ -597,14 +621,23 @@ function Invoke-PowerShellArbitration {
     if ($statements.Count -eq 0) { return $result }
 
     $allowed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $tierMap = @{}
 
-    # Pass 1: every embedded command must resolve ALLOW.
+    # Pass 1: every embedded command must resolve ALLOW (Resolve-AsArbiter
+    # returns the resolved TIER on success, 'NO' on failure). Tiers are
+    # collected per command-extent so the caller can stamp them back onto
+    # the sub-results the pipeline emitted BEFORE arbitration ran (wrappers
+    # like Invoke-Command -ScriptBlock { ... } are otherwise left with the
+    # unknown-command fallback's empty tier).
     foreach ($stmt in $statements) {
         $cmdAsts = $stmt.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true)
         foreach ($c in $cmdAsts) {
-            $verdict = Resolve-AsArbiter -CommandAst $c -Config $Config -Depth 0
-            if ($verdict -ne 'ALLOW') { return $result }
+            $tier = Resolve-AsArbiter -CommandAst $c -Config $Config -Depth 0
+            if ($tier -eq 'NO') { return $result }
             [void]$allowed.Add($c.Extent.Text.Trim())
+            $key = $c.Extent.Text.Trim()
+            if ($tierMap.ContainsKey($key)) { $tierMap[$key] = Merge-WorstTier $tierMap[$key] $tier }
+            else { $tierMap[$key] = $tier }
         }
     }
 
@@ -615,10 +648,34 @@ function Invoke-PowerShellArbitration {
     }
 
     $result.Conclusive = $true
+    $result.TierMap = $tierMap
     return $result
 }
 
+# Merge-WorstTier: strictness_gated outranks read_only outranks '' — the
+# tier of a wrapper is the tier of its most user-accepted-risky inner
+# command (gated is the bucket the user already accepts at normal
+# strictness, so a wrapper over gated + read-only inners stamps gated).
+function Merge-WorstTier {
+    param([string]$A, [string]$B)
+    if (-not $A) { $A = '' }
+    if (-not $B) { $B = '' }
+    $rank = @{ 'strictness_gated' = 2; 'read_only' = 1; '' = 0 }
+    $ra = 0; $rb = 0
+    if ($rank.ContainsKey($A)) { $ra = $rank[$A] }
+    if ($rank.ContainsKey($B)) { $rb = $rank[$B] }
+    if ($rb -gt $ra) { return $B }
+    return $A
+}
+
 function Resolve-AsArbiter {
+    <#
+    .SYNOPSIS
+        Arbiter-side resolution of one CommandAst. Returns the resolved TIER
+        string ('strictness_gated' / 'read_only' / '' when the allow carries
+        no tier) on success, 'NO' when the command cannot be shown safe.
+        For wrappers the tier is Merge-WorstTier over the inner commands.
+    #>
     param(
         $CommandAst,
         [PSCustomObject]$Config,
@@ -634,17 +691,20 @@ function Resolve-AsArbiter {
         $sb = $CommandAst.CommandElements[0].ScriptBlock
         if (-not $sb -or -not $sb.EndBlock) { return 'NO' }
         $innerAllowed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $worst = ''
         foreach ($istmt in $sb.EndBlock.Statements) {
             $icmds = $istmt.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true)
             foreach ($ic in $icmds) {
-                if ((Resolve-AsArbiter -CommandAst $ic -Config $Config -Depth ($Depth + 1)) -ne 'ALLOW') { return 'NO' }
+                $itier = Resolve-AsArbiter -CommandAst $ic -Config $Config -Depth ($Depth + 1)
+                if ($itier -eq 'NO') { return 'NO' }
+                $worst = Merge-WorstTier $worst $itier
                 [void]$innerAllowed.Add($ic.Extent.Text.Trim())
             }
         }
         foreach ($istmt in $sb.EndBlock.Statements) {
             if (-not (Test-SafeAst -Ast $istmt -AllowedCommands $innerAllowed -Config $Config)) { return 'NO' }
         }
-        return 'ALLOW'
+        return $worst
     }
 
     $text = $CommandAst.Extent.Text.Trim()
@@ -663,23 +723,27 @@ function Resolve-AsArbiter {
     # misread "ssh -W internal:80 user@bastion" as having a remote command.
     $nested = @(Find-NestedCommands -Command $text -ParentDomain $dom)
     if ($nested.Count -gt 0) {
+        $worst = ''
         foreach ($n in $nested) {
             $nr = Resolve-Command -Command $n.CommandText -Domain $n.Domain -Config $Config
-            if ($nr.Decision -eq 'allow') { continue }
+            if ($nr.Decision -eq 'allow') { $worst = Merge-WorstTier $worst $nr.Tier; continue }
             # Try finer decomposition of the nested text.
             $leaves = @(Split-Commands -Command $n.CommandText -Domain $n.Domain)
             $leafOk = $true
+            $leafWorst = ''
             foreach ($leaf in $leaves) {
                 $lr = Resolve-Command -Command $leaf.CommandText -Domain $leaf.Domain -Config $Config
                 if ($lr.Decision -ne 'allow') { $leafOk = $false; break }
+                $leafWorst = Merge-WorstTier $leafWorst $lr.Tier
             }
             if (-not $leafOk) { return 'NO' }
+            $worst = Merge-WorstTier $worst $leafWorst
         }
-        return 'ALLOW'
+        return $worst
     }
 
     # Not a wrapper: plain resolution must be allow.
     $r = Resolve-Command -Command $text -Domain $dom -Config $Config
-    if ($r.Decision -eq 'allow') { return 'ALLOW' }
+    if ($r.Decision -eq 'allow') { return "$($r.Tier)" }
     return 'NO'
 }
