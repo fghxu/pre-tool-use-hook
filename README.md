@@ -118,9 +118,12 @@ Bash/PowerShell command. (Pinned by `test-fullpipe.xml` *-FileTool* cases.)
 | **Claude Code** | `PreToolUse` | PascalCase event name, presence of `tool_use_id`, ISO 8601 timestamps |
 | **GitHub Copilot** | `preToolUse` | camelCase event name, absence of `tool_use_id`, Unix epoch timestamps |
 | **Codex CLI** | `PreToolUse` | PascalCase event name, presence of `turn_id` or `model` fields |
+| **DeepSeek Harness** | `PreToolUse` | presence of a `dsh` object with `harness: "DeepSeek Harness"` (stamped by the `dsh-plugin-pretoolhook` bridge) |
 
 IDE detection uses multi-signal voting (see `HookAdapter.ps1`). The output format adapts
-automatically per-IDE — Codex uses `permissionDecision: "deny"` instead of `"ask"`.
+automatically per-IDE — Codex uses `permissionDecision: "deny"` instead of `"ask"`; DeepSeek
+Harness keeps `ask` (its approval seam prompts the user). See
+`docs/Updates/DeepSeekHarness-Wiring.md` for the DSH wiring.
 
 ## Supported Command Domains
 
@@ -161,9 +164,12 @@ pretoolhook/
 │   │   ├── test-cases.redirect-strict.xml
 │   │   ├── test-cases.trustedpattern.xml
 │   │   ├── test-fullpipe.xml + FullPipeTestRunner.ps1  # Per-IDE full-pipe integration tests
-│   │   └── test-cases.codex.ps1       # Codex IDE detection + output mapping unit tests
+│   │   ├── test-cases.codex.ps1       # Codex IDE detection + output mapping unit tests
+│   │   └── test-cases.dsh.ps1         # DeepSeek Harness detection + mapping + logging unit tests
 │   └── test-strictness-gate/      # Isolated normal/strict fixture sandbox (+ own Run-Tests.ps1)
 ├── test/config/llm-review/     # Isolated llm_second_opinion fixture (mocked verdicts, no network)
+├── dsh-plugin/                 # DeepSeek Harness bridge (Cordis plugin): runs Hook.ps1 before
+│   │                           # bash/pwsh/write/edit execute; index.js + node test suite
 ├── debug/                    # Debug and verification scripts
 ├── README.md                 # This file
 ├── INSTALL.md                # Installation guide
@@ -499,6 +505,29 @@ Validates Codex-specific `Detect-IDE` / `Format-Output` functions in isolation.
 pwsh -NoProfile -File test/config/live/test-cases.codex.ps1
 ```
 
+### Layer 2c: DeepSeek Harness unit tests (`test-cases.dsh.ps1`)
+
+Validates DSH-specific `Detect-IDE` (the `dsh` field signature), `Format-Output`
+(ask stays ask), and the `.dsh.*` log split.
+
+```powershell
+pwsh -NoProfile -File test/config/live/test-cases.dsh.ps1
+```
+
+### DeepSeek Harness bridge plugin (`dsh-plugin/`)
+
+The Cordis plugin that runs `Hook.ps1` before `bash`/`pwsh`/`write`/`edit`
+execute inside the DeepSeek Harness. Its node test suite covers the payload
+builder, the fail-closed decision parser, and an end-to-end spawn contract
+against the real `Hook.ps1`:
+
+```powershell
+node dsh-plugin/test/run-tests.mjs
+```
+
+Wiring, config keys, and activation (restart the harness) are documented in
+`docs/Updates/DeepSeekHarness-Wiring.md`.
+
 **Adding a new IDE:** create a new `<category-group>` in `test-fullpipe.xml` with the IDE's payload
 format and expected decisions. No runner changes needed.
 
@@ -563,9 +592,10 @@ classify the inner command. AWS CLI also classifies by operation prefix (`descri
 ## Test status
 
 All suites are green with zero known-failure baselines — any new failure is a regression by
-definition (tracked in `PROGRESS.md`). Current: 1069/1069 in one `src/Run-AllTests.ps1` pass
-(6 `test/config/live/` suites + llm-review small/phase-I/http-mock) + 17/17 Codex unit tests;
-938/938 in the test-strictness-gate sandbox; llm-review large (opt-in) 80/80.
+definition (tracked in `PROGRESS.md`). Current: 1182/1182 in one `src/Run-AllTests.ps1` pass
+(6 `test/config/live/` suites + llm-review small/phase-I/http-mock + dsh-hook.unit +
+dsh-plugin.node) + 17/17 Codex unit tests; 938/938 in the test-strictness-gate sandbox;
+llm-review large (opt-in) 80/80.
 
 ## License
 

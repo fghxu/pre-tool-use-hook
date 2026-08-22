@@ -1,5 +1,6 @@
 # Hook.ps1 — Main stdin/stdout entry point for the PreToolUse Hook System
-# Invoked by Claude Code or Copilot as the hook script.
+# Invoked by Claude Code, Copilot (VS Code), Codex CLI, or the DeepSeek
+# Harness bridge (dsh-plugin-pretoolhook) as the hook script.
 # Reads JSON from stdin, classifies the command, and outputs the decision to stdout.
 
 # ----------------------------------------------------
@@ -78,7 +79,7 @@ catch {
 }
 
 # ----------------------------------------------------
-# Step 7: Detect IDE (ClaudeCode or Copilot)
+# Step 7: Detect IDE (ClaudeCode, Copilot, Codex, or DSH)
 # ----------------------------------------------------
 $ide = Detect-IDE -InputObject $parsedInput
 

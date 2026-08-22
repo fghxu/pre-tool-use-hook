@@ -1,6 +1,6 @@
 # Installing the PreToolUse Hook
 
-This guide walks through installing the PreToolUse hook system for Claude Code, GitHub Copilot, and Codex CLI. No prior hook experience is assumed.
+This guide walks through installing the PreToolUse hook system for Claude Code, GitHub Copilot, Codex CLI, and DeepSeek Harness. No prior hook experience is assumed.
 
 ## Prerequisites
 
@@ -519,7 +519,7 @@ Then add the binary prefix to `KnownBinaryPrefixes` in `src/Parser.ps1` and add 
 
 ## Logs
 
-The hook writes logs split by IDE into six files daily:
+The hook writes logs split by IDE into daily files:
 
 | File | Content | IDE |
 |------|---------|-----|
@@ -529,6 +529,8 @@ The hook writes logs split by IDE into six files daily:
 | `YYYY-MM-DD.copilot.log` | Human-readable classification log | Copilot |
 | `YYYY-MM-DD.codex.records.jsonl` | Raw JSON input records | Codex CLI |
 | `YYYY-MM-DD.codex.log` | Human-readable classification log | Codex CLI |
+| `YYYY-MM-DD.dsh.records.jsonl` | Raw JSON input records | DeepSeek Harness |
+| `YYYY-MM-DD.dsh.log` | Human-readable classification log | DeepSeek Harness |
 
 **JSONL Records** (e.g., `2026-05-15.claude.records.jsonl`):
 ```
@@ -644,3 +646,162 @@ Ensure the IDE is invoking `pwsh` (PowerShell 7), not `powershell` (Windows Powe
 Get-Command pwsh | Select-Object Source
 # Should show a PowerShell 7 path, not System32\WindowsPowerShell
 ```
+
+## Installing for DeepSeek Harness (DSH)
+
+The DeepSeek Harness is a Node.js/Cordis application and has **no native
+"hook script" setting** the way Claude Code / Copilot / Codex do — its tool
+scheduler only exposes a JavaScript event (`tools/pre-execute`). So DSH needs a
+tiny in-process bridge (`dsh-plugin-pretoolhook` in `dsh-plugin/`) that spawns
+`Hook.ps1` with the payload and maps `allow / ask / deny` onto DSH's approval
+seam. The hook folder itself is unchanged and travels the same way it does for
+the other three IDEs.
+
+The one machine-specific setting is the **location of `Hook.ps1`** — the
+`PRETOOLHOOK_HOOK_PATH` env var. That is the DSH analog of an IDE's hook-script
+path.
+
+### How DSH gating works
+
+| hook decision | DSH mapping |
+|---|---|
+| `allow` | runs (the scheduler chain continues) |
+| `ask`   | DSH shows an approval prompt for the user |
+| `deny`  | the tool is blocked, and the model sees the reason |
+
+The bridge gates only a default set of DSH tools (see below). `bash`, `pwsh`,
+`write`, and `edit` map onto the hook's `Bash`, `PowerShell`, `Write`, and
+`Edit` classifiers, so the hook's `intercept_tool_name` / `tool_name_mapping`
+already cover them — **no `config.json` change is needed** for the defaults.
+
+### Prerequisites
+
+- **PowerShell 7+** (`pwsh`) on PATH (the hook requires it).
+- **pnpm** on PATH **or** use `npx pnpm` for every `dsh plugin` operation. The
+  `dsh plugin` command is a thin pnpm forwarder and fails with *"pnpm not found
+  on PATH"* otherwise.
+- **git** (only needed when installing a plugin from a git URL).
+- The **hook folder** (the `pretoolhook` repo: `src/` + `config.json`) present
+  on the target machine.
+
+### Install on any machine (recommended, bundle-based)
+
+The plugin is a **bundle** package: it ships a `cordis.patch.yml` and declares
+`dsh.bundle.patch`, so `dsh plugin --profile web add <pkg>` auto-enables it (no
+manual patch row). Steps:
+
+```sh
+# 1. Get the hook folder + the plugin onto the machine (claim a path you'll reuse).
+git clone <your-pretoolhook-repo> C:\git\cc\pretoolhook
+
+# 2. Install the plugin. Pick one source:
+dsh plugin --profile web add github:<you>/<plugin-repo>   # git URL
+#   or
+dsh plugin --profile web add ./dsh-plugin-pretoolhook-1.0.0.tgz   # npm pack tarball
+#   or (dev, machine-local)
+dsh plugin --profile web add file:C:/git/cc/pretoolhook/dsh-plugin
+
+# 3. Point the plugin at your copy of Hook.ps1 — THE machine-specific line.
+$env:PRETOOLHOOK_HOOK_PATH = 'C:\git\cc\pretoolhook\src\Hook.ps1'
+#    (or set config.hookPath in the profile's cordis.patch.yml instead)
+
+# 4. Restart the harness.
+dsh --profile web
+```
+
+### `hookPath` resolution
+
+`dsh-plugin-pretoolhook` resolves `Hook.ps1` in this order:
+
+1. `config.hookPath` (in the profile's `cordis.patch.yml`), then
+2. `PRETOOLHOOK_HOOK_PATH` (environment variable of the DSH host process), then
+3. `<plugin>/../src/Hook.ps1` — **only** when the plugin is a `file:` link
+   straight into this repository checkout. A normal npm/git/package install
+   places the plugin in `node_modules`, so the fallback does **not** resolve.
+
+If it can't find an existing `Hook.ps1`, the plugin logs a warning and lets
+tools through (a broken hook path is a config error, not a security event).
+
+### Optional config keys (in `cordis.patch.yml`)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `true` | master switch |
+| `hookPath` | env / repo-relative | path to `Hook.ps1` |
+| `pwshPath` | `pwsh` | PowerShell 7+ executable |
+| `timeoutMs` | `45000` | hook budget (covers the hook's LLM second-opinion cap) |
+| `toolMap` | built-in | DSH tool name → `{ tool_name, input(args) }` |
+| `skipNested` | `true` | skip transport sub-dispatches |
+
+**Adding another DSH tool to gate** (e.g. `str_replace_editor`): extend `toolMap`
+in `cordis.patch.yml`, mapping it to a hook tool name already in the hook's
+`intercept_tool_name` (or add that name + a `tool_name_mapping` entry). This is
+plugin configuration in `cordis.patch.yml`, **not** the hook's `config.json`.
+
+### Install on another machine / PC
+
+The `file:` dev link you see in the Plugin Market UI only exists on the machine
+that created it. To move the hook to another DSH on another PC, use the bundle
+flow above. Then set `PRETOOLHOOK_HOOK_PATH` to that machine's copy of
+`Hook.ps1` and restart. If you prefer a single distributing artifact with no
+git/registry dependency:
+
+```sh
+cd dsh-plugin
+npm pack                          # -> dsh-plugin-pretoolhook-1.0.0.tgz
+# copy that .tgz AND the hook folder (src/ + config.json) to the target PC, then:
+dsh plugin --profile web add ./dsh-plugin-pretoolhook-1.0.0.tgz
+$env:PRETOOLHOOK_HOOK_PATH = '<target>\src\Hook.ps1'
+dsh --profile web
+```
+
+### git-hosted plugins and build scripts (pnpm ≥ 10)
+
+Installing from a git URL triggers pnpm's supply-chain policy: git-hosted
+packages that run build scripts are blocked until consented. When that happens
+pnpm prints an `allowBuilds` snippet to add to `C:\Users\<you>\.dsh\profiles\web\pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  <pkg>@<the-exact-key-pnpm-printed>: true
+```
+
+Add exactly what pnpm printed and re-run the install.
+
+### Verify it is gating
+
+```powershell
+# After restart, run any pwsh command in a session, then check the log:
+Get-Content C:\temp\logs\prehook\<YYYY-MM-DD>.dsh.log -Tail 3
+# expect an "IDE:DSH" line.
+```
+
+- A read-only command (`get-content`, `Get-Process`) → `allow`, logged.
+- A modifying command (`remove-item`, `Stop-Process`) → `ask`, logged, and an **approval prompt** appears.
+- The Plugin Market's **Plugin Inventory** (or DSH's boot console) shows the
+  `pretoolhook` entry as `active`/`enabled` — `failed` means it didn't load.
+
+### Troubleshooting (DSH)
+
+- **No approval prompt and no `YYYY-MM-DD.dsh.log` entry** → the plugin isn't
+  loaded. Server plugins load at boot: restart `dsh --profile web` (the change
+  does not hot-apply to a running instance).
+- **Entry shows as failed / no gating after restart** → check the DSH boot
+  console for a `pretoolhook` error, and confirm `PRETOOLHOOK_HOOK_PATH` points
+  at an existing `Hook.ps1`. The plugin warns and passes tools through when it
+  can't find the hook.
+- **"pnpm not found on PATH"** from `dsh plugin` → install pnpm or substitute
+  `npx pnpm` for the underlying `pnpm install/add`.
+- **`llm_second_opinion.enabled` is on** in `config.json` → if that local LLM
+  gateway is unreachable, the hook fails closed to `ask` on complex remote
+  commands (by design). The bridge's default `timeoutMs: 45000` covers the
+  hook's LLM budget.
+
+Full design detail — the payload request signature, decision mapping, and
+fail-closed table — is in `docs/Updates/DeepSeekHarness-Wiring.md`.
+
+> **Note on an already-wired profile:** if a profile was first wired before the
+> plugin became a bundle (i.e. it still has a manual `- insert: id: pretoolhook`
+> row in `cordis.patch.yml`) and a later `dsh plugin add/update` reconciles
+> `dsh-plugin-pretoolhook` into the `dsh.profile.bundles` list, remove the
+> manual row to avoid a duplicate loader entry.

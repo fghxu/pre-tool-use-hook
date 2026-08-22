@@ -1,0 +1,25 @@
+{
+  "name": "dsh-plugin-pretoolhook",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness bridge: runs the PreToolUse Hook (src/Hook.ps1) before risky tools execute, mapping allow/ask/deny onto DSH's tools/pre-execute decision seam.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
