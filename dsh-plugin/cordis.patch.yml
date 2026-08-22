@@ -1,0 +1,21 @@
+# dsh-plugin-pretoolhook bundle patch.
+#
+# Auto-inserted when this package is added to a profile (via
+# `dsh plugin --profile web add <pkg>` or by listing it in the profile's
+# dsh.profile.bundles). No `hookPath` is baked in here on purpose: it resolves
+# at runtime in this order:
+#   config.hookPath  ->  PRETOOLHOOK_HOOK_PATH (env)  ->  <plugin>/../src/Hook.ps1
+#
+# For a normal npm/git package install the plugin lands in node_modules, so the
+# repo-relative fallback does NOT resolve — set PRETOOLHOOK_HOOK_PATH to your
+# copy of Hook.ps1. That single env var is the "point the hook at the folder"
+# setting — the DSH analog of an IDE's hook-script path. If it can't be
+# resolved the plugin logs a warning and lets tools through (config error, not
+# a security event).
+- insert:
+    - id: pretoolhook
+      name: 'dsh-plugin-pretoolhook'
+      config:
+        enabled: true
+        pwshPath: 'pwsh'
+        timeoutMs: 45000

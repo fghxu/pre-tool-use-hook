@@ -102,7 +102,7 @@ function Write-RecordEntry {
 
     $jsonLine = $record | ConvertTo-Json -Compress -Depth 10
 
-    $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } elseif ($IDE -eq 'Codex') { 'codex' } else { 'claude' }
+    $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } elseif ($IDE -eq 'Codex') { 'codex' } elseif ($IDE -eq 'DSH') { 'dsh' } else { 'claude' }
     $fileName = $localNow.ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.records.jsonl'
     $filePath = Join-Path $LogDir $fileName
 
@@ -375,7 +375,7 @@ function Write-LogEntry {
     # Daily file is named by LOCAL computer date so a late-evening run does
     # not roll over to "tomorrow's" file (user is in EST; body timestamps
     # are already local, so the filename should match them).
-    $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } elseif ($IDE -eq 'Codex') { 'codex' } else { 'claude' }
+    $ideSuffix = if ($IDE -eq 'Copilot') { 'copilot' } elseif ($IDE -eq 'Codex') { 'codex' } elseif ($IDE -eq 'DSH') { 'dsh' } else { 'claude' }
     $logFileName = (Get-Date).ToString('yyyy-MM-dd') + '.' + $ideSuffix + '.log'
     $logFilePath = Join-Path $LogDir $logFileName
 

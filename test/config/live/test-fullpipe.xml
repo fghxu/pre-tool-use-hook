@@ -106,4 +106,44 @@
     </test-case>
   </category-group>
 
+  <category-group name="DeepSeekHarness-FullPipe" ide="DSH">
+    <!-- Payloads in this group carry the `dsh` field — the exact signature the
+         dsh-plugin-pretoolhook bridge stamps on every intercepted tool call.
+         IDE detection must return "DSH" and the decisions must flow through
+         unchanged (allow stays allow, ask stays ask; DSH's approval seam
+         prompts the user on ask). -->
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="DSH-FullPipe-ReadOnly">
+      <description>DSH: ls via Bash tool (read-only, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"ls -la /tmp"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:00.123Z","tool_use_id":"call_dsh001","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh001","root_call_id":"call_dsh001"}}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="rm" category="DSH-FullPipe-Modifying">
+      <description>DSH: rm -rf via Bash tool (modifying, ask, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/build"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:01.123Z","tool_use_id":"call_dsh002","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh002","root_call_id":"call_dsh002"}}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="DSH-FullPipe-PowerShell">
+      <description>DSH: Get-Process via PowerShell tool (read-only, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"PowerShell","tool_input":{"command":"Get-Process"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:02.123Z","tool_use_id":"call_dsh003","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh003","root_call_id":"call_dsh003"}}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="Stop-Process" category="DSH-FullPipe-PowerShellModifying">
+      <description>DSH: Stop-Process via PowerShell tool (modifying, ask, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"PowerShell","tool_input":{"command":"Stop-Process -Name notepad"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:03.123Z","tool_use_id":"call_dsh004","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh004","root_call_id":"call_dsh004"}}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="system path" category="DSH-FullPipe-FileToolSystem">
+      <description>DSH: Write to system path via Write tool (ask, exit 0 — file-tool asks are JSON decisions, not blocking hook errors)</description>
+      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"C:\\Windows\\evil.dll","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:04.123Z","tool_use_id":"call_dsh005","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh005","root_call_id":"call_dsh005"}}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="editable path" category="DSH-FullPipe-FileToolEditable">
+      <description>DSH: Write to editable path via Write tool (allow, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"C:\\temp\\notes.txt","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:05.123Z","tool_use_id":"call_dsh006","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh006","root_call_id":"call_dsh006"}}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="2" expected-reason="unknown tool" category="DSH-FullPipe-Unknown">
+      <description>DSH: unknown tool (exit 2, genuine error — bridge treats exit 2 as fail-closed deny)</description>
+      <hook-input><![CDATA[{"tool_name":"SomeUnknownTool","tool_input":{"command":"whatever"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:06.123Z","tool_use_id":"call_dsh007","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh007","root_call_id":"call_dsh007"}}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="ignored tool" category="DSH-FullPipe-Skip">
+      <description>DSH: Read (ignored tool, exit 0 — the bridge skips read-only tools, but the hook still classifies them correctly if asked)</description>
+      <hook-input><![CDATA[{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:07.123Z","tool_use_id":"call_dsh008","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh008","root_call_id":"call_dsh008"}}]]></hook-input>
+    </test-case>
+  </category-group>
+
 </commands>

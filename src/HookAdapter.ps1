@@ -35,7 +35,21 @@ function Detect-IDE {
     # Majority vote wins for signals 1-3. If signal 4 fires, it may override.
     # Default tie goes to "ClaudeCode".
 
-    # Signal 0: tool_use_id contains "__vscode-" → VS Code Copilot (decisive)
+    # Signal 0: dsh field — unique to the DeepSeek Harness bridge (decisive)
+    # The dsh-plugin-pretoolhook bridge wraps every intercepted tool call in a
+    # Claude Code PreToolUse-shaped payload and stamps it with a `dsh` object
+    # whose `harness` is exactly "DeepSeek Harness". No other IDE sends this
+    # field, so its presence is decisive and must fire before every other
+    # signal (the payload also carries tool_use_id + ISO timestamp, which would
+    # otherwise vote ClaudeCode).
+    if ($InputObject.PSObject.Properties.Name -contains "dsh" -and $null -ne $InputObject.dsh) {
+        $dshHarness = $InputObject.dsh.harness
+        if ($dshHarness -ceq "DeepSeek Harness") {
+            return "DSH"
+        }
+    }
+
+    # Signal 0b: tool_use_id contains "__vscode-" → VS Code Copilot (decisive)
     # VS Code Copilot shares Claude Code's protocol (PascalCase, ISO timestamp,
     # tool_use_id present) but its tool_use_id always ends with __vscode-<uuid>.
     # This must fire BEFORE the Codex signals to avoid misdetection.
@@ -272,6 +286,12 @@ function Format-Output {
     #   { "hookSpecificOutput": { "hookEventName": "PreToolUse",
     #       "permissionDecision": "<allow|ask>",
     #       "permissionDecisionReason": "<reason>" } }
+    #
+    # The DeepSeek Harness bridge (dsh-plugin-pretoolhook) consumes the SAME
+    # wrapper: it parses permissionDecision (allow|ask|deny) and the reason and
+    # maps them onto DSH's tools/pre-execute decision. DSH supports ask natively
+    # (the approval seam routes it to the user), so ask stays ask — only Codex
+    # maps ask→deny.
     #
     # Return PSCustomObject (NOT JSON string — caller will ConvertTo-Json)
 
