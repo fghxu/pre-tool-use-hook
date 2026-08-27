@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for strictness_gated_tool_name. BAD TYPE: the key holds a string instead of an array; Load-Config must throw.",
+
+  "global_modifying_strictness": "normal",
+
+  "log_file_path": "c:\\temp\\pretoolhook-toolgate-testlogs\\",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "ignore_tool_name": [ "Read" ],
+
+  "strictness_gated_tool_name": "Write",
+
+  "tool_name_mapping": {
+    "Bash": "tool_input.command"
+  },
+
+  "commands": {
+    "Linux": {
+      "modifying_strictness": "normal",
+      "description": "Minimal Linux domain.",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List files" }
+      ],
+      "strictness_gated": [],
+      "modifying": []
+    }
+  }
+}

@@ -34,6 +34,146 @@
 #   - "intecept_tool_name" is normalized to "intercept_tool_name"
 # =============================================================================
 
+# =============================================================================
+# Get-ToolGatePaths (helper)
+#
+# Extracts candidate write-target paths for a gated/ignored tool:
+#   1. path_tool_mapping exact dot-path (incl. [*] array form) via
+#      Get-InputFieldValues.
+#   2. Best-effort patch-TEXT scan for apply_patch / edit_files: absolute-path
+#      tokens (Windows drive / POSIX-rooted) pulled out of the patch string.
+# Returns an array of raw path strings (may be empty).
+# =============================================================================
+
+function Get-ToolGatePaths {
+    param(
+        [string]$ToolName,
+        [PSCustomObject]$RawInput,
+        [PSCustomObject]$Config
+    )
+
+    $paths = [System.Collections.Generic.List[string]]::new()
+
+    # 1) exact mapping
+    if (Get-Member -InputObject $Config -Name 'path_tool_mapping' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $ptm = $Config.path_tool_mapping
+        if ($ptm -and ($ptm.PSObject.Properties.Name -contains $ToolName)) {
+            foreach ($p in @(Get-InputFieldValues -RawInput $RawInput -FieldPath $ptm.$ToolName)) {
+                if ($p) { $paths.Add([string]$p) }
+            }
+        }
+    }
+
+    # 2) best-effort patch-text scan (paths live in patch text, not a JSON field)
+    if ($paths.Count -eq 0 -and $ToolName -in @('apply_patch', 'edit_files')) {
+        $text = $null
+        if ($RawInput -and $RawInput.tool_input) {
+            foreach ($propName in @('patch','content','text','input')) {
+                $v = $RawInput.tool_input.$propName
+                if ($v -is [string] -and $v.Trim()) { $text = $v; break }
+            }
+            if (-not $text) {
+                # any string field is fair game for a patch payload
+                foreach ($prop in $RawInput.tool_input.PSObject.Properties) {
+                    if ($prop.Value -is [string] -and $prop.Value -match '(?i)(\*\*\*|[A-Za-z]:[\\/]|^|\s)/?[A-Za-z0-9_.-]') { $text = [string]$prop.Value; break }
+                }
+            }
+        }
+        if ($text) {
+            foreach ($m in [regex]::Matches($text, '[A-Za-z]:[\\/][^\s"''<>|]+')) { $paths.Add($m.Value) }
+            foreach ($m in [regex]::Matches($text, '(?m)(?<=^|[\s"''])/(?:etc|var|usr|boot|sys|proc|opt|tmp|home)[^\s"''<>|]*')) { $paths.Add($m.Value) }
+        }
+    }
+
+    return $paths.ToArray()
+}
+
+# =============================================================================
+# Test-SystemPathsOnly (helper)
+#
+# The ABSOLUTE rule: any candidate path resolving into system_paths -> ask.
+# Returns a result PSCustomObject (Decision=ask) on the first system path, or
+# $null when no candidate is a system path.
+# =============================================================================
+
+function Test-SystemPathsOnly {
+    param(
+        [string[]]$Paths,
+        [PSCustomObject]$Config,
+        [string]$ToolName
+    )
+    foreach ($p in $Paths) {
+        $resolved = ConvertTo-CanonicalWritePath -TargetPath ([string]$p) -Config $Config
+        if ($resolved -and $Config._systemPathRegex -and ($resolved -match $Config._systemPathRegex)) {
+            return [PSCustomObject]@{
+                Decision = "ask"
+                Reason   = "gated/ignored tool $ToolName targets system path: $resolved (system_paths is absolute - no tool may write here without approval)"
+                ExitCode = 0
+            }
+        }
+    }
+    return $null
+}
+
+# =============================================================================
+# Resolve-ToolGate
+#
+# Decides a tool in strictness_gated_tool_name. Effective mode = strict if
+# EITHER global_modifying_strictness OR tool_name_modifying_strictness is
+# strict, else the tool value (default normal). Global loose never loosens.
+#
+#   strict -> full path policy: system/foreign ask; editable+CWD allow;
+#             unextractable path asks (fail-closed)
+#   normal -> system_paths ask; all other paths allow; unextractable allows
+#   loose  -> system_paths ask; all other paths allow; unextractable allows
+#
+# Returns a PSCustomObject @{ Action = 'skip' | 'ask' | 'allow'; Reason }
+#   'skip'  -> allow, IsSkipped (gate passed, not classified further)
+#   'allow' -> allow, NOT skipped (strict-mode editable/CWD allow)
+#   'ask'   -> ask result
+# =============================================================================
+
+function Resolve-ToolGate {
+    param(
+        [string]$ToolName,
+        [PSCustomObject]$RawInput,
+        [PSCustomObject]$Config
+    )
+
+    $global = if ($Config.global_modifying_strictness) { $Config.global_modifying_strictness } else { 'normal' }
+    $tool   = if ($Config.tool_name_modifying_strictness) { $Config.tool_name_modifying_strictness } else { 'normal' }
+    $mode   = if ($global -eq 'strict' -or $tool -eq 'strict') { 'strict' } else { $tool }
+
+    $paths = @(Get-ToolGatePaths -ToolName $ToolName -RawInput $RawInput -Config $Config)
+
+    # ABSOLUTE: system_paths ask in every mode.
+    $sysHit = Test-SystemPathsOnly -Paths $paths -Config $Config -ToolName $ToolName
+    if ($sysHit) { return [PSCustomObject]@{ Action = 'ask'; Reason = $sysHit.Reason } }
+
+    if ($paths.Count -eq 0) {
+        if ($mode -eq 'strict') {
+            return [PSCustomObject]@{ Action = 'ask'; Reason = "gated tool ${ToolName}: no write-target path extractable (strict mode fails closed)" }
+        }
+        return [PSCustomObject]@{ Action = 'skip'; Reason = "gated tool: $ToolName (no path; $mode mode)" }
+    }
+
+    if ($mode -eq 'strict') {
+        # full path policy: editable/CWD allow; anything else (foreign) ask.
+        foreach ($p in $paths) {
+            $resolved = ConvertTo-CanonicalWritePath -TargetPath ([string]$p) -Config $Config
+            $writable = $null
+            if ($resolved) { $writable = Test-EditableOrCwd -TargetPath $resolved -Config $Config }
+            if (-not $writable) {
+                return [PSCustomObject]@{ Action = 'ask'; Reason = "gated tool $ToolName targets non-editable path (strict mode): $resolved" }
+            }
+        }
+        return [PSCustomObject]@{ Action = 'allow'; Reason = "gated tool $ToolName (strict mode, editable/CWD target)" }
+    }
+
+    # normal/loose: non-system paths pass.
+    return [PSCustomObject]@{ Action = 'skip'; Reason = "gated tool: $ToolName ($mode mode, non-system target)" }
+}
+
 function Test-ToolNameFilter {
     param(
         [string]$ToolName,
@@ -64,6 +204,13 @@ function Test-ToolNameFilter {
 
     if ($interceptList -and $ToolName -in $interceptList) {
         return "classify"
+    }
+
+    # -- Check strictness-gated list (strictness_gated_tool_name) --
+    # v2 (2026-08-26): returns "gated" so Invoke-Classify can run the path-aware
+    # gate (Resolve-ToolGate) with the raw payload. system_paths is absolute.
+    if ($Config.strictness_gated_tool_name -and $ToolName -in $Config.strictness_gated_tool_name) {
+        return "gated"
     }
 
     # -- Neither list matched --
@@ -232,7 +379,24 @@ function Invoke-Classify {
 
     $filterResult = Test-ToolNameFilter -ToolName $toolName -Config $Config
 
+    # -- Ignored tool: skip, UNLESS a payload path resolves into system_paths --
+    # -- (the ABSOLUTE rule applies to ignored tools too).                   --
     if ($filterResult -eq "skip") {
+        $igPaths = @(Get-ToolGatePaths -ToolName $toolName -RawInput $RawInput -Config $Config)
+        $igSys = Test-SystemPathsOnly -Paths $igPaths -Config $Config -ToolName $toolName
+        if ($igSys) {
+            return (Repair-ResultProperties ([PSCustomObject]@{
+                Decision    = "ask"
+                Reason      = $igSys.Reason
+                ExitCode    = 0
+                IDE         = $IDE
+                ToolName    = $toolName
+                Command     = ($igPaths -join "; ")
+                SubResults  = @()
+                IsSkipped   = $false
+                IsUnknown   = $false
+            }))
+        }
         return (Repair-ResultProperties ([PSCustomObject]@{
             Decision    = "allow"
             Reason      = "ignored tool: $toolName"
@@ -242,6 +406,26 @@ function Invoke-Classify {
             Command     = ""
             SubResults  = @()
             IsSkipped   = $true
+            IsUnknown   = $false
+        }))
+    }
+
+    # -- Gated tool: path-aware gate (strictness_gated_tool_name). system_paths --
+    # -- is absolute; effective mode from global + tool_name_modifying_strictness. --
+    if ($filterResult -eq "gated") {
+        $gate = Resolve-ToolGate -ToolName $toolName -RawInput $RawInput -Config $Config
+        $gPaths = @(Get-ToolGatePaths -ToolName $toolName -RawInput $RawInput -Config $Config)
+        # Gated tools are decided ENTIRELY by the gate (skip / ask / strict-allow);
+        # they never fall through to the command tiers or the generic path branch.
+        return (Repair-ResultProperties ([PSCustomObject]@{
+            Decision    = $(if ($gate.Action -eq 'ask') { "ask" } else { "allow" })
+            Reason      = $gate.Reason
+            ExitCode    = 0
+            IDE         = $IDE
+            ToolName    = $toolName
+            Command     = ($gPaths -join "; ")
+            SubResults  = @()
+            IsSkipped   = ($gate.Action -eq 'skip')
             IsUnknown   = $false
         }))
     }

@@ -207,7 +207,9 @@ recipes for common tasks.
 | `trusted_pattern` | array of regex | Commands that match → **allow immediately** (fast path). |
 | `untrusted_pattern` | array of regex | Commands that match → **ask immediately** (checked before `trusted_pattern`). |
 | `intercept_tool_name` | array of tool names | Tool calls to classify. |
-| `ignore_tool_name` | array of tool names | Tool calls to skip (silently allow). |
+| `ignore_tool_name` | array of tool names | Tool calls to skip (silently allow) — **except** a payload path in `system_paths` asks. |
+| `strictness_gated_tool_name` | array of tool names (optional) | Tool calls gated by `tool_name_modifying_strictness`. See **intercept/ignore/gated** below. |
+| `tool_name_modifying_strictness` | `"normal"` \| `"strict"` \| `"loose"` (optional) | Gate mode for `strictness_gated_tool_name`. Default `normal`. `system_paths` always asks. |
 | `tool_name_mapping` | object | Per-tool JSON field path that holds the command string. |
 | `path_tool_mapping` | object | Per-tool JSON field path that holds the target file path (for Write/Edit-type tools). |
 | `dry_run_flags` | object | Maps a command prefix to `read-only` when a dry-run form is used. |
@@ -269,11 +271,27 @@ can span a multi-line command).
 "untrusted_pattern": ["^rm -rf /$", "^kubectl delete --all"]
 ```
 
-#### `intercept_tool_name` / `ignore_tool_name`
+#### `intercept_tool_name` / `ignore_tool_name` / `strictness_gated_tool_name`
 
 `intercept_tool_name` lists tool names whose commands are classified. `ignore_tool_name` lists
-tools that bypass the hook entirely (silently allowed, e.g. `read_file`, `Edit`, `Grep`). A tool
+tools that bypass the hook entirely (silently allowed, e.g. `read_file`, `Grep`). A tool
 in **neither** list is treated as unknown → the hook asks (fail-safe).
+
+**`system_paths` is absolute:** no tool — intercepted, gated, or ignored — may write to a
+`system_paths` target without an ask. Even an ignored tool with a payload path resolving into
+`system_paths` prompts.
+
+`strictness_gated_tool_name` (optional, 2026-08-26) is the tool-level analogue of the per-domain
+`strictness_gated` command tier, governed by **`tool_name_modifying_strictness`**
+(`strict | normal | loose`, default `normal`). Effective gate mode = `strict` if **either** the
+global OR the tool strictness is `strict`, else the tool value (global `loose` never loosens the
+gate). Gate behavior: **strict** = full path policy (system/foreign ask; editable+CWD allow;
+unextractable path asks). **normal**/**loose** = skip (allow) for all paths **except**
+`system_paths`, which always asks. `apply_patch`/`edit_files` paths are extracted best-effort
+from the patch text. A name may live in only one of the three lists — `Load-Config` throws on
+overlap. The live config gates the file tools (`Write`, `Edit`, `create_file`,
+`replace_string_in_file`, …): non-system writes auto-approve day-to-day, `system_paths` writes
+always prompt.
 
 #### `tool_name_mapping`
 

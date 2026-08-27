@@ -27,16 +27,16 @@
       <hook-input><![CDATA[{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:05.123Z","tool_use_id":"call_test006","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
     <test-case expected-decision="ask" expected-exit="0" expected-reason="system path" category="CC-FullPipe-FileToolSystem">
-      <description>ClaudeCode: Write to system path (ask, exit 0 — file-tool asks must be JSON decisions the IDE can prompt on, NOT blocking hook errors from exit 2)</description>
-      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"C:\\Windows\\evil.dll","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:06.123Z","tool_use_id":"call_test007","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+      <description>ClaudeCode: create_file to system path (ask, exit 0 — file-tool asks must be JSON decisions the IDE can prompt on, NOT blocking hook errors from exit 2). Uses create_file: Write/Edit are now strictness_gated and skip in normal mode (see tool-gate suite).</description>
+      <hook-input><![CDATA[{"tool_name":"create_file","tool_input":{"filePath":"C:\\Windows\\evil.dll","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:06.123Z","tool_use_id":"call_test007","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
     <test-case expected-decision="allow" expected-exit="0" expected-reason="editable path" category="CC-FullPipe-FileToolEditable">
-      <description>ClaudeCode: Write to editable path (allow, exit 0)</description>
-      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"C:\\temp\\notes.txt","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:07.123Z","tool_use_id":"call_test008","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+      <description>ClaudeCode: create_file to editable path (allow, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"create_file","tool_input":{"filePath":"C:\\temp\\notes.txt","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:07.123Z","tool_use_id":"call_test008","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
     <test-case expected-decision="ask" expected-exit="0" expected-reason="file write to" category="CC-FullPipe-FileToolForeign">
-      <description>ClaudeCode: Edit to foreign (non-editable, non-system) path (ask, exit 0)</description>
-      <hook-input><![CDATA[{"tool_name":"Edit","tool_input":{"file_path":"D:\\work\\notes.txt","old_string":"a","new_string":"b"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:08.123Z","tool_use_id":"call_test009","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+      <description>ClaudeCode: replace_string_in_file to foreign (non-editable, non-system) path (ask, exit 0)</description>
+      <hook-input><![CDATA[{"tool_name":"replace_string_in_file","tool_input":{"filePath":"D:\\work\\notes.txt","oldString":"a","newString":"b"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:08.123Z","tool_use_id":"call_test009","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
   </category-group>
 
@@ -101,8 +101,8 @@
       <hook-input><![CDATA[{"tool_name":"SomeUnknownTool","tool_input":{"command":"whatever"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:06.123Z","tool_use_id":"call_cx007","turn_id":"turn_stu901"}]]></hook-input>
     </test-case>
     <test-case expected-decision="deny" expected-exit="0" expected-reason="system path" category="CX-FullPipe-FileToolSystem">
-      <description>Codex: Write to system path (ask mapped to deny, exit 0 — file-tool asks must not be blocking hook errors)</description>
-      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"C:\\Windows\\evil.dll","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:07.123Z","tool_use_id":"call_cx008","turn_id":"turn_vwx234"}]]></hook-input>
+      <description>Codex: create_file to system path (ask mapped to deny, exit 0 — file-tool asks must not be blocking hook errors). Uses create_file: Write/Edit are now strictness_gated and skip in normal mode.</description>
+      <hook-input><![CDATA[{"tool_name":"create_file","tool_input":{"filePath":"C:\\Windows\\evil.dll","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:07.123Z","tool_use_id":"call_cx008","turn_id":"turn_vwx234"}]]></hook-input>
     </test-case>
   </category-group>
 
@@ -130,11 +130,11 @@
     </test-case>
     <test-case expected-decision="ask" expected-exit="0" expected-reason="system path" category="DSH-FullPipe-FileToolSystem">
       <description>DSH: Write to system path via Write tool (ask, exit 0 — file-tool asks are JSON decisions, not blocking hook errors)</description>
-      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"C:\\Windows\\evil.dll","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:04.123Z","tool_use_id":"call_dsh005","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh005","root_call_id":"call_dsh005"}}]]></hook-input>
+      <hook-input><![CDATA[{"tool_name":"create_file","tool_input":{"filePath":"C:\\Windows\\evil.dll","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:04.123Z","tool_use_id":"call_dsh005","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh005","root_call_id":"call_dsh005"}}]]></hook-input>
     </test-case>
     <test-case expected-decision="allow" expected-exit="0" expected-reason="editable path" category="DSH-FullPipe-FileToolEditable">
       <description>DSH: Write to editable path via Write tool (allow, exit 0)</description>
-      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"C:\\temp\\notes.txt","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:05.123Z","tool_use_id":"call_dsh006","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh006","root_call_id":"call_dsh006"}}]]></hook-input>
+      <hook-input><![CDATA[{"tool_name":"create_file","tool_input":{"filePath":"C:\\temp\\notes.txt","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:05.123Z","tool_use_id":"call_dsh006","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh006","root_call_id":"call_dsh006"}}]]></hook-input>
     </test-case>
     <test-case expected-decision="ask" expected-exit="2" expected-reason="unknown tool" category="DSH-FullPipe-Unknown">
       <description>DSH: unknown tool (exit 2, genuine error — bridge treats exit 2 as fail-closed deny)</description>

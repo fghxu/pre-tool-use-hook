@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  tool_name_modifying_strictness suite — NORMAL tool gate (this folder's
+  config.tool-gate-normal.json via -ConfigPath; global normal + tool normal).
+  Gated tools SKIP (allow) for every non-system path; a system_paths target
+  ALWAYS asks (system_paths is absolute). Unextractable path allows (fail-open).
+  Run from repo root:
+    powershell.exe -ExecutionPolicy Bypass -File src/TestRunner.ps1 `
+      -XmlPath test/config/test-strictness-gate/tool-gate/test-cases.tool-gate.normal.xml `
+      -ConfigPath test/config/test-strictness-gate/tool-gate/config.tool-gate-normal.json
+-->
+<commands>
+  <category-group name="TG-Normal">
+
+    <!-- system_paths ALWAYS asks (absolute) -->
+    <test-case expected="ask" reason="system path asks (absolute)" category="TG-Normal-System">
+      <description>Write C:\Windows\evil.dll — system path asks even in normal</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\evil.dll","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="system path asks (absolute)" category="TG-Normal-System">
+      <description>Write C:\Windows\System32\drivers\etc\hosts — nested system path asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\System32\\drivers\\etc\\hosts","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="system path asks (absolute)" category="TG-Normal-System">
+      <description>Write /etc/cron.d/evil — linux system path asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"/etc/cron.d/evil"}</tool-input-json>
+    </test-case>
+
+    <!-- non-system paths SKIP (allow) in normal -->
+    <test-case expected="allow" reason="editable path skips" category="TG-Normal-Skip">
+      <description>Write C:\temp\notes.txt — editable root skips in normal</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\temp\\notes.txt","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="foreign path skips in normal (only system_paths enforced)" category="TG-Normal-Skip">
+      <description>Write D:\work\x.txt — foreign path skips in normal</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"D:\\work\\x.txt","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="unextractable path allows (fail-open) in normal" category="TG-Normal-Skip">
+      <description>NoPathTool (no path mapping) — allows in normal</description>
+      <tool-name>NoPathTool</tool-name>
+      <tool-input-json>{"foo":"bar"}</tool-input-json>
+    </test-case>
+
+    <!-- apply_patch: best-effort path extraction from patch text -->
+    <test-case expected="ask" reason="apply_patch system path asks" category="TG-Normal-Patch">
+      <description>apply_patch with C:\Windows target in patch text — asks</description>
+      <tool-name>apply_patch</tool-name>
+      <tool-input-json>{"patch":"*** Begin Patch\n*** Update File: C:\\Windows\\system32\\drivers\\etc\\hosts\n@@\n+x\n*** End Patch"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="apply_patch temp path skips" category="TG-Normal-Patch">
+      <description>apply_patch with C:\temp target — skips in normal</description>
+      <tool-name>apply_patch</tool-name>
+      <tool-input-json>{"patch":"*** Begin Patch\n*** Update File: C:\\temp\\notes.txt\n@@\n+x\n*** End Patch"}</tool-input-json>
+    </test-case>
+
+    <!-- ignored tool: system path asks (absolute applies to ignored tools too) -->
+    <test-case expected="ask" reason="ignored tool system path asks (absolute)" category="TG-Normal-Ignored">
+      <description>IgnorePathTool C:\Windows\x.dll — ignored but system path asks</description>
+      <tool-name>IgnorePathTool</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\x.dll"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="ignored tool non-system skips" category="TG-Normal-Ignored">
+      <description>IgnorePathTool C:\temp\x.txt — ignored non-system skips</description>
+      <tool-name>IgnorePathTool</tool-name>
+      <tool-input-json>{"file_path":"C:\\temp\\x.txt"}</tool-input-json>
+    </test-case>
+
+    <!-- control: intercepted command tool still classifies -->
+    <test-case expected="allow" reason="read-only: ls" category="TG-Normal-Control">
+      <description>Bash ls /tmp — intercepted command tool classifies read-only</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[ls /tmp]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: rm" category="TG-Normal-Control">
+      <description>Bash rm /tmp/x — intercepted command tool classifies modifying</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[rm /tmp/x]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

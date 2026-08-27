@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for strictness_gated_tool_name. OVERLAP: Write appears in BOTH intercept_tool_name and strictness_gated_tool_name; Load-Config must throw (keep the lists disjoint).",
+
+  "global_modifying_strictness": "normal",
+
+  "log_file_path": "c:\\temp\\pretoolhook-toolgate-testlogs\\",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash", "Write" ],
+  "ignore_tool_name": [ "Read" ],
+
+  "strictness_gated_tool_name": [ "Write" ],
+
+  "tool_name_mapping": {
+    "Bash": "tool_input.command"
+  },
+
+  "path_tool_mapping": {
+    "Write": "tool_input.file_path"
+  },
+
+  "commands": {
+    "Linux": {
+      "modifying_strictness": "normal",
+      "description": "Minimal Linux domain.",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List files" }
+      ],
+      "strictness_gated": [],
+      "modifying": []
+    }
+  }
+}

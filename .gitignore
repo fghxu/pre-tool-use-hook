@@ -1,0 +1,4 @@
+# Local developer overrides — never commit your personal hook config.
+# The hook reads PRETOOLHOOK_CONFIG_PATH first; point it at this file to run
+# the live hook with your own settings while the tracked config.json stays generic.
+config.local.json

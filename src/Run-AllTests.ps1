@@ -82,7 +82,9 @@ $extraSuites = @(
     @{ Name = 'llm-review.check-blindspot'; File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\llm-review\test-cases.check-blindspot.xml')) },
     @{ Name = 'llm-review.http-mock'; File = (Join-Path $repoRoot 'test\config\llm-review\http\Run-LlmCallTests.ps1'); Args = @() },
     @{ Name = 'dsh-hook.unit';       File = (Join-Path $repoRoot 'test\config\live\test-cases.dsh.ps1'); Args = @() },
-    @{ Name = 'dsh-plugin.node';     File = (Join-Path $repoRoot 'dsh-plugin\test\Run-NodeTests.ps1'); Args = @() }
+    @{ Name = 'dsh-plugin.node';     File = (Join-Path $repoRoot 'dsh-plugin\test\Run-NodeTests.ps1'); Args = @() },
+    @{ Name = 'tool-gate';           File = (Join-Path $repoRoot 'test\config\tool-gate\Run-Tests.ps1'); Args = @() },
+    @{ Name = 'tool-gate.strictness'; File = (Join-Path $repoRoot 'test\config\test-strictness-gate\tool-gate\Run-Tests.ps1'); Args = @() }
 )
 if ($Filter) {
     $extraSuites = @($extraSuites | Where-Object { $_.Name -like "*$Filter*" })
