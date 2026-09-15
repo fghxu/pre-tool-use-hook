@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  tool_name_modifying_strictness suite — LOOSE tool gate (this folder's
+  config.tool-gate-loose.json via -ConfigPath; global normal + tool LOOSE, so
+  the effective gate is LOOSE). Every non-system path allows (incl. foreign);
+  system_paths STILL asks (the absolute rule is never loosened).
+  Run from repo root:
+    powershell.exe -ExecutionPolicy Bypass -File src/TestRunner.ps1 `
+      -XmlPath test/config/test-strictness-gate/tool-gate/test-cases.tool-gate.loose.xml `
+      -ConfigPath test/config/test-strictness-gate/tool-gate/config.tool-gate-loose.json
+-->
+<commands>
+  <category-group name="TG-Loose">
+
+    <!-- system_paths STILL asks (absolute; loose does not loosen system_paths) -->
+    <test-case expected="ask" reason="system path asks (absolute)" category="TG-Loose-System">
+      <description>Write C:\Windows\evil.dll — system path asks even in loose</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\evil.dll","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="system path asks (absolute)" category="TG-Loose-System">
+      <description>Write /etc/cron.d/evil — linux system path asks even in loose</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"/etc/cron.d/evil"}</tool-input-json>
+    </test-case>
+
+    <!-- every non-system path allows in loose -->
+    <test-case expected="allow" reason="editable path allows" category="TG-Loose-Allow">
+      <description>Write C:\temp\notes.txt — editable allows</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\temp\\notes.txt","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="foreign path allows in loose" category="TG-Loose-Allow">
+      <description>Write D:\work\x.txt — foreign path allows in loose</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"D:\\work\\x.txt","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="unextractable path allows in loose" category="TG-Loose-Allow">
+      <description>NoPathTool (no path mapping) — allows in loose</description>
+      <tool-name>NoPathTool</tool-name>
+      <tool-input-json>{"foo":"bar"}</tool-input-json>
+    </test-case>
+
+    <!-- ignored tool: system path asks (absolute) even in loose -->
+    <test-case expected="ask" reason="ignored tool system path asks (absolute)" category="TG-Loose-Ignored">
+      <description>IgnorePathTool C:\Windows\x.dll — ignored but system path asks</description>
+      <tool-name>IgnorePathTool</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\x.dll"}</tool-input-json>
+    </test-case>
+
+  </category-group>
+</commands>

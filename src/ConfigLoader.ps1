@@ -221,6 +221,41 @@ function Test-ConfigSchema {
         throw "Configuration validation failed: 'ignore_tool_name' key is required"
     }
 
+    # Validate optional "strictness_gated_tool_name" (strictness-gated tool gate).
+    # OPTIONAL: absent = feature off. When present it must be an array of tool
+    # names that must NOT overlap intercept_tool_name or ignore_tool_name
+    # (overlap = ambiguous gate behavior, rejected at load time). Semantics:
+    # global_modifying_strictness normal|loose => gated tools skip like
+    # ignore_tool_name; strict => classified like intercept_tool_name.
+    $hasGatedTools = Get-Member -InputObject $Config -Name 'strictness_gated_tool_name' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasGatedTools) {
+        if ($Config.strictness_gated_tool_name -isnot [array]) {
+            throw "Configuration validation failed: 'strictness_gated_tool_name' must be an array"
+        }
+        foreach ($gatedName in $Config.strictness_gated_tool_name) {
+            if ($gatedName -in $Config.intercept_tool_name) {
+                throw "Configuration validation failed: '$gatedName' appears in both 'intercept_tool_name' and 'strictness_gated_tool_name' - keep the lists disjoint"
+            }
+            if ($gatedName -in $Config.ignore_tool_name) {
+                throw "Configuration validation failed: '$gatedName' appears in both 'ignore_tool_name' and 'strictness_gated_tool_name' - keep the lists disjoint"
+            }
+        }
+    }
+
+    # Validate optional "tool_name_modifying_strictness" (governs gated tools).
+    # OPTIONAL: absent = 'normal'. strict|normal|loose. Effective gate mode =
+    # strict if EITHER global_modifying_strictness OR this is strict; else this
+    # value. Global loose NEVER loosens the tool gate. system_paths is absolute
+    # (asks in every mode, even loose).
+    if (-not (Get-Member -InputObject $Config -Name 'tool_name_modifying_strictness' -MemberType NoteProperty)) {
+        $Config | Add-Member -MemberType NoteProperty -Name 'tool_name_modifying_strictness' -Value 'normal' -Force
+    }
+    else {
+        if ($Config.tool_name_modifying_strictness -notin @('normal', 'strict', 'loose')) {
+            throw "Configuration validation failed: 'tool_name_modifying_strictness' must be 'normal', 'strict', or 'loose', got '$($Config.tool_name_modifying_strictness)'"
+        }
+    }
+
     # Validate "tool_name_mapping" exists and is non-empty
     if (-not (Get-Member -InputObject $Config -Name 'tool_name_mapping' -MemberType NoteProperty)) {
         throw "Configuration validation failed: 'tool_name_mapping' key is required"

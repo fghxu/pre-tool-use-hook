@@ -3,6 +3,59 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 
 (Prior goal — strictness_gated config section + per-domain strictness — COMPLETE; spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md)
 
+## Current Step
+(none — v2 feature complete; local/generic config split done; tool-gate strictness suites added)
+
+## tool_name_modifying_strictness test suites in test-strictness-gate/tool-gate/ (2026-08-27, DONE, all suites green 1242/1242, +28 new)
+- User request: dedicated strict/normal test cases for tool_name_modifying_strictness under test/config/test-strictness-gate/, each mode in its own config file with its own test cases, wired into Run-AllTests.
+- New folder test/config/test-strictness-gate/tool-gate/ (mirrors the strictness-gate folder shape: per-mode config + per-mode XML suite + a parent Run-Tests.ps1):
+  - config.tool-gate-normal.json (global normal + tool normal) + test-cases.tool-gate.normal.xml (12 cases: system paths ask absolute; editable/foreign/unextractable skip; apply_patch system+temp; ignored-tool system asks + non-system skips; intercepted Bash control).
+  - config.tool-gate-strict.json (global normal + tool strict => effective strict) + test-cases.tool-gate.strict.xml (10 cases: system/foreign/unextractable ask; editable/CWD allow; apply_patch system asks; ignored system asks; control).
+  - config.tool-gate-loose.json (global normal + tool loose => effective loose) + test-cases.tool-gate.loose.xml (6 cases: system asks absolute; all non-system allow; ignored system asks).
+  - Run-Tests.ps1 (parent runner; prints a 'Total: X  Passed: Y  Failed: Z' one-liner so Run-AllTests can parse it).
+- Wired into src/Run-AllTests.ps1 as extra suite 'tool-gate.strictness' (distinct from the existing 'tool-gate' unit/fullpipe suite under test/config/tool-gate/).
+- Full pass: 1242/1242.
+
+## Local vs generic config split (2026-08-26, DONE, all suites green 1214/1214)
+- User need: keep a PERSONAL live config for day-to-day hook use on this machine, while the TRACKED config.json stays generic (publishable to GitHub, runs out of the box for anyone who clones).
+- Mechanism: no code change needed — Hook.ps1 already reads PRETOOLHOOK_CONFIG_PATH before falling back to the repo-root config.json.
+- Setup:
+  - config.local.json = the personal live config (copied from the pre-split config.json, keeps llm_second_opinion.enabled=true + the user's expanded strictness_gated_tool_name list). Added to NEW .gitignore so it never appears in git status.
+  - config.json (tracked) = GENERIC: llm_second_opinion.enabled=false, trusted_programs kept to the project's OWN dev/test scripts (TestRunner.ps1, src\*.ps1, test runners — these are dev infrastructure the test suites depend on, NOT personal), strictness_gated_tool_name restored to the standard four (Write/Edit/MultiEdit/NotebookEdit). Added a _comment_local_override documenting the pattern.
+  - PRETOOLHOOK_CONFIG_PATH set (User scope) to C:\git\cc\pretoolhook\config.local.json — live hook uses the private config; restart IDE to inherit.
+- Bonus fix surfaced by re-syncing fixtures from the generic config: git rev-parse was in Git.read_only (with a dead risk field) while the config's own _comment_gated line and the SG-strict suite both expected it gated. Moved to Git.strictness_gated (risk low) in the generic config; strict suite green again.
+- Sync-Fixtures.ps1 re-ran cleanly (llm now disabled in the generic config) — test/config/live/config.json + config.strict.json now mirror the generic root.
+- Docs: docs/INSTALL.md Step 3 gained a "Contributing? Use a private local config" section.
+- Full pass: 1214/1214.
+
+## strictness_gated_tool_name v2 + tool_name_modifying_strictness: system_paths absolute (2026-08-26, DONE, all suites green 1214/1214, tool-gate suite 13 -> 32)
+- User request: make system_paths unbypassable — no tool (intercepted, gated, or ignored) may write to a system_paths target without an ask. v1 let gated tools skip BEFORE path policy, so a gated create_file to C:\Windows was silently allowed.
+- Spec: docs/superpowers/specs/2026-08-26-tool-gate-system-paths-absolute-design.md (user-confirmed, written before implementation).
+- New config key `tool_name_modifying_strictness` (strict|normal|loose, default normal) governs gated tools. Effective gate mode = strict if EITHER global OR tool strictness is strict, else the tool value. Global loose NEVER loosens the tool gate.
+- Gate behavior by effective mode: strict = full path policy (system/foreign ask; editable+CWD allow; unextractable asks, fail-closed). normal = system_paths ask, all other paths allow, unextractable allows. loose = system_paths ask (absolute), all other paths allow, unextractable allows. system_paths asks in EVERY mode.
+- ignore_tool_name: still skipped EXCEPT a payload path resolving into system_paths asks (absolute rule applies to ignored tools too).
+- Implementation (src/Classifier.ps1):
+  - Test-ToolNameFilter: gated tools now return "gated" (not "skip"/"classify"); ignore still returns "skip" but Invoke-Classify re-checks the payload paths first.
+  - New helpers: Get-ToolGatePaths (path_tool_mapping exact fields + best-effort patch-TEXT scan for apply_patch/edit_files), Test-SystemPathsOnly (absolute system_paths check via ConvertTo-CanonicalWritePath + _systemPathRegex), Resolve-ToolGate (effective-mode ladder; strict uses Test-EditableOrCwd for the editable/CWD-vs-foreign split).
+  - Invoke-Classify STEP 0: skip branch path-checks ignored tools; new "gated" branch runs Resolve-ToolGate. Gated tools are decided ENTIRELY by the gate (skip/ask/strict-allow) — they never fall through to command tiers or the generic path branch.
+  - src/ConfigLoader.ps1: validates tool_name_modifying_strictness (strict|normal|loose, throws on bad value, defaults normal when absent).
+- Live config.json: tool_name_modifying_strictness = normal added (with an IMPORTANT loose-warning comment); _comment_strictness_gated_tool_name updated to v2 semantics.
+- Tests: test/config/tool-gate/ extended to 32 checks (v1 validation/unit/fullpipe + v2: system-paths-ask in every mode, foreign/editable/unextractable per mode, ignored-tool system-path ask, apply_patch patch-text extraction, inheritance pinning global-loose+tool-strict and global-strict+tool-loose, bad-value + absent-key default). Fixtures gained tool_name_modifying_strictness, an ignored path tool (IgnorePathTool), a no-path gated tool (NoPathTool), and apply_patch.
+- Docs: docs/config-json-guide.md section 6 + README.md rewritten for v2. Full pass: 1214/1214.
+
+## strictness_gated_tool_name: strictness-gated tool gate (2026-08-26, DONE, all suites green 1195/1195, +13 new)
+- User request: a strictness_gated block alongside intercept_tool_name / ignore_tool_name so tools (e.g. Write/Edit/MultiEdit) are treated as ignore (silently skipped) when global_modifying_strictness is normal/loose, and as intercept (classified) when strict.
+- Config (`strictness_gated_tool_name`, OPTIONAL top-level array of tool names). Semantics mirror the per-domain strictness_gated command tier at the tool level: normal/loose => skip; strict => classify.
+- Decisions (user-confirmed): strictness source = GLOBAL global_modifying_strictness ONLY (tool gating runs before domain routing, so per-domain strictness never applies); key name = strictness_gated_tool_name; overlap with intercept_tool_name OR ignore_tool_name => Load-Config THROWS (lists must stay disjoint).
+- Implementation:
+  - `src/ConfigLoader.ps1` (Test-ConfigSchema): validates the key is an array when present, and throws on any name shared with intercept_tool_name or ignore_tool_name.
+  - `src/Classifier.ps1` (Test-ToolNameFilter): after the ignore and intercept checks, a name in strictness_gated_tool_name returns "skip" when global_modifying_strictness is normal/loose, "classify" when strict. Gate fires BEFORE path policy, so even a system-path write skips in normal/loose.
+- Live config.json: Write/Edit/MultiEdit/NotebookEdit moved from intercept_tool_name to the new strictness_gated_tool_name block (with _comment). Copilot file tools (create_file, replace_string_in_file, multi_replace_string_in_file, insert_edit_into_file, edit_notebook_file, create_new_jupyter_notebook, create_directory, create_new_workspace) remain intercepted.
+- Test suite: `test/config/tool-gate/` — 13 checks (3 pre-flight overlap/badtype throws + key-absent, 6 unit Test-ToolNameFilter across normal/loose/strict + ignore/intercept/unknown regression, 3 fullpipe via the real Hook.ps1 incl. system-path skip in normal and path-policy classify in strict). Registered in src/Run-AllTests.ps1.
+- Re-based suites (pinned old behavior for the now-gated tools): test/config/live/test-cases.trustedpattern.xml and test-fullpipe.xml switched their file-tool path-policy cases from Write/Edit/MultiEdit/NotebookEdit to still-intercepted Copilot file tools (create_file, replace_string_in_file, insert_edit_into_file, edit_notebook_file) — same Resolve-PathPolicy ladder, coverage preserved. Live fixture configs (test/config/live/config.json + config.strict.json) hand-patched with the gated list because Sync-Fixtures.ps1 refused to run (root config had llm_second_opinion.enabled=true at the time).
+- Docs: docs/config-json-guide.md section 6 + README.md (key table + intercept/ignore/gated section).
+- Full pass: 1195/1195 (13 suites, +13 new tool-gate checks).
+
 ## DeepSeek Harness wiring — dsh-plugin-pretoolhook bridge (2026-08-XX, DONE, all suites green 1182/1182 + 17/17 Codex + 938/938 sandbox)
 - User request: wire this hook into the local DeepSeek Harness instance (the DSH web app at 127.0.0.1:3080 hosting the session), alongside the existing Claude Code / Copilot / Codex support. The hook's Detect-IDE must learn the DSH request signature.
 - IDE adaptation (`src/HookAdapter.ps1`): the bridge stamps every intercepted call with a `dsh` object (`harness: "DeepSeek Harness"`, call_id, root_call_id, agent_id). Detect-IDE treats it as a DECISIVE signal (checked before every other signal) and returns `"DSH"`. Format-Output keeps ask=ask for DSH (its approval seam prompts the user; only Codex maps ask→deny). Logger.ps1 splits DSH logs to `yyyy-MM-dd.dsh.{records.jsonl,log}`.

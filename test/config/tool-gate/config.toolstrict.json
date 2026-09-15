@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for strictness_gated_tool_name. NORMAL global + tool STRICT: effective gate STRICT (foreign paths ask, editable allow, unextractable asks).",
+
+  "global_modifying_strictness": "normal",
+  "tool_name_modifying_strictness": "strict",
+
+  "log_file_path": "c:\\temp\\pretoolhook-toolgate-testlogs\\",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "ignore_tool_name": [ "Read", "IgnorePathTool" ],
+
+  "strictness_gated_tool_name": [ "Write", "NoPathTool", "apply_patch" ],
+
+  "tool_name_mapping": {
+    "Bash": "tool_input.command"
+  },
+
+  "path_tool_mapping": {
+    "Write": "tool_input.file_path",
+    "IgnorePathTool": "tool_input.file_path"
+  },
+
+  "editable_paths": {
+    "linux": [ "/tmp/" ],
+    "windows": [ "C:\\\\temp\\\\" ]
+  },
+  "system_paths": {
+    "linux": [ "/etc/" ],
+    "windows": [ "[A-Za-z]:\\\\Windows\\\\" ]
+  },
+
+  "commands": {
+    "Linux": {
+      "modifying_strictness": "normal",
+      "description": "Minimal Linux domain.",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List files" }
+      ],
+      "strictness_gated": [],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files" }
+      ]
+    }
+  }
+}

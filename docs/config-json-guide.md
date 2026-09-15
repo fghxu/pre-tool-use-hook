@@ -64,15 +64,43 @@ Cardinal rules (violating these is how you get `rm -rf /` auto-approved):
 - Always anchor with `^` (and usually `.*$`).
 - Keep the command-side exe asker in `untrusted_pattern` — without it, bare full-path executables (`C:\temp\tool.exe` via Bash) hit the zero-command allow.
 
-## 6. `intercept_tool_name` / `ignore_tool_name`
+## 6. `intercept_tool_name` / `ignore_tool_name` / `strictness_gated_tool_name`
 
 **What they do:** the tool gate (`Test-ToolNameFilter` in Classifier.ps1):
 
 | Tool is in… | Result |
 |---|---|
-| `ignore_tool_name` | `skip` → **silently allowed**, nothing inspected |
+| `ignore_tool_name` | `skip` → **silently allowed**… **unless a payload path resolves into `system_paths` → ask** |
 | `intercept_tool_name` | `classify` → command/path extracted and classified |
+| `strictness_gated_tool_name` | **gated** by `tool_name_modifying_strictness` (see below) |
 | **neither** | `unknown tool` → **ask** (fail-safe) |
+
+**`strictness_gated_tool_name`** (optional array; v1 2026-08-26, v2 same day) is the tool-level
+analogue of the per-domain `strictness_gated` command tier. It is governed by
+**`tool_name_modifying_strictness`** (`strict | normal | loose`, default `normal`), NOT directly
+by the global value. The effective gate mode is:
+
+- `strict` if **either** `global_modifying_strictness` **or** `tool_name_modifying_strictness`
+  is `strict`; otherwise the value of `tool_name_modifying_strictness`.
+- Global `loose` **never** loosens the tool gate (a loose global with the default tool value
+  `normal` still behaves as `normal`).
+
+| Effective mode | system_paths | foreign (not editable/CWD) | editable / CWD | path unextractable |
+|---|---|---|---|---|
+| strict | **ask** | ask | allow | ask (fail-closed) |
+| normal | **ask** | allow | allow | allow |
+| loose  | **ask** | allow | allow | allow |
+
+**`system_paths` is absolute (v2):** no tool — intercepted, gated, or **ignored** — may write
+to a `system_paths` target without an ask. The gate scans payload paths BEFORE skipping: gated
+tools via `path_tool_mapping`, and `apply_patch`/`edit_files` via best-effort path extraction
+from the patch text. A tool with no extractable path (e.g. `run_task`, `kill_terminal`) passes
+in normal/loose and asks in strict (fail-closed).
+
+Notes:
+- A name may appear in only **one** of the three lists; `Load-Config` throws on any overlap.
+- Gated tools are decided entirely by the gate (skip / ask / strict-allow); they never fall
+  through to the command tiers or the generic file-tool path branch.
 
 **When adding entries:**
 - The ignore list is an *allow-list of tools* — every entry means "this tool's actions are never inspected." Only put genuinely read-only tools there (`read_file`, `Grep`, `WebFetch`…). Anything that writes files, runs code, or mutates state must NOT be here.

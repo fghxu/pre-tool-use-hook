@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  tool_name_modifying_strictness suite — STRICT tool gate (this folder's
+  config.tool-gate-strict.json via -ConfigPath; global normal + tool STRICT, so
+  the effective gate is STRICT). Gated tools get FULL path policy:
+  system/foreign ask; editable+CWD allow; unextractable path asks (fail-closed).
+  Run from repo root:
+    powershell.exe -ExecutionPolicy Bypass -File src/TestRunner.ps1 `
+      -XmlPath test/config/test-strictness-gate/tool-gate/test-cases.tool-gate.strict.xml `
+      -ConfigPath test/config/test-strictness-gate/tool-gate/config.tool-gate-strict.json
+-->
+<commands>
+  <category-group name="TG-Strict">
+
+    <!-- system_paths asks -->
+    <test-case expected="ask" reason="system path asks" category="TG-Strict-System">
+      <description>Write C:\Windows\evil.dll — system path asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\evil.dll","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="system path asks" category="TG-Strict-System">
+      <description>Write /etc/cron.d/evil — linux system path asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"/etc/cron.d/evil"}</tool-input-json>
+    </test-case>
+
+    <!-- foreign (not editable, not CWD) asks in strict -->
+    <test-case expected="ask" reason="foreign path asks in strict" category="TG-Strict-Foreign">
+      <description>Write D:\work\x.txt — foreign path asks in strict</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"D:\\work\\x.txt","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="ask" reason="foreign path asks in strict" category="TG-Strict-Foreign">
+      <description>Write C:\Users\someone\doc.txt — outside editable roots asks in strict</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Users\\someone\\doc.txt","content":"x"}</tool-input-json>
+    </test-case>
+
+    <!-- editable / CWD allow in strict (classified, not skipped) -->
+    <test-case expected="allow" reason="editable path allows in strict" category="TG-Strict-Editable">
+      <description>Write C:\temp\notes.txt — editable root allows in strict</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\temp\\notes.txt","content":"x"}</tool-input-json>
+    </test-case>
+    <test-case expected="allow" reason="CWD path allows in strict" category="TG-Strict-Editable">
+      <description>Write notes.txt (relative, under CWD) — allows in strict</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"notes.txt","content":"x"}</tool-input-json>
+    </test-case>
+
+    <!-- unextractable path asks (fail-closed) in strict -->
+    <test-case expected="ask" reason="unextractable path asks (fail-closed) in strict" category="TG-Strict-Unextractable">
+      <description>NoPathTool (no path mapping) — asks in strict</description>
+      <tool-name>NoPathTool</tool-name>
+      <tool-input-json>{"foo":"bar"}</tool-input-json>
+    </test-case>
+
+    <!-- apply_patch: system path asks even in strict -->
+    <test-case expected="ask" reason="apply_patch system path asks" category="TG-Strict-Patch">
+      <description>apply_patch with C:\Windows target — asks</description>
+      <tool-name>apply_patch</tool-name>
+      <tool-input-json>{"patch":"*** Begin Patch\n*** Update File: C:\\Windows\\system32\\drivers\\etc\\hosts\n@@\n+x\n*** End Patch"}</tool-input-json>
+    </test-case>
+
+    <!-- ignored tool: system path asks (absolute) even in strict -->
+    <test-case expected="ask" reason="ignored tool system path asks (absolute)" category="TG-Strict-Ignored">
+      <description>IgnorePathTool C:\Windows\x.dll — ignored but system path asks</description>
+      <tool-name>IgnorePathTool</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\x.dll"}</tool-input-json>
+    </test-case>
+
+    <!-- control -->
+    <test-case expected="allow" reason="read-only: ls" category="TG-Strict-Control">
+      <description>Bash ls /tmp — intercepted command tool classifies read-only</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[ls /tmp]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

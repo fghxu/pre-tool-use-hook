@@ -40,6 +40,29 @@ Under the root dir of the cloned location  (e.g. C:\git\pretoolusehook\).   Edit
 
 On Windows, use a full path or a path relative to your user directory. On macOS/Linux, `~/pretoolusehook/logs/` is a good default.
 
+#### Contributing? Use a private local config (keep `config.json` generic)
+
+The tracked `config.json` is the **generic default** — it must run out of the box for anyone
+who clones the repo, so it should never carry machine-specific settings. If you are developing
+on this project and want your own live settings (log paths, `trusted_programs`,
+`llm_second_opinion` gateway/model, your own `strictness_gated_tool_name` list):
+
+1. Copy the tracked config to a private, git-ignored file:
+   ```powershell
+   Copy-Item config.json config.local.json
+   ```
+   (`config.local.json` is already in `.gitignore`.)
+2. Point the hook at it via the `PRETOOLHOOK_CONFIG_PATH` environment variable (the hook
+   checks this first; unset it and the hook falls back to the tracked `config.json`):
+   ```powershell
+   [Environment]::SetEnvironmentVariable('PRETOOLHOOK_CONFIG_PATH', 'C:\git\pretoolusehook\config.local.json', 'User')
+   ```
+   Restart your IDE/terminal so spawned hook processes inherit the variable.
+3. Edit `config.local.json` freely — it never appears in `git status`. Commit only changes to
+   the generic `config.json`. The test suites run against their own fixtures under
+   `test/config/…` (regenerate the live copies with
+   `test/config/live/Sync-Fixtures.ps1` after editing the root `config.json`).
+
 
 ## Where to Put the Project
 
