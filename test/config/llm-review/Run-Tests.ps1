@@ -299,7 +299,24 @@ $parserCases = @(
     @{ Name = 'LlmParser-BareProseGluedF';   Raw = 'This is a read-only GET request with no data flags.false'; WantVerdict = 'read-only'; WantRecovered = $true },
     # Doubled bare token (glm-5.2 quirk: emits 'truetrue' / 'falsefalse').
     @{ Name = 'LlmParser-BareDoubledT';      Raw = 'truetrue'; WantVerdict = 'modifying'; WantRecovered = $true },
-    @{ Name = 'LlmParser-BareDoubledF';      Raw = 'falsefalse'; WantVerdict = 'read-only'; WantRecovered = $true }
+    @{ Name = 'LlmParser-BareDoubledF';      Raw = 'falsefalse'; WantVerdict = 'read-only'; WantRecovered = $true },
+
+    # === Layer 3.5 (2026-09-15): stray double-quote inside single-quoted prose ===
+    # Pinned from the 2026-09-15 14:00:24 production log: GLM-5.3 echoed a command
+    # containing 'rg "stage' (a DOUBLE quote inside SINGLE-quoted text) in its
+    # analysis prose. ConvertFrom-BalancedJsonObject tracks only double-quote
+    # string state, so the stray " flipped it into "inside string" mode and the
+    # valid {"modifying":[]} glued at the end was never seen -> 0 candidates ->
+    # unusable -> fail-closed ask (local AND LLM both said read-only). Fix: when
+    # the quote-aware scan finds nothing, fall back to a quote-blind balanced-
+    # brace scan. Candidates still pass ConvertFrom-Json + schema validation.
+    # Exact log shape: stray " in 'rg "stage' then read-only JSON glued on.
+    @{ Name = 'LlmParser-StrayDqProseGluedRO'; Raw = 'Pattern ''rg "stage'' is a read-only search. Both are read-only.{"modifying":[]}'; Count = 2; WantVerdict = 'read-only'; WantRecovered = $true; WantIndices = '' },
+    # Same desync shape, modifying answer glued on.
+    @{ Name = 'LlmParser-StrayDqProseGluedMod'; Raw = 'Pattern ''rg "stage'' matches a write marker. Second sub-command modifies.{"modifying":[2]}'; Count = 2; WantVerdict = 'modifying'; WantRecovered = $true; WantIndices = '2' },
+    # Safety guard: stray double-quote but NO JSON and no bare token -> the
+    # fallback must NOT invent a verdict; stays unusable.
+    @{ Name = 'LlmParser-StrayDqNoJson';      Raw = 'Pattern ''rg "stage'' is a read-only search.'; Count = 2; WantVerdict = 'unusable';  WantRecovered = $false }
 )
 foreach ($pc in $parserCases) {
     if (-not (Get-Command ConvertTo-LlmVerdict -ErrorAction SilentlyContinue)) {

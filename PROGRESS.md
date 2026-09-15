@@ -4,7 +4,16 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 (Prior goal — strictness_gated config section + per-domain strictness — COMPLETE; spec: docs/superpowers/specs/2026-07-25-strictness-gated-design.md)
 
 ## Current Step
-(none — v2 feature complete; local/generic config split done; tool-gate strictness suites added)
+(none — LLM verdict-parser stray-double-quote desync fix complete; all suites green 1256/1256, +3 new parser cases)
+
+## LLM verdict parser: stray double-quote in prose -> unusable (2026-09-15, DONE, all suites green 1256/1256, +3 new)
+- User report: production log 2026-09-15 14:00:24 — a purely read-only `Select-String ... | Select-Object` command was forced to ask. Local said allow (read_only ×2), LLM answered `{"modifying":[]}` (read-only), but the response parsed as verdict=unusable -> fail-closed ask.
+- Root cause: ConvertFrom-BalancedJsonObject (src/LlmReview.ps1) tracks string state using DOUBLE quotes only. The LLM's analysis prose echoed a command containing `'rg "stage'` — a double-quote inside single-quoted text. That stray `"` flipped the scanner into permanent "inside string" mode, so the valid `{"modifying":[]}` glued at the end was treated as string content (depth never incremented) -> 0 candidate objects -> Layer 3.5a chatty-model rescue found nothing -> unusable. Probe confirmed: exact raw => 0 objects/unusable; same raw with the stray `"` removed => 1 object/read-only(recovered).
+- Fix (src/LlmReview.ps1, ConvertFrom-BalancedJsonObject): when the quote-aware primary scan finds ZERO objects, run a second quote-blind balanced-brace scan (count {/} depth, ignore quotes) as fallback. Conservative: fires only on zero candidates, never overrides a successful quote-aware extraction. Candidates still pass ConvertFrom-Json + Test-ModifyingArray schema validation in Layer 3.5a, so prose fragments are rejected — the scanner only proposes, the JSON parser disposes. Rescued verdicts stay Recovered=$true.
+- Tests: 3 new LlmParser-* cases in test/config/llm-review/Run-Tests.ps1 $parserCases — StrayDqProseGluedRO (read-only rescue), StrayDqProseGluedMod (modifying rescue idx 2), StrayDqNoJson (safety guard: stray `"` but no JSON/token must stay unusable). RED confirmed 2/3 failing pre-fix (the guard already passed); GREEN 38/38 post-fix.
+- Full pass: 1256/1256 (all 15 suites, zero regressions).
+
+## [pscustomobject]@{...} in Invoke-Command -ScriptBlock: phantom unclassified fix (2026-09-15, DONE, all suites green 1247/1247, +5 new)
 
 ## [pscustomobject]@{...} in Invoke-Command -ScriptBlock: phantom unclassified fix (2026-09-15, DONE, all suites green 1247/1247, +5 new)
 - User report: production log from another machine (2026-09-03) showed a purely read-only command (`Invoke-Command -Session ... -ScriptBlock { [pscustomobject]@{ Test-Path ...; Get-Service ... } }`) decomposed into 8 sub-commands, two of which were `unclassified` (the raw `[pscustomobject]@{...}` text), forcing an unnecessary ask. LLM second-opinion said read-only but "LLM never downgrades" kept the local ask.

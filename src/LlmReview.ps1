@@ -273,6 +273,9 @@ function Test-LlmReviewScope {
 function ConvertFrom-BalancedJsonObject {
     param([AllowNull()][AllowEmptyString()][string]$Text)
     if ([string]::IsNullOrEmpty($Text)) { return @() }
+
+    # Primary pass: quote-aware (tracks double-quoted strings + backslash
+    # escapes). Correct for well-formed prose where quotes are balanced.
     $objs = New-Object System.Collections.Generic.List[string]
     $depth = 0; $inStr = $false; $escape = $false; $start = -1
     for ($i = 0; $i -lt $Text.Length; $i++) {
@@ -295,6 +298,34 @@ function ConvertFrom-BalancedJsonObject {
             }
         }
     }
+
+    # Fallback pass (2026-09-15): if the quote-aware scan found NOTHING, a stray
+    # double-quote in the prose (e.g. 'rg "stage' — a " inside single-quoted
+    # text) desynced it into permanent "inside string" mode and hid a valid
+    # {"modifying":[...]} glued to the end -> unusable -> fail-closed ask even
+    # though local AND LLM both said read-only (2026-09-15 14:00:24 log). Re-scan
+    # IGNORING quotes entirely (pure balanced-brace counting). Candidates may
+    # include prose fragments, but Layer 3.5a still validates each with
+    # ConvertFrom-Json + schema check, so garbage is rejected — the scanner only
+    # proposes, the JSON parser disposes. Conservative: fires ONLY when the
+    # primary scan found zero objects (never overrides a successful quote-aware
+    # extraction).
+    if ($objs.Count -eq 0) {
+        $depth = 0; $start = -1
+        for ($i = 0; $i -lt $Text.Length; $i++) {
+            $c = $Text[$i]
+            if ($c -eq '{') { if ($depth -eq 0) { $start = $i }; $depth++ }
+            elseif ($c -eq '}') {
+                if ($depth -gt 0) {
+                    $depth--
+                    if ($depth -eq 0 -and $start -ge 0) {
+                        $objs.Add($Text.Substring($start, $i - $start + 1)); $start = -1
+                    }
+                }
+            }
+        }
+    }
+
     return ,$objs
 }
 
