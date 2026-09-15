@@ -6,6 +6,13 @@ Design + implement llm_second_opinion: a second-opinion LLM cross-check of the l
 ## Current Step
 (none — v2 feature complete; local/generic config split done; tool-gate strictness suites added)
 
+## [pscustomobject]@{...} in Invoke-Command -ScriptBlock: phantom unclassified fix (2026-09-15, DONE, all suites green 1247/1247, +5 new)
+- User report: production log from another machine (2026-09-03) showed a purely read-only command (`Invoke-Command -Session ... -ScriptBlock { [pscustomobject]@{ Test-Path ...; Get-Service ... } }`) decomposed into 8 sub-commands, two of which were `unclassified` (the raw `[pscustomobject]@{...}` text), forcing an unnecessary ask. LLM second-opinion said read-only but "LLM never downgrades" kept the local ask.
+- Root cause: double-extraction. The AST walker (`Get-PowerShellCommands`) correctly decomposes the ScriptBlock into its constituent cmdlet invocations (Test-Path, Get-Service) and treats `[pscustomobject]@{...}` as a data expression (hashtable literal), NOT a command. But `Find-NestedCommands` (regex) ALSO matches `Invoke-Command ... -ScriptBlock { ... }` and dumps the entire ScriptBlock content as a raw "command" text, then re-splits it — producing phantom entries that fall through to "unknown command" (tier=unclassified).
+- Fix (src/Classifier.ps1, Invoke-Classify combine step): when AST extraction succeeds (`$astCommands.Count -gt 0`), do NOT append `$nestedCommands`. The AST walker already handles all wrapper cases natively (Get-AstWrapperInnerCommands + ScriptBlockAst recursion). `Find-NestedCommands` is a regex fallback for when AST parsing is unavailable; when AST succeeds it only adds phantom entries from data expressions. Fallback paths (AST failed / safe-expressions / no-AST) unchanged.
+- Tests: new suite test/config/live/test-cases.pscustomobject-scriptblock.xml (5 cases): exact log repro, simpler form, modifying-inside-hashtable (still asks), nested pwsh -Command inside [pscustomobject], [pscustomobject] + pipeline. RED confirmed 4/5 failing pre-fix; GREEN 5/5 post-fix.
+- Full pass: 1247/1247 (all 15 suites, zero regressions).
+
 ## tool_name_modifying_strictness test suites in test-strictness-gate/tool-gate/ (2026-08-27, DONE, all suites green 1242/1242, +28 new)
 - User request: dedicated strict/normal test cases for tool_name_modifying_strictness under test/config/test-strictness-gate/, each mode in its own config file with its own test cases, wired into Run-AllTests.
 - New folder test/config/test-strictness-gate/tool-gate/ (mirrors the strictness-gate folder shape: per-mode config + per-mode XML suite + a parent Run-Tests.ps1):
