@@ -540,6 +540,7 @@
         { "name": "head",     "patterns": ["head *"],                          "description": "Output first lines of file" },
         { "name": "tail",     "patterns": ["tail *"],                          "description": "Output last lines of file" },
         { "name": "grep",     "patterns": ["grep *"],                          "description": "Search text patterns (read-only, no -i or redirection)" },
+        { "name": "rg",       "patterns": ["rg *", "rg", "rg.exe *", "rg.exe"], "description": "ripgrep search (read-only)" },
         { "name": "awk",      "patterns": ["awk *"],                           "description": "Text processing (read-only, no redirection)" },
         { "name": "sort",     "patterns": ["sort *", "sort"],                  "description": "Sort lines of text" },
         { "name": "sed",      "patterns": ["sed (?!-i|--in-place).*"],         "description": "Stream editor (read-only, excludes in-place editing)" },
@@ -900,7 +901,7 @@
       "modifying_strictness": "normal",
       "description": "AWS CLI commands — classified by service and operation verb",
       "_comment_tiers": "The operation verb is matched against read_only_prefixes => allow, modifying_prefixes => ask by risk tier; unmatched operations ask. In normal strictness, --flags are stripped before classification so only service + operation decide (disabled in strict mode). Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
-      "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-"],
+      "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-", "search"],
       "modifying_prefixes": {
         "high":   ["delete-", "terminate-", "remove-", "detach-", "deactivate-", "disable-", "revoke-", "deregister-", "execute-"],
         "medium": ["create-", "put-", "update-", "modify-", "attach-", "enable-", "activate-", "register-", "import-", "copy-", "sync", "cp ", "mv ", "start-", "provision-"]
