@@ -826,7 +826,18 @@ function Invoke-LlmReview {
                     if ($ix -eq 0) { $vetoIdx += 0; continue }   # unlisted danger: never suppressible (P3)
                     $sub = $scope.SubCommands[$ix - 1]
                     $isGated = ($sub -and $sub.Tier -eq 'strictness_gated')
-                    if ($isGated -and (Test-GatedInvocationSafe -Command $sub.Command -Config $Config)) {
+                    # Option B: a trusted_program sub-command is UNCONDITIONALLY
+                    # suppressible. The user explicitly whitelisted this program in
+                    # trusted_programs, and the local engine already validated it via
+                    # Test-StatementContainsModifying (no embedded modifying command)
+                    # before stamping the tier. That explicit trust overrides a remote
+                    # LLM veto - no path guard is applied (the trust IS the safety
+                    # decision; gating it would contradict the whitelist).
+                    $isTrusted = ($sub -and $sub.Tier -eq 'trusted_program')
+                    if ($isTrusted) {
+                        $suppIdx += $ix
+                    }
+                    elseif ($isGated -and (Test-GatedInvocationSafe -Command $sub.Command -Config $Config)) {
                         $suppIdx += $ix
                     }
                     else {

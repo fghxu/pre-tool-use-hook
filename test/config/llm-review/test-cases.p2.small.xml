@@ -67,5 +67,40 @@
       <copilot-command><![CDATA[git add .]]></copilot-command>
     </test-case>
 
+    <!-- Option A: collapse 'pwsh -NoProfile -File <script>' into ONE sub-command (the script path) so a standalone trusted-script run drops below the LLM scope threshold (min 2) and the local trusted_program allow stands. Pre-fix it decomposed into 2 (path + wrapper) => in-scope => LLM veto => ask (RED). -->
+    <test-case expected="allow" category="P2-PwshFileTrustedSingleSub" level="complex_commands" mock="idx:1" in-scope="false" verdict="not_called" effect="none" reason="Option A: pwsh -NoProfile -File trusted-script collapses to 1 sub-command (the script path) => below min=2 => out of scope; local trusted_program allow stands. Pre-fix = 2 sub-commands (path + wrapper) => in-scope => LLM veto => ask (RED).">
+      <description>pwsh -File trusted script: single sub-command, out of LLM scope, local allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File "c:\git\cc\pretoolhook\src\Run-AllTests.ps1"]]></copilot-command>
+    </test-case>
+
+    <!-- Guard: an UNTRUSTED script must still fail closed to ask. Passes pre AND post Option A (no scope/verdict asserted so it holds both ways); mock set only to avoid a real HTTP attempt when in-scope pre-fix. -->
+    <test-case expected="ask" category="P2-PwshFileUntrustedGuard" level="complex_commands" mock="idx:1" reason="guard: pwsh -File UNTRUSTED script stays fail-closed ask (bare path unclassified); passes pre AND post Option A">
+      <description>pwsh -File untrusted script: still asks (fail-closed preserved)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File "c:\temp\not-trusted-xyz.ps1"]]></copilot-command>
+    </test-case>
+
+    <!-- Option B: a trusted_program sub-command gets the SAME suppression power as strictness_gated in the LLM merge. Sub 1 = the fixture's trusted script (src\Run-AllTests.ps1), sub 2 = git status (read_only). The LLM flags ONLY the trusted one (idx:1); post-fix it is suppressed by policy => local allow stands. Pre-fix trusted_program was NOT suppressible => veto => ask (RED). -->
+    <test-case expected="allow" category="P2-TrustedProgramSuppressed" level="complex_commands" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="Option B: LLM flags the trusted_program sub-command (idx 1); it is now suppressible like strictness_gated => all flags suppressed => local allow stands. Pre-fix trusted_program vetoed => ask (RED).">
+      <description>trusted_program flag suppressed by policy (mirrors strictness_gated)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File "c:\git\cc\pretoolhook\src\Run-AllTests.ps1" ; git status]]></copilot-command>
+    </test-case>
+
+    <!-- Option B guard: suppression is per-tier. The LLM flags the read_only sub-command (idx 2 = git status), NOT the trusted one. read_only has no suppression power => veto stands => ask. Passes pre AND post Option B (pins that trusted_program power does not leak to other tiers). -->
+    <test-case expected="ask" category="P2-TrustedProgramReadOnlyStillVetoes" level="complex_commands" mock="idx:2" in-scope="true" verdict="modifying" effect="veto" flagged="2" suppressed="" reason-contains="git status" reason="Option B guard: LLM flags the read_only sub-command (git status, idx 2); read_only is never suppressible => veto => ask. Confirms trusted_program power does not extend to other tiers.">
+      <description>read_only flag still vetoes even when a sibling is trusted</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File "c:\git\cc\pretoolhook\src\Run-AllTests.ps1" ; git status]]></copilot-command>
+    </test-case>
+
+    <!-- Option B end-to-end (fullpipe): through the REAL hook process, a trusted_program flag is suppressed and the reconciliation log carries the tier-accurate label 'all suppressed (trusted_program policy)'. curl keeps the block in scope at the fixture's own complex_remote level. Pre-fix: trusted vetoed => ask + wrong label (RED). -->
+    <test-case expected="allow" category="P2-TrustedProgramFullPipeSuppressed" mode="fullpipe" mock="idx:1" log-contains="LLM-RECONCILE;all suppressed (trusted_program policy)" reason="Option B fullpipe: trusted flag suppressed end-to-end + the child hook's .log reconcile line names the trusted_program tier (not strictness_gated).">
+      <description>fullpipe: trusted suppression + tier-accurate reconciliation label</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File "c:\git\cc\pretoolhook\src\Run-AllTests.ps1" ; curl http://h/y]]></copilot-command>
+    </test-case>
+
   </category-group>
 </commands>

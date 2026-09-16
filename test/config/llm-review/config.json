@@ -11,6 +11,11 @@
   "trusted_pattern": [],
   "untrusted_pattern": [],
 
+  "_comment_trusted_programs": "Option A (pwsh -File collapse) needs a trusted script so the standalone 'pwsh -NoProfile -File <trusted>.ps1' form classifies as allow locally. Path-suffix entry: matches any full path ending in src\\Run-AllTests.ps1.",
+  "trusted_programs": [
+    "src\\Run-AllTests.ps1"
+  ],
+
   "_comment_system_paths": "Needed by the stage-2 path-guard (Test-GatedInvocationSafe): without system_paths the compiled regex matches NOTHING and Resolve-PathPolicy allows C:\\Windows at normal. Windows entries are regex (not escaped by the loader) -> quadruple backslashes in JSON.",
   "system_paths": {
     "linux": ["/etc", "/usr", "/bin", "/sbin"],
