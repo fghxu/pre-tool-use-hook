@@ -76,11 +76,23 @@ function Get-CommandDomain {
     # Step 0: PowerShell variable assignment strip
     #   "$creds = aws sts get-caller-identity" → "aws sts get-caller-identity"
     #   "$x = git status" → "git status"
-    #   Strips the first $var = prefix, then re-detects domain from remainder.
-    #   Safe against comparison operators (-eq, -ne, -lt) because they start
-    #   with '-', not '$'.  Chained assignments ($a = $b = cmd) are handled
-    #   by recursion.
+    #   "[xml]$cfg = Invoke-RestMethod ..." → "Invoke-RestMethod ..." (type-cast)
+    #   Strips the first [type]$var = / $var = prefix, then re-detects domain
+    #   from remainder. The LHS of an assignment is not a command; the RHS
+    #   decides the domain (so "[int]$x = git status" routes to git, exactly
+    #   like "$x = git status"). Safe against comparison operators (-eq, -ne,
+    #   -lt) because they start with '-', not '$'. Chained assignments
+    #   ($a = $b = cmd) are handled by recursion. The type-cast form is
+    #   anchored at ^ and requires "$var =" immediately after the closing ],
+    #   so a bash "[token]" (test builtin / [[ ... ]]) can never match;
+    #   generic casts ([List[string]]$x) do not match and stay fail-closed.
     # -------------------------------------------------
+    if ($trimmed -match '^\[[\w.]+\]\s*\$[\w:]+\s*=\s*') {
+        $stripped = [regex]::Replace($trimmed, '^\[[\w.]+\]\s*\$[\w:]+\s*=\s*', '', 1)
+        if ($stripped -and $stripped -ne $trimmed) {
+            return Get-CommandDomain -Command $stripped
+        }
+    }
     if ($trimmed -match '\$[\w:]+\s*=\s*') {
         $stripped = [regex]::Replace($trimmed, '\$[\w:]+\s*=\s*', '', 1)
         if ($stripped -and $stripped -ne $trimmed) {

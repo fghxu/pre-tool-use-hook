@@ -2,7 +2,15 @@
 Maintenance mode: the PreToolUse safety hook (local classifier + llm_second_opinion cross-check) is feature-complete. Current work = fixing production mis-classifications and extending config coverage for new tools.
 
 ## Current Step
-(none — Option B trusted_program LLM-suppression implemented + tested; all suites green 1261/1261, +3 new. Awaiting user go-ahead to checkin+push.)
+(none — type-cast assignment domain fix implemented + tested; all suites green 1267/1267, +6 new. Awaiting user go-ahead to checkin+push.)
+
+## Type-cast assignment `[type]$var = ...` mis-routed to linux (2026-09-16, DONE, all suites green 1267/1267, +6 new)
+- User report: production log 2026-09-16 — a purely read-only Jenkins config fetch (`[xml]$ChildConfig = Invoke-RestMethod -Method Get ... ; [pscustomobject]@{...} | ConvertTo-Json`) forced ask. LLM said read-only but "LLM never downgrades" kept the local ask. Local tiers: [1]=unclassified [2]=unclassified [3]=read_only.
+- Root cause: `Get-CommandDomain` Step 0 strips `$var = ` prefixes, but for a TYPE-CAST assignment it left the `[xml]` cast glued to the cmdlet (`[xml]Invoke-RestMethod ...`), so the start-anchored Verb-Noun match failed and no other PowerShell marker fired => whole-command domain fell back to LINUX. With domain=linux the AST walker never runs (Classifier.ps1:558 gate); each raw segment is classified against Linux patterns => the type-cast statement and the [pscustomobject] data expression both become "unknown command" (unclassified) => ask. The AST walker itself handles the command perfectly when fed directly (extracts Invoke-RestMethod, skips the data expression) — only the domain gate was wrong.
+- Fix (src/Parser.ps1, Get-CommandDomain Step 0): extended the assignment-strip semantic to also strip a leading `[type]$var = ` prefix via anchored regex `^\[[\w.]+\]\s*\$[\w:]+\s*=\s*` (checked before the plain `$var =` strip). Same meaning as the existing strip: the LHS is not a command, the RHS decides the domain (`[int]$x = git status` routes to git, like `$x = git status`). Anchored at ^ and requires `$var =` right after `]`, so bash `[token]` (test builtin / [[ ... ]]) can never match; generic casts ([List[string]]$x) don't match and stay fail-closed.
+- Tests: new suite test/config/live/test-cases.typecast-domain.xml (6 cases, wired into Run-AllTests.ps1 $suiteConfig with -ConfigPath test\config\live\config.json): exact log repro (short URL https://server/config.xml), simpler single-statement form, modifying-RHS guard ([xml]$x = Remove-Item => ask), static-member guard ([Console]::Title = 'x' => ask, unaffected), plain-assignment regression pin ($x = git status => allow), generic-cast fail-closed guard. RED confirmed 2/6 failing pre-fix; GREEN 6/6 post-fix.
+- Merge (same day): user reviewed both data-expression suites and merged them into test/config/live/test-cases-regression.xml (11 cases: PSCustomObject-ScriptBlock group + TypeCast-Domain group); the two old files (test-cases.pscustomobject-scriptblock.xml, test-cases.typecast-domain.xml) were deleted and Run-AllTests.ps1 $suiteConfig now lists test-cases-regression.xml. Full run still 1267/1267.
+- Full pass: 1267/1267 (all 16 suites, zero regressions — main test-cases.xml 781 incl. AST-Arbiter-Guard).
 
 ## Option B: `trusted_program` gets LLM-veto suppression power (2026-09-16, DONE, all suites green 1261/1261, +3 new)
 - User request: "give trusted_program suppression power in the merge, mirroring strictness_gated. I already give the trusted_program; these should override the remote LLM."
@@ -46,7 +54,7 @@ Maintenance mode: the PreToolUse safety hook (local classifier + llm_second_opin
 - All entries before 2026-09-15 (July-August: strictness_gated + per-domain strictness, tool-gate v2 / system_paths absolute, local-vs-generic config split, DSH wiring, ask_notification, check_blindspot, LLM second-opinion phases I-III, parser/verb/static-allowlist fixes, security audits) were removed from this file on 2026-09-15 to keep it current. Details live in the user's PROGRESS.md backup and in git history (PROGRESS.md was committed with each change).
 
 ## Next Steps
-- Awaiting user go-ahead to checkin + push Option A (src/Parser.ps1) and Option B (src/LlmReview.ps1, src/Logger.ps1) + llm-review fixture (config.json trusted_programs, small XML +5 cases total).
+- Awaiting user go-ahead to checkin + push the type-cast domain fix (src/Parser.ps1, src/Run-AllTests.ps1, test/config/live/test-cases-regression.xml [merged suite]).
 - Optional: pin `rg` read-only with a TDD case in the live suite (today it is covered only by the config.local.json entry).
 
 ## Blockers / Notes

@@ -63,6 +63,10 @@ $suiteConfig = @{
         Args       = @('-ConfigPath', (Join-Path $testDir 'config.json'))
         KnownFails = 0
     }
+    'test-cases-regression.xml' = @{
+        Args       = @('-ConfigPath', (Join-Path $testDir 'config.json'))
+        KnownFails = 0
+    }
 }
 
 $xmlFiles = @(Get-ChildItem -Path $testDir -Filter '*.xml' -File | Sort-Object Name)
