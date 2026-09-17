@@ -102,5 +102,19 @@
       <copilot-command><![CDATA[pwsh -NoProfile -File "c:\git\cc\pretoolhook\src\Run-AllTests.ps1" ; curl http://h/y]]></copilot-command>
     </test-case>
 
+    <!-- strict_gate_override_llm switch (2026-09-16 spec). Sub 2 = git commit carrying a SYSTEM-PATH token, so the stage-2 path guard DENIES suppression. Switch false/absent => veto stands => ask (guard case: passes pre AND post; pins that the default does not loosen today's reconciliation). The safe-path + switch-false => suppressed behavior is already pinned by P2-GatedBothSuppressed above. -->
+    <test-case expected="ask" category="P2-GateOverride-DefaultDenies" level="complex_commands" strictness="normal" mock="idx:2" in-scope="true" verdict="modifying" effect="veto" flagged="2" suppressed="" reason="switch absent (default false): gated flag + path-guard DENIAL (system-path token) => veto stands => ask. Pins default = today's reconciliation, not unconditional suppression.">
+      <description>switch off: path-guard denial still vetoes a gated flag</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m "x" C:\Windows\a.txt]]></copilot-command>
+    </test-case>
+
+    <!-- strict_gate_override_llm=true: the local (config-declared) gated decision OVERPOWERS the online LLM, exactly like trusted_program — path guard bypassed. RED pre-fix (attribute not yet read by runner/merge => guard denies => ask); GREEN post-fix. -->
+    <test-case expected="allow" category="P2-GateOverride-SwitchTrueSuppresses" level="complex_commands" strictness="normal" strict_gate_override="true" mock="idx:2" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="2" suppressed="2" reason="switch true: gated flag unconditionally suppressed (trusted_program-style) even though the path guard would deny (system-path token) => local allow stands. RED pre-fix.">
+      <description>switch on: local gated decision overpowers online LLM despite guard denial</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . ; git commit -m "x" C:\Windows\a.txt]]></copilot-command>
+    </test-case>
+
   </category-group>
 </commands>

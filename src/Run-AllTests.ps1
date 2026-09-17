@@ -67,6 +67,14 @@ $suiteConfig = @{
         Args       = @('-ConfigPath', (Join-Path $testDir 'config.json'))
         KnownFails = 0
     }
+    'test-cases.git-param.xml' = @{
+        Args       = @('-ConfigPath', (Join-Path $testDir 'config.json'))
+        KnownFails = 0
+    }
+    'test-cases.git-param-strict.xml' = @{
+        Args       = @('-ConfigPath', (Join-Path $testDir 'config.json'), '-Strictness', 'strict')
+        KnownFails = 0
+    }
 }
 
 $xmlFiles = @(Get-ChildItem -Path $testDir -Filter '*.xml' -File | Sort-Object Name)

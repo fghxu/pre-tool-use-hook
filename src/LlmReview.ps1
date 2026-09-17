@@ -822,6 +822,12 @@ function Invoke-LlmReview {
                 $vetoIdx = @()
                 $suppIdx = @()
                 $pgDenied = @()
+                # strict_gate_override_llm (2026-09-16, default false): when true, a
+                # local strictness_gated decision UNCONDITIONALLY overpowers an online
+                # LLM veto (trusted_program-style; path guard bypassed). When false/
+                # absent, today's reconciliation stands (the path guard decides).
+                $gateOverride = ($Config._compiled.llmSecondOpinion -and
+                    $Config._compiled.llmSecondOpinion.StrictGateOverrideLlm)
                 foreach ($ix in $verdict.Indices) {
                     if ($ix -eq 0) { $vetoIdx += 0; continue }   # unlisted danger: never suppressible (P3)
                     $sub = $scope.SubCommands[$ix - 1]
@@ -835,6 +841,11 @@ function Invoke-LlmReview {
                     # decision; gating it would contradict the whitelist).
                     $isTrusted = ($sub -and $sub.Tier -eq 'trusted_program')
                     if ($isTrusted) {
+                        $suppIdx += $ix
+                    }
+                    elseif ($isGated -and $gateOverride) {
+                        # Switch on: local gated decision overpowers the LLM, exactly
+                        # like trusted_program (path guard bypassed).
                         $suppIdx += $ix
                     }
                     elseif ($isGated -and (Test-GatedInvocationSafe -Command $sub.Command -Config $Config)) {

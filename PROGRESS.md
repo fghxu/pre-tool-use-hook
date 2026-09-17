@@ -2,7 +2,33 @@
 Maintenance mode: the PreToolUse safety hook (local classifier + llm_second_opinion cross-check) is feature-complete. Current work = fixing production mis-classifications and extending config coverage for new tools.
 
 ## Current Step
-(none — type-cast assignment domain fix implemented + tested; all suites green 1267/1267, +6 new. Awaiting user go-ahead to checkin+push.)
+DONE (2026-09-16): parameter_commands subcommand framework + git migration implemented on branch `parameter_commands_rework`. Full regression 1305/1305 green. See entry below.
+
+## Git global-flag misclassification → subcommand framework (2026-09-16, DONE, all suites green 1305/1305)
+- User report: production log 2026-09-16 12:57 — `git --no-pager log -1 --format=%B` forced ask (tier unregistered). Git tier patterns are start-anchored; global flags between `git` and the subcommand break them. Step 0d stripped only -C/-c/--git-dir/--work-tree/--namespace/--exec-path, not --no-pager.
+- Design (spec: docs/Updates/Update-2026-09-16-parameter-commands-subcommand-framework.md, SPEC v3 FINAL): extend parameter_commands with subcommand rules (phrase = prefix of positional sequence), compound rules (subcommand + flag), global_value_flags (dash forms; walker consumes value token unconditionally), strictness_gated rule decision (entry-level modifying_strictness, global forces), no-positional fallback = truly-bare→allow(usage) / flags-without-subcommand→ask(unregistered, fail-closed) [post-review correction], unknown positional → ask tier unregistered (reason text unchanged for check_blindspot compat).
+- New LLM switch llm_second_opinion.strict_gate_override_llm (default false): true = gated sub-commands unconditionally suppress LLM flags (trusted_program-style); false = today's path-guard reconciliation.
+- Git migrates to Linux.parameter_commands.git; Parser.ps1 ^git\b routing line removed (git falls through to linux domain). 1:1 rule mapping of all current tier entries + ONE new GATED flag rule (--output, long form only due to -o/-O lowercase collision); git fetch stays read-only; bare git → allow.
+- /flag (DOS) support DROPPED from the framework per user decision (leading-path ambiguity on Linux tools); pre-existing DOS flag-rule branch untouched.
+
+### Code changes (green phase)
+- src/Parser.ps1: removed `@{ Pattern = '^git\b'; Domain = 'git' }` from $script:KnownBinaryPrefixes (comment left explaining why).
+- src/Resolver.ps1: (a) Get-EffectiveStrictness gained optional -Entry param (global forces → entry modifying_strictness → domain → normal); existing callers unaffected. (b) Step 0d git global-flag stripping block REMOVED (superseded by global_value_flags walker). (c) line-801 unregistered-fallback domain list trimmed 'git' → @('docker','kubernetes','terraform'). (d) Get-ShellParameterMap: opt-in subcommand/positionals capture (only for entries with a subcommand rule) — separate walk before the unchanged flag-map loop; dash-tokens skipped, global_value_flags consume next token unconditionally, first non-dash = subcommand, all positionals → reserved '_positionals'. (e) New Test-RuleMatch helper (subcommand prefix AND/OR param condition). (f) Evaluate-ParameterRules rewritten: eval order modifying → strictness_gated → read-only → fallback; gated uses entry-aware effective strictness; no-match for subcommand entries = bare→allow(usage) / positional→ask(unregistered); flag-only entries keep legacy unrecognized-value + default path.
+- src/ConfigLoader.ps1: parameter_commands validation extended (rule forms A/B/C; decision vocabulary += strictness_gated; entry modifying_strictness ∈ strict/normal/loose; global_value_flags = dash-tokens). Parse llm_second_opinion.strict_gate_override_llm (bool, default false) → _compiled.llmSecondOpinion.StrictGateOverrideLlm.
+- src/LlmReview.ps1: attributed merge loop — for a flagged strictness_gated sub-command, StrictGateOverrideLlm=true ⇒ unconditional suppress (trusted_program-style, path guard bypassed); false/absent ⇒ today's Test-GatedInvocationSafe reconciliation. trusted_program + index-0 unchanged.
+- test/config/llm-review/Run-Tests.ps1: per-case strict_gate_override="true|false" attribute → sets $llmCfg.StrictGateOverrideLlm (Add-Member -Force, mirrors AttributedVerdicts).
+
+### Config migration (7 files)
+Migrated git tier lists → Linux.parameter_commands.git and removed the now-dead top-level Git domain: config.json (root), test/config/live/config.json + config.strict.json (regenerated via Sync-Fixtures.ps1 from root), test/config/llm-review/config.json, test/config/test-strictness-gate/normal/config.normal.json, test/config/test-strictness-gate/strict/config.strict.json, config.local.json. NOT touched: config - Copy.json / config.local - Copy.json (user backups), llm-review config.badlevel/badtype.json (negative fixtures).
+
+### TDD
+- RED (pre-fix): git-param normal 6 fails (original failure, bare git, --version, case-insensitive LOG, logg→allow, ssh-wrapped); git-param strict 2 fails (--no-pager log, diff --output→allow); llm-review SwitchTrueSuppresses fail (DefaultDenies guard passed as designed).
+- GREEN: git-param normal 26/26, strict 10/10, llm-review small 45/45.
+- Regression: full Run-AllTests.ps1 = 1305/1305.
+- Post-review correction (user challenge): `git --online -3` is NOT read-only — it's an invalid command (--online is a typo of --oneline, no subcommand). The first GREEN pass wrongly allowed any no-positional invocation as "usage" and I had flipped the two pre-existing flag-only cases (git -C C:\repo --online -3, git --online -3) to allow. Fixed: Get-ShellParameterMap now tracks _hadFlags; the step-4 fallback distinguishes truly-bare `git` (no flags → allow, usage) from flags-without-subcommand (→ ask, tier unregistered, fail-closed). Both cases reverted to their original expected="ask". Added a dedicated git-param case (`git --online -3` → ask) to pin the new behavior. Re-ran full regression: 1306/1306.
+
+### Roadmap
+Phase 1 (git pilot) DONE. Phase 2 = terraform → Linux.parameter_commands.terraform (+ remove ^terraform\b routing, drop Terraform section). Phase 3 = docker/k8s/npm/gh/etc. Phase 4 = rename Linux domain to a neutral name (e.g. ExternalTools).
 
 ## Type-cast assignment `[type]$var = ...` mis-routed to linux (2026-09-16, DONE, all suites green 1267/1267, +6 new)
 - User report: production log 2026-09-16 — a purely read-only Jenkins config fetch (`[xml]$ChildConfig = Invoke-RestMethod -Method Get ... ; [pscustomobject]@{...} | ConvertTo-Json`) forced ask. LLM said read-only but "LLM never downgrades" kept the local ask. Local tiers: [1]=unclassified [2]=unclassified [3]=read_only.
@@ -54,8 +80,8 @@ Maintenance mode: the PreToolUse safety hook (local classifier + llm_second_opin
 - All entries before 2026-09-15 (July-August: strictness_gated + per-domain strictness, tool-gate v2 / system_paths absolute, local-vs-generic config split, DSH wiring, ask_notification, check_blindspot, LLM second-opinion phases I-III, parser/verb/static-allowlist fixes, security audits) were removed from this file on 2026-09-15 to keep it current. Details live in the user's PROGRESS.md backup and in git history (PROGRESS.md was committed with each change).
 
 ## Next Steps
-- Awaiting user go-ahead to checkin + push the type-cast domain fix (src/Parser.ps1, src/Run-AllTests.ps1, test/config/live/test-cases-regression.xml [merged suite]).
-- Optional: pin `rg` read-only with a TDD case in the live suite (today it is covered only by the config.local.json entry).
+- User reviews spec section 9 (test-case table) + section 11 (open items: entry key name, Step 0d dead code, line-801 trim). Green light → write red tests.
+- After green: checkin + push (type-cast fix a1bd735 already pushed; this batch = framework + git migration).
 
 ## Blockers / Notes
 - None. Live hook reads config.local.json via PRETOOLHOOK_CONFIG_PATH; it loads clean and all rg forms classify allow/read_only.

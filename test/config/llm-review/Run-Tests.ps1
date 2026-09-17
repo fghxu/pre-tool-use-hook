@@ -503,6 +503,12 @@ foreach ($tc in $testCases) {
     $attrWant = $true
     if ($tc.HasAttribute('attributed')) { $attrWant = [bool]::Parse($tc.GetAttribute('attributed')) }
     $llmCfg | Add-Member -MemberType NoteProperty -Name 'AttributedVerdicts' -Value $attrWant -Force
+    # strict_gate_override_llm (2026-09-16). Per-case override; default false. When
+    # true, a local strictness_gated decision overpowers the online LLM veto in the
+    # attributed merge (trusted_program-style; path guard bypassed).
+    $gateOverrideWant = $false
+    if ($tc.HasAttribute('strict_gate_override')) { $gateOverrideWant = [bool]::Parse($tc.GetAttribute('strict_gate_override')) }
+    $llmCfg | Add-Member -MemberType NoteProperty -Name 'StrictGateOverrideLlm' -Value $gateOverrideWant -Force
     # check_blindspot (optional). Default off. The compiled block always has a
     # CheckBlindspot sibling (the loader adds one); the per-case attribute toggles
     # Enabled on it so check_blindspot cases fire without editing config files.

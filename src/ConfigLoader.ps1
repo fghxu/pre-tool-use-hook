@@ -486,20 +486,49 @@ function Test-ConfigSchema {
                 if (-not (Get-Member -InputObject $pEntry -Name 'default' -MemberType NoteProperty) -or $pEntry.default -notin @('read-only','modifying')) {
                     throw "Configuration validation failed: parameter_commands entry '$cmdName' (domain '$domainKey') must have 'default' of 'read-only' or 'modifying'"
                 }
-                foreach ($rule in $pEntry.rules) {
-                    if (-not (Get-Member -InputObject $rule -Name 'param' -MemberType NoteProperty)) {
-                        throw "Configuration validation failed: rule in '$cmdName' (domain '$domainKey') missing 'param'"
+                # Entry-level modifying_strictness (optional): per-entry strictness
+                # mode, consulted only when the global is 'normal' (see Get-EffectiveStrictness).
+                if (Get-Member -InputObject $pEntry -Name 'modifying_strictness' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+                    if ($pEntry.modifying_strictness -notin @('strict','normal','loose')) {
+                        throw "Configuration validation failed: parameter_commands entry '$cmdName' (domain '$domainKey') modifying_strictness must be 'strict', 'normal', or 'loose', got '$($pEntry.modifying_strictness)'"
                     }
-                    if (-not (Get-Member -InputObject $rule -Name 'match' -MemberType NoteProperty) -or $rule.match -notin @('present','values')) {
-                        throw "Configuration validation failed: rule in '$cmdName' (domain '$domainKey') must have 'match' of 'present' or 'values'"
-                    }
-                    if ($rule.match -eq 'values') {
-                        if (-not (Get-Member -InputObject $rule -Name 'values' -MemberType NoteProperty) -or -not $rule.values) {
-                            throw "Configuration validation failed: values-rule in '$cmdName' (domain '$domainKey') must have a non-empty 'values' array"
+                }
+                # Entry-level global_value_flags (optional): dash-tokens that consume
+                # the following token as their value during subcommand detection.
+                if ((Get-Member -InputObject $pEntry -Name 'global_value_flags' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and $pEntry.global_value_flags) {
+                    foreach ($g in $pEntry.global_value_flags) {
+                        if (-not "$g".StartsWith('-')) {
+                            throw "Configuration validation failed: parameter_commands entry '$cmdName' (domain '$domainKey') global_value_flags must be dash-tokens (start with '-'), got '$g'"
                         }
                     }
-                    if (-not (Get-Member -InputObject $rule -Name 'decision' -MemberType NoteProperty) -or $rule.decision -notin @('read-only','modifying')) {
-                        throw "Configuration validation failed: rule in '$cmdName' (domain '$domainKey') must have 'decision' of 'read-only' or 'modifying'"
+                }
+                foreach ($rule in $pEntry.rules) {
+                    # Rule forms (2026-09-16 subcommand framework):
+                    #   A: subcommand only            (prefix match on positionals)
+                    #   B: subcommand + param         (prefix AND flag condition)
+                    #   C: param only                 (legacy flag-only rule)
+                    $hasSub = Get-Member -InputObject $rule -Name 'subcommand' -MemberType NoteProperty -ErrorAction SilentlyContinue
+                    $hasParam = Get-Member -InputObject $rule -Name 'param' -MemberType NoteProperty -ErrorAction SilentlyContinue
+                    if (-not $hasSub -and -not $hasParam) {
+                        throw "Configuration validation failed: rule in '$cmdName' (domain '$domainKey') must have a 'subcommand' list and/or a 'param' list"
+                    }
+                    if ($hasSub) {
+                        if (-not $rule.subcommand -or @($rule.subcommand).Count -eq 0) {
+                            throw "Configuration validation failed: subcommand rule in '$cmdName' (domain '$domainKey') must have a non-empty 'subcommand' list"
+                        }
+                    }
+                    if ($hasParam) {
+                        if (-not (Get-Member -InputObject $rule -Name 'match' -MemberType NoteProperty) -or $rule.match -notin @('present','values')) {
+                            throw "Configuration validation failed: rule in '$cmdName' (domain '$domainKey') must have 'match' of 'present' or 'values'"
+                        }
+                        if ($rule.match -eq 'values') {
+                            if (-not (Get-Member -InputObject $rule -Name 'values' -MemberType NoteProperty) -or -not $rule.values) {
+                                throw "Configuration validation failed: values-rule in '$cmdName' (domain '$domainKey') must have a non-empty 'values' array"
+                            }
+                        }
+                    }
+                    if (-not (Get-Member -InputObject $rule -Name 'decision' -MemberType NoteProperty) -or $rule.decision -notin @('read-only','modifying','strictness_gated')) {
+                        throw "Configuration validation failed: rule in '$cmdName' (domain '$domainKey') must have 'decision' of 'read-only', 'modifying', or 'strictness_gated'"
                     }
                 }
             }
@@ -629,6 +658,12 @@ function Load-Config {
         if (Get-Member -InputObject $llmRaw -Name 'attributed_verdicts' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmAttributed = [bool]$llmRaw.attributed_verdicts }
         $llmJsonMode = $false
         if (Get-Member -InputObject $llmRaw -Name 'json_mode' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmJsonMode = [bool]$llmRaw.json_mode }
+        # strict_gate_override_llm (2026-09-16, default false): when true, a local
+        # strictness_gated decision UNCONDITIONALLY overpowers an online-LLM veto in
+        # the attributed merge (trusted_program-style; path guard bypassed). When
+        # false/absent, today's reconciliation stands (path guard decides).
+        $llmGateOverride = $false
+        if (Get-Member -InputObject $llmRaw -Name 'strict_gate_override_llm' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $llmGateOverride = [bool]$llmRaw.strict_gate_override_llm }
         # check_blindspot sub-block (optional). Compiled into a sibling CheckBlindspot
         # object the scope engine consults after the normal scope gate fails.
         # Default tiers = all local-unknown tiers. CHECK_BLINDSPOT NEVER CHANGES THE
@@ -655,6 +690,7 @@ function Load-Config {
             ComplexMinSubcommands = $llmMinSubs
             AttributedVerdicts      = $llmAttributed
             JsonMode                = $llmJsonMode
+            StrictGateOverrideLlm   = $llmGateOverride
             RemoteIndicators      = $indicatorRegexes
             CheckBlindspot        = $cbCompiled
         }

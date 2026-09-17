@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GIT PARAMETER_COMMANDS SUITE (strict mode).
+     Validates that strictness_gated rules ASK when effective strictness is strict.
+     Run against test/config/live/config.json with -Strictness strict.
+     Wired into Run-AllTests.ps1 $suiteConfig. -->
+<commands>
+  <category-group name="GitParam-Strict">
+
+    <!-- === Read-only subcommands: unaffected by strictness === -->
+    <test-case expected="allow" reason="read-only always allows" category="GitParamStrict-ReadOnly">
+      <description>git status (read-only, strict still allows)</description>
+      <copilot-command><![CDATA[git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only with global flag" category="GitParamStrict-ReadOnly">
+      <description>git --no-pager log (read-only, strict still allows)</description>
+      <copilot-command><![CDATA[git --no-pager log -1]]></copilot-command>
+    </test-case>
+
+    <!-- === Strictness-gated: ASK in strict mode === -->
+    <test-case expected="ask" reason="gated asks in strict" category="GitParamStrict-Gated">
+      <description>git worktree add x (gated, strict => ask)</description>
+      <copilot-command><![CDATA[git worktree add c:\temp\wt]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="gated compound asks in strict" category="GitParamStrict-Gated">
+      <description>git tag -a v1 -m msg (gated compound, strict => ask)</description>
+      <copilot-command><![CDATA[git tag -a v1 -m "release"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="gated multi-word phrase asks in strict" category="GitParamStrict-Gated">
+      <description>git remote add origin url (gated, strict => ask)</description>
+      <copilot-command><![CDATA[git remote add origin https://github.com/x/y.git]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="gated subcommand asks in strict" category="GitParamStrict-Gated">
+      <description>git commit -m "fix" (gated, strict => ask)</description>
+      <copilot-command><![CDATA[git commit -m "fix bug"]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="gated subcommand asks in strict (add)" category="GitParamStrict-Gated">
+      <description>git add . (gated, strict => ask)</description>
+      <copilot-command><![CDATA[git add .]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="gated flag rule (--output) asks in strict; outranks read-only subcommand (diff)" category="GitParamStrict-Gated">
+      <description>git diff --output=C:\temp\out.txt (gated flag, strict => ask; RED pre-fix: old 'git diff*' tier pattern allows even in strict)</description>
+      <copilot-command><![CDATA[git diff --output=C:\temp\out.txt]]></copilot-command>
+    </test-case>
+
+    <!-- === Modifying: always ask (unchanged) === -->
+    <test-case expected="ask" reason="modifying always asks" category="GitParamStrict-Modifying">
+      <description>git push origin main (modifying, strict => ask)</description>
+      <copilot-command><![CDATA[git push origin main]]></copilot-command>
+    </test-case>
+
+    <!-- === Fail-closed: unchanged in strict === -->
+    <test-case expected="ask" reason="unregistered subcommand (fail-closed)" category="GitParamStrict-FailClosed">
+      <description>git frobnicate (unknown, strict => ask)</description>
+      <copilot-command><![CDATA[git frobnicate]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

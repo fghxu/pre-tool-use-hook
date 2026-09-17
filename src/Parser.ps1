@@ -30,7 +30,9 @@ $script:KnownBinaryPrefixes = @(
     @{ Pattern = '^helm\b';               Domain = 'kubernetes' },
     @{ Pattern = '^terraform\b';          Domain = 'terraform'  },
     @{ Pattern = '^aws\s';                Domain = 'aws_cli'    },
-    @{ Pattern = '^git\b';                Domain = 'git'        },
+    # NOTE: git is intentionally NOT routed to a 'git' domain (2026-09-16
+    # parameter_commands rework). It classifies via Linux.parameter_commands.git
+    # (Step 7), so subcommands/flags may appear anywhere in the command line.
     @{ Pattern = '^(pwsh|powershell)\b';  Domain = 'powershell' },
     @{ Pattern = '^cmd\s+/c';             Domain = 'dos'        }
 )
