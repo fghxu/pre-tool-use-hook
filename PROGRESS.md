@@ -2,7 +2,7 @@
 Maintenance mode: the PreToolUse safety hook (local classifier + llm_second_opinion cross-check) is feature-complete. Current work = fixing production mis-classifications and extending config coverage for new tools.
 
 ## Current Step
-(none — Layer 1 + Layer 2 merged into master; live config.local.json switched to new format with GetNetworkCredential. Awaiting full-regression verification on the merged tree.)
+(none — Layer 1 + Layer 2 merged into master (523c2fe) and pushed; merged-tree regression 1311/1311 green (framework 1306 + 5 new); live config.local.json switched to new format with GetNetworkCredential.)
 
 ## MiobuildHeaders "unknown command": Layer 1 allowlist + Layer 2 atomic unknown (2026-09-17, DONE, all suites green 1272/1272, +5 new)
 - User report: production log 2026-09-17 11:01:47 — a purely in-memory Basic-auth header assignment (`$global:MiobuildHeaders = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($global:MiobuildCredential.UserName):$($global:MiobuildCredential.GetNetworkCredential().Password)")) }`) forced ask (tiers [1]=unclassified [2]=unclassified, reason showed TWO bogus fragments). LLM said read-only but "LLM never downgrades" kept the local ask.
