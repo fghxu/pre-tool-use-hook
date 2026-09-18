@@ -146,9 +146,20 @@ for ($i = 0; $i -lt $total; $i++) {
         $reasonContains = $tc.GetAttribute('reason-contains').Trim()
     }
 
+    # Optional subresult-tier assertion (pins a SubResult's Tier, not just the
+    # top-level decision). Needed when two behaviors share the same Decision +
+    # Reason but differ in per-sub-command tier (e.g. a trusted-script run that
+    # must carry tier=trusted_program so the LLM merge can suppress a flag).
+    # Absent on all pre-existing cases -> behavior unchanged (decision-only).
+    $subresultTier = ""
+    if ($tc -is [System.Xml.XmlElement]) {
+        $subresultTier = $tc.GetAttribute('subresult-tier').Trim()
+    }
+
     $decisionOk = ($result.Decision -eq $tc.expected)
     $reasonOk   = (-not $reasonContains) -or ("$($result.Reason)" -like "*$reasonContains*")
-    if ($decisionOk -and $reasonOk) {
+    $tierOk     = (-not $subresultTier) -or (@($result.SubResults | Where-Object { "$($_.Tier)" -eq $subresultTier }).Count -gt 0)
+    if ($decisionOk -and $reasonOk -and $tierOk) {
         $passed++
     }
     else {
@@ -170,6 +181,10 @@ for ($i = 0; $i -lt $total; $i++) {
         Write-Host "  Command: $($fail.Command.Substring(0, [Math]::Min(200, $fail.Command.Length)))"
         if ($reasonContains) {
             Write-Host "  Reason must contain: '$reasonContains'"
+        }
+        if ($subresultTier) {
+            $tiers = (@($result.SubResults | ForEach-Object { "$($_.Command)=$($_.Tier)" }) -join ', ')
+            Write-Host "  SubResult tier must include: '$subresultTier'  (actual: $tiers)"
         }
         Write-Host "  Expected: $($fail.Expected)  Got: $($fail.Got)"
         Write-Host "  Classifier said: $($fail.Reason)"

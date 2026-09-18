@@ -566,7 +566,21 @@ function Invoke-Classify {
     }
 
     # -- 4c: Find nested commands (pwsh -Command, ssh, docker exec, kubectl exec) --
-    $nestedCommands = @(Find-NestedCommands -Command $command -ParentDomain $domain)
+    # Run per sub-command SEGMENT, not on the full command string. The wrapper
+    # patterns inside Find-NestedCommands are anchored (^pwsh..., ^ssh..., ...),
+    # so calling it on a compound command ('cd x; pwsh -File y.ps1') never
+    # matches — the string starts with 'cd'. That left the whole 'pwsh -File'
+    # segment to the generic pwsh read_only pattern: a trusted script lost its
+    # trusted_program tier (LLM could veto a trusted run) and an UNTRUSTED
+    # script was allowed instead of asked (2026-09-17 production incident).
+    # Per-segment, the anchored patterns match the wrapper segment itself. For
+    # single-segment commands this is identical to the old full-string call.
+    # Each nested entry's ParentCommand is the SEGMENT text, so the combination
+    # step below suppresses exactly that segment (not the whole compound).
+    $nestedCommands = @()
+    foreach ($seg in $subCommands) {
+        $nestedCommands += @(Find-NestedCommands -Command $seg.CommandText -ParentDomain $seg.Domain)
+    }
 
     # -- 4c-2: Extract subshell commands $(command) --
     $subshellCommands = @(Split-SubshellCommands -Command $command)

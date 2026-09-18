@@ -1036,6 +1036,27 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
       <copilot-command><![CDATA[powershell -File src/Run-AllTests.ps1 -Command "python somescript.py --batch 1k"]]></copilot-command>
     </test-case>
 
+    <!-- Compound (multi-segment) wrapper forms (2026-09-17): Find-NestedCommands
+         is anchored (^pwsh...) and was called on the FULL command string, so a
+         wrapper that is NOT the first segment (cd ...; pwsh -File ...) never
+         unwrapped — the whole 'pwsh -NoProfile -File <script>' segment fell to
+         the generic pwsh read_only pattern. That lost the trusted_program tier
+         on the script path (LLM could veto a trusted run) AND, worse, allowed
+         an UNTRUSTED script (generic pwsh pattern) instead of asking. The fix
+         calls Find-NestedCommands per sub-command segment. -->
+    <test-case expected="allow" reason="trusted_programs: compound cd; pwsh -File — per-segment unwrap must grant trusted tier to the script path" category="PSWrapper-Compound" subresult-tier="trusted_program">
+      <description>cd c:\git\cc\pretoolhook; pwsh -NoProfile -File src/Run-AllTests.ps1 — compound form, trusted script => allow with trusted_program tier (production incident 2026-09-17)</description>
+      <copilot-command><![CDATA[cd c:\git\cc\pretoolhook; pwsh -NoProfile -File src/Run-AllTests.ps1]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="-File path NOT in trusted_programs => ask (untrusted script must not fall to generic pwsh read_only pattern)" category="PSWrapper-Compound">
+      <description>cd c:\git\cc\pretoolhook; pwsh -NoProfile -File C:\temp\untrusted.ps1 — compound form, untrusted script => ask</description>
+      <copilot-command><![CDATA[cd c:\git\cc\pretoolhook; pwsh -NoProfile -File C:\temp\untrusted.ps1]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying: compound cd; powershell -Command Remove-Item — per-segment unwrap must still catch modifying inner" category="PSWrapper-Compound">
+      <description>cd c:\git\cc\pretoolhook; powershell -NoProfile -Command "Remove-Item C:\temp\x" — compound form, modifying inner => ask</description>
+      <copilot-command><![CDATA[cd c:\git\cc\pretoolhook; powershell -NoProfile -Command "Remove-Item C:\temp\x"]]></copilot-command>
+    </test-case>
+
     <test-case expected="ask" reason="modifying: Remove-LocalUser" category="PowerShell-UserManagement">
       <description>Remove-LocalUser deletes a local user account</description>
       <copilot-command><![CDATA[Remove-LocalUser -Name "tempUser"]]></copilot-command>

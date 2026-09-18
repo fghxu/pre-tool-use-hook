@@ -102,6 +102,13 @@
       <copilot-command><![CDATA[pwsh -NoProfile -File "c:\git\cc\pretoolhook\src\Run-AllTests.ps1" ; curl http://h/y]]></copilot-command>
     </test-case>
 
+    <!-- Compound wrapper (2026-09-17 production incident): the pwsh -File wrapper is NOT the first segment (a read-only command precedes it). Pre-fix, Find-NestedCommands was anchored (^pwsh) and called on the FULL string, so it never matched — the whole 'pwsh -NoProfile -File <script>' segment fell to the generic pwsh read_only pattern. The script path lost its trusted_program tier, so when the LLM flagged it (idx 2), Option B could NOT suppress it => veto => ask. Post-fix, per-segment unwrapping grants the script path tier=trusted_program; the LLM flag on idx 2 is suppressed by policy => local allow stands. curl keeps the block in scope at complex_remote. (ls /tmp is the first segment because the fixture's minimal config recognizes ls but not cd.) -->
+    <test-case expected="allow" category="P2-TrustedProgramCompoundSuppressed" level="complex_commands" mock="idx:3" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="3" suppressed="3" reason="Compound ls; pwsh -File: per-segment unwrap grants trusted_program tier to the script path (idx 3 — nested/unwrapped commands are appended after the regex-split segments); LLM flag on idx 3 is suppressed by Option B policy => local allow stands. Pre-fix: wrapper not first segment => no unwrap => read_only tier => veto => ask (RED).">
+      <description>compound ls; pwsh -File trusted script: LLM flags the script (idx 3), suppressed by trusted_program policy</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[ls /tmp; pwsh -NoProfile -File src/Run-AllTests.ps1; curl http://h/y]]></copilot-command>
+    </test-case>
+
     <!-- strict_gate_override_llm switch (2026-09-16 spec). Sub 2 = git commit carrying a SYSTEM-PATH token, so the stage-2 path guard DENIES suppression. Switch false/absent => veto stands => ask (guard case: passes pre AND post; pins that the default does not loosen today's reconciliation). The safe-path + switch-false => suppressed behavior is already pinned by P2-GatedBothSuppressed above. -->
     <test-case expected="ask" category="P2-GateOverride-DefaultDenies" level="complex_commands" strictness="normal" mock="idx:2" in-scope="true" verdict="modifying" effect="veto" flagged="2" suppressed="" reason="switch absent (default false): gated flag + path-guard DENIAL (system-path token) => veto stands => ask. Pins default = today's reconciliation, not unconditional suppression.">
       <description>switch off: path-guard denial still vetoes a gated flag</description>
