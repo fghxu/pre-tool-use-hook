@@ -588,6 +588,64 @@ function Invoke-Classify {
     elseif ($safeExpressions.Count -gt 0) {
         $allCommands = $safeExpressions + $nestedCommands + $subshellCommands
     }
+    # -- 4b-3: Atomic unknown (2026-09-17 Layer 2) --
+    # Zero cmdlets AND zero safe expressions, but the AST parse SUCCEEDED:
+    # the input is one coherent unsafe expression (unlisted .NET method call,
+    # property set, unlisted static). Do NOT regex-split it — Split-Commands
+    # misreads ':' inside string interpolation and manufactures phantom
+    # sub-command fragments (incident 2026-09-17 MiobuildHeaders: 2 garbage
+    # fragments instead of the one real statement). Classify the WHOLE
+    # statement as ONE atomic unknown. Nested/subshell commands are still
+    # extracted and unioned (edge case 2/3 in the design doc). Parse FAILURE
+    # (e.g. a bash for-loop) falls through to the legacy regex path below.
+    # NOTE: call Get-PowerShellCommands DIRECTLY here — do NOT rely on
+    # $astCommands, which is only populated for powershell-domain inputs. For
+    # every non-powershell command (git, curl, docker, while-loops...) it stays
+    # @(), so "$astCommands.Count -eq 0" would be true for ALL of them and —
+    # since most shell text parses as valid PowerShell syntax — this branch
+    # would wrongly turn real commands into atomic unknowns. Parsing the text
+    # directly yields the TRUE cmdlet count for any domain: a real command has
+    # >=1 CommandAst and is excluded; only pure expressions (0 cmdlets) pass.
+    elseif ((@(Get-PowerShellCommands -Command $command)).Count -eq 0 -and
+            $safeExpressions.Count -eq 0 -and
+            (Test-PowerShellParses -Command $command)) {
+        # Unanchored: the static call may sit behind an assignment LHS
+        # ($x = [Type]::Method(...)). Safe here because this branch only runs
+        # with ZERO cmdlets, so no leading command can be misread as a type.
+        # Truthfulness guard: only name it "not on allowlist" when the matched
+        # Type::Method is genuinely absent from the static allowlist — an
+        # allowlisted static inside a partially-unsafe expression would
+        # otherwise get a misleading message (decision stays ask either way).
+        $staticSet = $null
+        if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetStaticMethodAllowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+            $staticSet = $Config._dotnetStaticMethodAllowlist
+        }
+        $isUnlistedStatic = $false
+        if ($command -match '\[([^\]]+)\]\s*::\s*([A-Za-z_]\w*)\s*\(') {
+            $writtenKey = "$($Matches[1].Trim())::$($Matches[2])"
+            $isUnlistedStatic = (-not $staticSet) -or (-not $staticSet.Contains($writtenKey))
+        }
+        if ($isUnlistedStatic) {
+            $atomicReason = "static method not on allowlist: [$($Matches[1].Trim())]::$($Matches[2]) (see safe_expressions.dotnet_static_method_allowlist)"
+        }
+        else {
+            $truncatedAtomic = $command.Substring(0, [Math]::Min(80, $command.Length))
+            $atomicReason = "unsafe PowerShell expression (fail-closed): $truncatedAtomic"
+        }
+        # One synthetic entry carrying the pre-computed reason. It stays in
+        # $allCommands (so count >= 1, no 4d early-return) and STEP 4e honors
+        # its AtomicReason instead of re-resolving (Resolve-Command would emit
+        # the generic 'unknown command' fallback). Nested/subshell commands are
+        # still unioned so a wrapped modifying inner is not lost.
+        $atomicEntry = [PSCustomObject]@{
+            CommandText   = $command
+            Domain        = 'powershell'
+            IsPipeline    = $false
+            ParentCommand = $null
+            AtomicReason  = $atomicReason
+        }
+        $allCommands = @($atomicEntry) + $nestedCommands + $subshellCommands
+    }
     elseif ($nestedCommands.Count -gt 0) {
         $parentTexts = [System.Collections.Generic.HashSet[string]]::new()
         foreach ($nc in $nestedCommands) {
@@ -628,7 +686,22 @@ function Invoke-Classify {
     $blockingCommands = [System.Collections.Generic.List[PSCustomObject]]::new()
 
     foreach ($sc in $allCommands) {
-        $r = Resolve-Command -Command $sc.CommandText -Domain $sc.Domain -Config $Config
+        # Atomic-unknown marker (2026-09-17 Layer 2): the reason was computed
+        # at the combination step for the WHOLE statement. Re-resolving would
+        # emit the generic 'unknown command' fallback, so use it verbatim.
+        if ($sc.PSObject.Properties['AtomicReason']) {
+            $r = [PSCustomObject]@{
+                Command        = $sc.CommandText
+                Decision       = 'ask'
+                Reason         = $sc.AtomicReason
+                MatchedPattern = $null
+                Risk           = 'unknown'
+                Tier           = 'unclassified'
+            }
+        }
+        else {
+            $r = Resolve-Command -Command $sc.CommandText -Domain $sc.Domain -Config $Config
+        }
         $subResults.Add($r)
 
         if ($r.Decision -eq "ask") {
@@ -686,6 +759,19 @@ function Invoke-Classify {
                             else { $sr | Add-Member -NotePropertyName Tier -NotePropertyValue $stamped }
                         }
                     }
+                }
+                # Tier upgrade (2026-09-17): Conclusive=true means Test-SafeAst
+                # passed on EVERY statement — they are provably read-only. The
+                # TierMap above only covers entries with a CommandAst node; pure
+                # expressions (atomic unknowns, subshell fragments) have no map
+                # entry and still carry the pre-arbitration 'unclassified' tier.
+                # Upgrade those to 'read_only' so downstream consumers (LLM merge,
+                # check_blindspot, log display) see the truthful tier. Only
+                # 'unclassified' is touched — never strictness_gated, read_only,
+                # safe_expr, or other meaningful tiers.
+                foreach ($sr in $subResults) {
+                    if ($sr.MatchedPattern -eq 'redirection-target') { continue }
+                    if ($sr.Tier -eq 'unclassified') { $sr.Tier = 'read_only' }
                 }
                 return (Repair-ResultProperties ([PSCustomObject]@{
                     Decision    = "allow"

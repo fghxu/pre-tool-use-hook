@@ -2315,6 +2315,35 @@ function Test-SafeAst {
 }
 
 # =============================================================================
+# Test-PowerShellParses
+#
+# Distinguishes "AST parse SUCCEEDED" from "parse FAILED". Needed because
+# Get-PowerShellCommands / Get-PowerShellSafeExpressions both return @() for
+# BOTH a syntax error AND a genuinely-zero-cmdlet expression — the two cases
+# must diverge for the atomic-unknown classification (2026-09-17 Layer 2):
+#   - parse OK + 0 cmdlets + 0 safe exprs => ONE coherent unsafe statement
+#     (classify atomically, never regex-split into phantom fragments)
+#   - parse FAILED                        => legacy regex fallback
+# Returns $false when the parser type is unavailable (fail-closed: caller
+# keeps the legacy path).
+# =============================================================================
+
+function Test-PowerShellParses {
+    param([string]$Command)
+
+    $astType = 'System.Management.Automation.Language.Parser' -as [type]
+    if (-not $astType) { return $false }
+
+    $tokens = $null
+    $errors = $null
+    try {
+        $null = $astType::ParseInput($Command, [ref]$tokens, [ref]$errors)
+    }
+    catch { return $false }
+    return ($null -eq $errors) -or ($errors.Count -eq 0)
+}
+
+# =============================================================================
 # Get-PowerShellSafeExpressions
 #
 # When a powershell-domain command string contains no cmdlet invocations but

@@ -139,7 +139,16 @@ for ($i = 0; $i -lt $total; $i++) {
     $sw.Stop()
     $elapsed = $sw.ElapsedMilliseconds
 
-    if ($result.Decision -eq $tc.expected) {
+    # Optional reason-contains assertion (pins reason TEXT, not just decision).
+    # Absent on all pre-existing cases -> behavior unchanged (decision-only).
+    $reasonContains = ""
+    if ($tc -is [System.Xml.XmlElement]) {
+        $reasonContains = $tc.GetAttribute('reason-contains').Trim()
+    }
+
+    $decisionOk = ($result.Decision -eq $tc.expected)
+    $reasonOk   = (-not $reasonContains) -or ("$($result.Reason)" -like "*$reasonContains*")
+    if ($decisionOk -and $reasonOk) {
         $passed++
     }
     else {
@@ -159,6 +168,9 @@ for ($i = 0; $i -lt $total; $i++) {
         Write-Host ""
         Write-Host "FAIL [$num/$total $pct% - $name]  Time: ${elapsed}ms" -ForegroundColor Red
         Write-Host "  Command: $($fail.Command.Substring(0, [Math]::Min(200, $fail.Command.Length)))"
+        if ($reasonContains) {
+            Write-Host "  Reason must contain: '$reasonContains'"
+        }
         Write-Host "  Expected: $($fail.Expected)  Got: $($fail.Got)"
         Write-Host "  Classifier said: $($fail.Reason)"
         Write-Host ""

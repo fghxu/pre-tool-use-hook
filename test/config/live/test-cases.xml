@@ -3843,6 +3843,40 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
   </category-group>
 
   <!-- =================================================================== -->
+  <!-- PSAtomic-Unknown: Layer 1 (allowlist) + Layer 2 (atomic fail-closed) -->
+  <!-- Incident 2026-09-17 MiobuildHeaders "unknown command".               -->
+  <!-- =================================================================== -->
+
+  <category-group name="PSAtomic-Unknown">
+
+    <test-case expected="allow" reason="safe expression: .NET method allowlisted" category="PSAtomic-Unknown">
+      <description>MiobuildHeaders Basic-auth header (incident 2026-09-17) — allow after Layer 1</description>
+      <copilot-command><![CDATA[$global:MiobuildHeaders = @{ Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($global:MiobuildCredential.UserName):$($global:MiobuildCredential.GetNetworkCredential().Password)")) }]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="atomic unknown" category="PSAtomic-Unknown" reason-contains="unsafe PowerShell expression">
+      <description>Instance method Kill (not allowlisted) => atomic fail-closed, no phantom fragments</description>
+      <copilot-command><![CDATA[$proc.Kill()]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="atomic unknown" category="PSAtomic-Unknown" reason-contains="unsafe PowerShell expression">
+      <description>Property SET on a type => atomic fail-closed</description>
+      <copilot-command><![CDATA[[Console]::Title = 'x']]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="atomic unknown (static-specific reason preserved)" category="PSAtomic-Unknown" reason-contains="static method not on allowlist">
+      <description>.NET static Delete (not allowlisted) => atomic fail-closed, keeps the specific static-method reason</description>
+      <copilot-command><![CDATA[$x = [System.IO.File]::Delete('c:\temp\x.txt')]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="parse error => legacy regex" category="PSAtomic-Unknown">
+      <description>Bash for-loop is a PS parse error => legacy regex path, NOT atomic (guard)</description>
+      <copilot-command><![CDATA[for f in /etc/*; do weirdcmd $f; done]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <!-- =================================================================== -->
   <!-- Log-Gap-Fill: commands seen as "unknown command" in prehook logs     -->
   <!-- (spec 2026-07-19-agent-command-guidelines-design.md).                -->
   <!-- =================================================================== -->

@@ -318,7 +318,7 @@
       "AddMicroseconds", "AddTicks", "AddMonths", "AddYears", "Subtract",
       "ToUniversalTime", "ToLocalTime", "ToShortDateString", "ToLongDateString",
       "ToShortTimeString", "ToLongTimeString", "ToOADate", "ToBinary", "Negate", "Duration",
-      "GetBytes", "GetString", "GetChars", "GetByteCount", "GetCharCount",
+      "GetBytes", "GetString", "GetChars", "GetByteCount", "GetCharCount", "GetNetworkCredential",
       "GetMaxByteCount", "GetMaxCharCount", "GetEncoder", "GetDecoder",
       "Match", "Matches", "IsMatch",
       "SelectNodes", "SelectSingleNode", "GetElementsByTagName", "GetElementById",
