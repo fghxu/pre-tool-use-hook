@@ -598,61 +598,41 @@
           ],
           "default": "modifying",
           "default_risk": "medium"
+        },
+        "git": {
+          "modifying_strictness": "normal",
+          "global_value_flags": ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"],
+          "rules": [
+            { "subcommand": ["branch"], "param": ["-d","--delete","-D","-m","--move"], "match": "present", "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["push"],   "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["merge"],  "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["rebase"], "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["reset"],  "decision": "modifying", "risk": "high" },
+            { "subcommand": ["clean"],  "decision": "modifying", "risk": "high" },
+            { "subcommand": ["checkout"],"decision": "modifying", "risk": "medium" },
+            { "subcommand": ["restore"],"decision": "modifying", "risk": "medium" },
+            { "subcommand": ["pull","switch","init","clone","add","commit","stash"], "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["rev-parse"], "decision": "strictness_gated", "risk": "medium" },
+            { "subcommand": ["tag"], "param": ["-d","--delete"], "match": "present", "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["tag"], "param": ["-a","-s","-m"], "match": "present", "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["remote add","remote remove","remote set-url","remote rename"], "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["worktree add","worktree remove","worktree prune","worktree move","worktree lock","worktree unlock"], "decision": "strictness_gated", "risk": "low" },
+            { "param": ["--output"], "match": "present", "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["status","log","diff","show","blame","ls-files","ls-tree","ls-remote","check-ignore","fetch"], "decision": "read-only" },
+            { "subcommand": ["branch"], "param": ["-a","-l","--list","--show-current"], "match": "present", "decision": "read-only" },
+            { "subcommand": ["branch"], "decision": "read-only" },
+            { "subcommand": ["tag"], "param": ["-l","--list","--sort","-n"], "match": "present", "decision": "read-only" },
+            { "subcommand": ["tag"], "decision": "read-only" },
+            { "subcommand": ["remote"], "decision": "read-only" },
+            { "subcommand": ["worktree list"], "decision": "read-only" },
+            { "param": ["--version","-v"], "match": "present", "decision": "read-only" }
+          ],
+          "default": "read-only"
         }
       }
     },
 
-    "Git": {
-      "modifying_strictness": "normal",
-      "description": "Git version control commands",
-      "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",
-      "_comment_gated": "strictness_gated below: git add, pull, commit, switch, init, clone, tag -d, tag create, worktree add/remove/prune/move/lock/unlock, remote modify, rev-parse, stash — allow in normal/loose, ask in strict.",
-      "read_only": [
-        { "name": "git status",    "patterns": ["git status*", "git status *"],                  "description": "Show working tree status" },
-        { "name": "git log",       "patterns": ["git log*", "git log *"],                        "description": "Show commit logs" },
-        { "name": "git ls-remote", "patterns": ["git ls-remote*", "git ls-remote *"],            "description": "Show remote" },
-		{ "name": "git ls-files", "patterns": ["git ls-files*", "git ls-files *"],            "description": "Show file logs" },
-        { "name": "git diff",      "patterns": ["git diff*", "git diff *"],                      "description": "Show changes" },
-		{ "name": "git check-ignore", "patterns": ["git check-ignore*", "git check-ignore *"],                      "description": "Show whether specific files or directories are ignored" },
-        { "name": "git show",      "patterns": ["git show*", "git show *"],                      "description": "Show various objects" },
-        { "name": "git branch",    "patterns": ["^git branch$", "git branch -a*", "git branch -l*", "git branch --list*", "git branch --show*"], "description": "List branches (no write)" },
-        { "name": "git tag",       "patterns": ["^git tag$", "git tag -l*", "git tag --list*"],  "description": "List tags (no write)" },
-        { "name": "git remote",    "patterns": ["^git remote$", "git remote -v*", "git remote --verbose*"], "description": "List remotes (no write)" },
-        { "name": "git fetch",     "patterns": ["git fetch*", "git fetch *"],                    "description": "Download objects and refs" },
-        { "name": "git worktree list", "patterns": ["git worktree list*", "git worktree list *"], "description": "List worktrees (no write)" }
-      ],
-      "strictness_gated": [
-        { "name": "git pull",      "patterns": ["git pull*", "git pull *"],                      "risk": "low", "description": "Fetch and integrate (may modify working tree)" },
-        { "name": "git switch",    "patterns": ["git switch$", "git switch *"],                  "risk": "low", "description": "Switch to a branch (modifies working tree)" },
-        { "name": "git init",      "patterns": ["git init*", "git init *"],                      "risk": "low",    "description": "Create empty repository" },
-        { "name": "git clone",     "patterns": ["git clone*", "git clone *"],                    "risk": "low",    "description": "Clone repository" },
-        { "name": "git tag -d",    "patterns": ["git tag -d*", "git tag --delete*"],             "risk": "low",    "description": "Delete tag" },
-        { "name": "git add",       "patterns": ["git add*", "git add *"],                        "risk": "low",    "description": "Stage file changes" },
-        { "name": "git worktree add", "patterns": ["git worktree add*", "git worktree add *"], "risk": "low",    "description": "Add a linked worktree" },
-        { "name": "git commit",    "patterns": ["git commit*", "git commit *"],                  "risk": "low",    "description": "Record changes to repository" },
-        { "name": "git rev-parse",   "patterns": ["git rev-parse*", "git rev-parse *"],                "risk": "medium", "description": "rev-parse working tree files" },
-        { "name": "git stash",     "patterns": ["git stash*", "git stash *"],                    "risk": "low",    "description": "Stash changes" },
-        { "name": "git tag create",      "patterns": ["git tag -a*", "git tag -s *", "git tag -m *"], "risk": "low", "description": "Create annotated/signed tag" },
-        { "name": "git remote modify", "patterns": ["git remote add*", "git remote remove*", "git remote set-url*", "git remote rename*"], "risk": "low", "description": "Modify remote configuration" },
-        { "name": "git worktree remove", "patterns": ["git worktree remove*", "git worktree remove *"], "risk": "low", "description": "Remove a worktree" },
-        { "name": "git worktree prune",  "patterns": ["git worktree prune*"],                        "risk": "low", "description": "Prune stale worktree metadata" },
-        { "name": "git worktree move",   "patterns": ["git worktree move*"],                         "risk": "low", "description": "Move a worktree" },
-        { "name": "git worktree lock",   "patterns": ["git worktree lock*"],                         "risk": "low", "description": "Lock a worktree" },
-        { "name": "git worktree unlock", "patterns": ["git worktree unlock*"],                       "risk": "low", "description": "Unlock a worktree" }
-      ],
-      "modifying": [
-        { "name": "git push",      "patterns": ["git push*", "git push *"],                      "risk": "medium", "description": "Update remote refs" },
-        { "name": "git merge",     "patterns": ["git merge*", "git merge *"],                    "risk": "medium", "description": "Join development histories" },
-        { "name": "git rebase",    "patterns": ["git rebase*", "git rebase *"],                  "risk": "medium", "description": "Reapply commits" },
-        { "name": "git reset",     "patterns": ["git reset*", "git reset *"],                    "risk": "high",   "description": "Reset current HEAD" },
-        { "name": "git clean",     "patterns": ["git clean*", "git clean *"],                    "risk": "high",   "description": "Remove untracked files" },
-        { "name": "git checkout",  "patterns": ["git checkout*", "git checkout *"],              "risk": "medium", "description": "Switch branches or restore files" },
-        { "name": "git restore",   "patterns": ["git restore*", "git restore *"],                "risk": "medium", "description": "Restore working tree files" },
-        { "name": "git branch -D", "patterns": ["git branch -D*", "git branch --delete*", "git branch -d*", "git branch -m*", "git branch --move*"], "risk": "medium", "description": "Delete or rename branch" }
-      ]
-    },
-
-    "Terraform": {
+"Terraform": {
       "modifying_strictness": "normal",
       "description": "HashiCorp Terraform IaC commands",
       "_comment_tiers": "read_only => allow in every mode | strictness_gated => allow in normal/loose, ask in strict | modifying => ask always ('risk' shown in prompt). Optional per-domain modifying_strictness is honored only when the global one is 'normal'.",

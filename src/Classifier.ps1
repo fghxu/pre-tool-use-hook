@@ -577,7 +577,13 @@ function Invoke-Classify {
     # Combine all commands to classify.
     # Prefer AST-extracted commands for PowerShell; fall back to regex split.
     if ($astCommands.Count -gt 0) {
-        $allCommands = $astCommands + $nestedCommands + $subshellCommands
+        # AST walker already decomposed all wrappers/scriptblocks natively
+        # (Get-AstWrapperInnerCommands + ScriptBlockAst recursion). Appending
+        # Find-NestedCommands results would add phantom "commands" from data
+        # expressions like [pscustomobject]@{...} that the AST correctly
+        # identified as non-commands (2026-09-15: production log showed
+        # unclassified [pscustomobject] fragments forcing unnecessary ask).
+        $allCommands = $astCommands + $subshellCommands
     }
     elseif ($safeExpressions.Count -gt 0) {
         $allCommands = $safeExpressions + $nestedCommands + $subshellCommands

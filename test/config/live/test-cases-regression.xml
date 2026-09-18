@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  REGRESSION SUITE - PowerShell data expressions must not become "unknown commands"
+
+  Merged from two related production-bug suites (2026-09-16):
+    1. PSCustomObject-ScriptBlock (was test-cases.pscustomobject-scriptblock.xml, 2026-09-15)
+       Bug: Invoke-Command -ScriptBlock { [pscustomobject]@{...} } with read-only cmdlets
+       inside the hashtable - the regex-based Find-NestedCommands extracted the entire
+       ScriptBlock content as a raw "command" text. That text ([pscustomobject]@{...}) is
+       a data expression, not a command invocation, so it fell through to "unknown
+       command" (tier=unclassified) and forced an unnecessary ask.
+       Fix: when AST extraction succeeds, skip appending Find-NestedCommands results.
+       Source: log from another machine (2026-09-03).
+
+    2. TypeCast-Domain (was test-cases.typecast-domain.xml, 2026-09-16)
+       Bug: a PowerShell type-cast variable assignment at the START of a command,
+       e.g. [xml]$ChildConfig = Invoke-RestMethod ... ; [pscustomobject]@{...} | ConvertTo-Json,
+       was routed to the LINUX domain by Get-CommandDomain (Step 0 stripped "$var =" but
+       left the "[xml]" cast glued to the cmdlet, so the start-anchored Verb-Noun match
+       failed and no other PowerShell marker fired). With domain=linux the AST walker
+       never ran, each raw segment was classified against Linux patterns, and both the
+       type-cast statement and the [pscustomobject] data expression fell through to
+       "unknown command" (unclassified) => forced ask on a purely read-only command.
+       Fix: extend Get-CommandDomain Step 0 (assignment strip) to also strip a leading
+       "[type]$var =" prefix, so the RHS decides the domain - same semantic as the
+       existing plain "$var =" strip. The AST walker then extracts the real cmdlets and
+       skips data expressions, exactly as it already does for plain assignments.
+       Source: production log 2026-09-16 (Jenkins config.xml fetch + pscustomobject summary).
+
+  Common theme: [pscustomobject]@{...} is a DATA EXPRESSION, not a command. The AST
+  walker knows this (it only collects CommandAst nodes); the regex fallbacks do not.
+-->
+
+<commands>
+
+  <category-group name="PSCustomObject-ScriptBlock">
+
+    <!-- Test 1: Exact reproduction from the 2026-09-03 log -->
+    <test-case expected="allow" reason="read-only: Invoke-Command with [pscustomobject]@{Test-Path, Get-Service} (all read-only)" category="PSCustomObject-ScriptBlock">
+      <description>Invoke-Command -Session with [pscustomobject] hashtable containing Test-Path and Get-Service (exact log repro)</description>
+      <copilot-command><![CDATA[$configPrecheck = Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock { [pscustomobject]@{ SqlReadyMarker = Test-Path "\\server1\d$\temp\Chef\__SQL.Servers.Installed.log"; ConfigXml = Test-Path "D:\temp\Config.xml"; ConfigurationExe = Test-Path "D:\Program Files (x86)\Configuration.exe"; EntSsoServicePresent = $null -ne (Get-Service -Name "SSO" -ErrorAction SilentlyContinue) } }]]></copilot-command>
+    </test-case>
+
+    <!-- Test 2: Simpler variant - no variable assignment, just Invoke-Command -->
+    <test-case expected="allow" reason="read-only: Invoke-Command with [pscustomobject]@{Test-Path, Get-Service}" category="PSCustomObject-ScriptBlock">
+      <description>Invoke-Command -ScriptBlock with [pscustomobject] hashtable of read-only cmdlets (simpler form)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName "SRV01" -ScriptBlock { [pscustomobject]@{ DiskFree = Test-Path "C:\temp\check.txt"; ServiceRunning = Get-Service -Name "Spooler" } }]]></copilot-command>
+    </test-case>
+
+    <!-- Test 3: [pscustomobject] with a modifying cmdlet inside (should still ask) -->
+    <test-case expected="ask" reason="modifying: Remove-Item inside [pscustomobject] hashtable in ScriptBlock" category="PSCustomObject-ScriptBlock">
+      <description>Invoke-Command -ScriptBlock with [pscustomobject] containing Remove-Item (modifying, must still ask)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName "SRV01" -ScriptBlock { [pscustomobject]@{ Cleaned = Remove-Item "C:\temp\old.log" -Force; StillThere = Test-Path "C:\temp\old.log" } }]]></copilot-command>
+    </test-case>
+
+    <!-- Test 4: [pscustomobject] with nested pwsh -Command inside ScriptBlock (AST wrapper extraction) -->
+    <test-case expected="allow" reason="read-only: Invoke-Command with [pscustomobject] wrapping pwsh -Command git status" category="PSCustomObject-ScriptBlock">
+      <description>Invoke-Command -ScriptBlock with [pscustomobject] containing nested pwsh -Command (git status is read-only)</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName "SRV01" -ScriptBlock { [pscustomobject]@{ GitState = (pwsh -Command "git status"); FileExists = Test-Path "C:\temp\x.txt" } }]]></copilot-command>
+    </test-case>
+
+    <!-- Test 5: Multiple statements in ScriptBlock, first is [pscustomobject], second is a pipeline -->
+    <test-case expected="allow" reason="read-only: Invoke-Command with [pscustomobject] + Get-ChildItem pipeline" category="PSCustomObject-ScriptBlock">
+      <description>Invoke-Command -ScriptBlock with [pscustomobject] assignment followed by Get-ChildItem | Where-Object pipeline</description>
+      <copilot-command><![CDATA[Invoke-Command -ComputerName "SRV01" -ScriptBlock { $info = [pscustomobject]@{ LogExists = Test-Path "C:\logs\app.log"; SvcStatus = Get-Service -Name "W32Time" }; Get-ChildItem "C:\temp" | Where-Object { $_.Length -gt 1MB } }]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="TypeCast-Domain">
+
+    <!-- Test 1: Exact reproduction from the 2026-09-16 production log (URL shortened).
+         [xml] type-cast assignment + [pscustomobject] data expression + ConvertTo-Json.
+         All read-only => allow. Pre-fix: domain=linux, two unclassified segments => ask (RED). -->
+    <test-case expected="allow" reason="read-only: [xml] type-cast Invoke-RestMethod GET + [pscustomobject] | ConvertTo-Json" category="TypeCast-Domain">
+      <description>[xml]$var = Invoke-RestMethod -Method Get ; [pscustomobject]@{...} | ConvertTo-Json (exact log repro, short URL)</description>
+      <copilot-command><![CDATA[[xml]$ChildConfig = Invoke-RestMethod -Method Get -Uri 'https://server/config.xml' -Headers $global:MiobuildHeaders -SkipCertificateCheck; [pscustomobject]@{ RootType = $ChildConfig.DocumentElement.Name; Disabled = $ChildConfig.DocumentElement.disabled; ConcurrentBuild = $ChildConfig.DocumentElement.concurrentBuild; DefinitionClass = $ChildConfig.DocumentElement.definition.class } | ConvertTo-Json]]></copilot-command>
+    </test-case>
+
+    <!-- Test 2: Simpler variant - type-cast assignment only, no data expression. -->
+    <test-case expected="allow" reason="read-only: [xml] type-cast Invoke-RestMethod GET (simpler form)" category="TypeCast-Domain">
+      <description>[xml]$var = Invoke-RestMethod -Method Get (single statement)</description>
+      <copilot-command><![CDATA[[xml]$cfg = Invoke-RestMethod -Method Get -Uri 'https://server/config.xml' -SkipCertificateCheck]]></copilot-command>
+    </test-case>
+
+    <!-- Test 3: Guard - the fix must route to REAL classification, not blanket-allow.
+         Type-cast assignment whose RHS is a modifying cmdlet must still ask. -->
+    <test-case expected="ask" reason="modifying: Remove-Item on RHS of [xml] type-cast assignment" category="TypeCast-Domain">
+      <description>[xml]$x = Remove-Item ... (RHS is modifying, must still ask)</description>
+      <copilot-command><![CDATA[[xml]$x = Remove-Item "C:\temp\old.log" -Force]]></copilot-command>
+    </test-case>
+
+    <!-- Test 4: Guard - static member access is NOT a type-cast variable assignment.
+         [Console]::Title = 'x' has no $var after the type; must keep today's behavior (ask). -->
+    <test-case expected="ask" reason="unknown command: static property set on a type is a side effect" category="TypeCast-Domain">
+      <description>[Console]::Title = 'x' (static member, not [type]$var - unaffected by the fix)</description>
+      <copilot-command><![CDATA[[Console]::Title = 'x']]></copilot-command>
+    </test-case>
+
+    <!-- Test 5: Regression pin - plain $var = assignment (existing Step 0 behavior) still works. -->
+    <test-case expected="allow" reason="read-only: plain $var = git status (existing assignment strip)" category="TypeCast-Domain">
+      <description>$x = git status (plain assignment, pre-existing behavior unchanged)</description>
+      <copilot-command><![CDATA[$x = git status]]></copilot-command>
+    </test-case>
+
+    <!-- Test 6: Guard - generic type cast [List[string]]$var does NOT match the simple
+         [type] pattern; keeps today's fail-closed behavior (unknown => ask). -->
+    <test-case expected="ask" reason="unknown command: generic type cast not recognized (fail-closed)" category="TypeCast-Domain">
+      <description>[List[string]]$x = git status (generic cast, stays fail-closed)</description>
+      <copilot-command><![CDATA[[List[string]]$x = git status]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+</commands>

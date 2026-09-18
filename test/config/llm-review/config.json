@@ -11,6 +11,11 @@
   "trusted_pattern": [],
   "untrusted_pattern": [],
 
+  "_comment_trusted_programs": "Option A (pwsh -File collapse) needs a trusted script so the standalone 'pwsh -NoProfile -File <trusted>.ps1' form classifies as allow locally. Path-suffix entry: matches any full path ending in src\\Run-AllTests.ps1.",
+  "trusted_programs": [
+    "src\\Run-AllTests.ps1"
+  ],
+
   "_comment_system_paths": "Needed by the stage-2 path-guard (Test-GatedInvocationSafe): without system_paths the compiled regex matches NOTHING and Resolve-PathPolicy allows C:\\Windows at normal. Windows entries are regex (not escaped by the loader) -> quadruple backslashes in JSON.",
   "system_paths": {
     "linux": ["/etc", "/usr", "/bin", "/sbin"],
@@ -78,22 +83,39 @@
       "strictness_gated": [
         { "name": "printf", "patterns": ["printf *"], "description": "Format string is DATA (guard skip-list)" },
         { "name": "mkdir",  "patterns": ["mkdir *"],  "description": "Create directory (gated; stage-2 target)" }
-      ]
-    },
-
-    "Git": {
-      "modifying_strictness": "normal",
-      "description": "Minimal Git domain. git counts as LOCAL for llm_second_opinion (no remote indicator).",
-      "read_only": [
-        { "name": "git status", "patterns": ["git status"], "description": "Working tree status" }
       ],
-      "modifying": [
-        { "name": "git push", "patterns": ["git push *"], "risk": "medium", "description": "Push refs" }
-      ],
-      "strictness_gated": [
-        { "name": "git add",    "patterns": ["git add *"],    "description": "Stage changes (gated)" },
-        { "name": "git commit", "patterns": ["git commit *"], "description": "Commit (gated)" }
-      ]
+      "parameter_commands": {
+        "git": {
+          "modifying_strictness": "normal",
+          "global_value_flags": ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"],
+          "rules": [
+            { "subcommand": ["branch"], "param": ["-d","--delete","-D","-m","--move"], "match": "present", "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["push"],   "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["merge"],  "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["rebase"], "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["reset"],  "decision": "modifying", "risk": "high" },
+            { "subcommand": ["clean"],  "decision": "modifying", "risk": "high" },
+            { "subcommand": ["checkout"],"decision": "modifying", "risk": "medium" },
+            { "subcommand": ["restore"],"decision": "modifying", "risk": "medium" },
+            { "subcommand": ["pull","switch","init","clone","add","commit","stash"], "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["rev-parse"], "decision": "strictness_gated", "risk": "medium" },
+            { "subcommand": ["tag"], "param": ["-d","--delete"], "match": "present", "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["tag"], "param": ["-a","-s","-m"], "match": "present", "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["remote add","remote remove","remote set-url","remote rename"], "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["worktree add","worktree remove","worktree prune","worktree move","worktree lock","worktree unlock"], "decision": "strictness_gated", "risk": "low" },
+            { "param": ["--output"], "match": "present", "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["status","log","diff","show","blame","ls-files","ls-tree","ls-remote","check-ignore","fetch"], "decision": "read-only" },
+            { "subcommand": ["branch"], "param": ["-a","-l","--list","--show-current"], "match": "present", "decision": "read-only" },
+            { "subcommand": ["branch"], "decision": "read-only" },
+            { "subcommand": ["tag"], "param": ["-l","--list","--sort","-n"], "match": "present", "decision": "read-only" },
+            { "subcommand": ["tag"], "decision": "read-only" },
+            { "subcommand": ["remote"], "decision": "read-only" },
+            { "subcommand": ["worktree list"], "decision": "read-only" },
+            { "param": ["--version","-v"], "match": "present", "decision": "read-only" }
+          ],
+          "default": "read-only"
+        }
+      }
     }
   }
 }

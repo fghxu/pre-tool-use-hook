@@ -134,6 +134,28 @@ function Write-RecordEntry {
     }
 }
 
+function Get-SuppressedTierLabel {
+    <#
+    .SYNOPSIS
+        Option B: derive the tier label for the suppressed sub-commands from the
+        log's per-index tiers ($LlmLog.tiers, 0-based; suppressed indices are 1-based).
+        Backward-compatible: all strictness_gated => 'strictness_gated' (the pre-Option-B
+        label); all trusted_program => 'trusted_program'; mixed => joined with '+'.
+        Returns '' when there is nothing to label.
+    #>
+    param([PSCustomObject]$LlmLog)
+    $suppressed = @($LlmLog.suppressed)
+    if ($suppressed.Count -eq 0) { return '' }
+    $tiers = @()
+    foreach ($ix in $suppressed) {
+        $t = ''
+        if ($LlmLog.tiers -and $ix -ge 1 -and $ix -le $LlmLog.tiers.Count) { $t = "$($LlmLog.tiers[$ix - 1])" }
+        if (-not $t) { $t = 'unlabeled' }
+        $tiers += $t
+    }
+    return (@($tiers | Select-Object -Unique) -join '+')
+}
+
 function Format-LlmLogBlock {
     <#
     .SYNOPSIS
@@ -219,7 +241,10 @@ function Format-LlmLogBlock {
         'veto' {
             $reconLine += "flagged=[$($LlmLog.flagged -join ',')]"
             if ($LlmLog.suppressed -and $LlmLog.suppressed.Count -gt 0) {
-                $reconLine += " suppressed=[$($LlmLog.suppressed -join ',')](strictness_gated)"
+                # Option B: label the suppressed tier(s) accurately (strictness_gated /
+                # trusted_program / mixed). All-gated still renders 'strictness_gated'.
+                $suppLabel = Get-SuppressedTierLabel -LlmLog $LlmLog
+                $reconLine += " suppressed=[$($LlmLog.suppressed -join ',')]($suppLabel)"
             }
             $vetoIdx = @($LlmLog.flagged | Where-Object { $LlmLog.suppressed -notcontains $_ })
             $reconLine += " veto=[$($vetoIdx -join ',')]"
@@ -229,7 +254,11 @@ function Format-LlmLogBlock {
             $reconLine += " -> FINAL: $($Result.Decision)"
         }
         'veto-suppressed-policy' {
-            $reconLine += "flagged=[$($LlmLog.flagged -join ',')] all suppressed (strictness_gated policy) -> FINAL: $($Result.Decision)"
+            # Option B: name the tier(s) that were suppressed. All-gated still renders
+            # 'strictness_gated policy'; a trusted_program suppression reads 'trusted_program policy'.
+            $suppLabel = Get-SuppressedTierLabel -LlmLog $LlmLog
+            if (-not $suppLabel) { $suppLabel = 'policy' }
+            $reconLine += "flagged=[$($LlmLog.flagged -join ',')] all suppressed ($suppLabel policy) -> FINAL: $($Result.Decision)"
         }
         'agree' { $reconLine += "agree -> FINAL: $($Result.Decision)" }
         'disagree-kept-ask' { $reconLine += "LLM read-only but local ask (LLM never downgrades) -> FINAL: $($Result.Decision)" }

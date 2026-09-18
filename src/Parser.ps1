@@ -30,7 +30,9 @@ $script:KnownBinaryPrefixes = @(
     @{ Pattern = '^helm\b';               Domain = 'kubernetes' },
     @{ Pattern = '^terraform\b';          Domain = 'terraform'  },
     @{ Pattern = '^aws\s';                Domain = 'aws_cli'    },
-    @{ Pattern = '^git\b';                Domain = 'git'        },
+    # NOTE: git is intentionally NOT routed to a 'git' domain (2026-09-16
+    # parameter_commands rework). It classifies via Linux.parameter_commands.git
+    # (Step 7), so subcommands/flags may appear anywhere in the command line.
     @{ Pattern = '^(pwsh|powershell)\b';  Domain = 'powershell' },
     @{ Pattern = '^cmd\s+/c';             Domain = 'dos'        }
 )
@@ -76,11 +78,23 @@ function Get-CommandDomain {
     # Step 0: PowerShell variable assignment strip
     #   "$creds = aws sts get-caller-identity" → "aws sts get-caller-identity"
     #   "$x = git status" → "git status"
-    #   Strips the first $var = prefix, then re-detects domain from remainder.
-    #   Safe against comparison operators (-eq, -ne, -lt) because they start
-    #   with '-', not '$'.  Chained assignments ($a = $b = cmd) are handled
-    #   by recursion.
+    #   "[xml]$cfg = Invoke-RestMethod ..." → "Invoke-RestMethod ..." (type-cast)
+    #   Strips the first [type]$var = / $var = prefix, then re-detects domain
+    #   from remainder. The LHS of an assignment is not a command; the RHS
+    #   decides the domain (so "[int]$x = git status" routes to git, exactly
+    #   like "$x = git status"). Safe against comparison operators (-eq, -ne,
+    #   -lt) because they start with '-', not '$'. Chained assignments
+    #   ($a = $b = cmd) are handled by recursion. The type-cast form is
+    #   anchored at ^ and requires "$var =" immediately after the closing ],
+    #   so a bash "[token]" (test builtin / [[ ... ]]) can never match;
+    #   generic casts ([List[string]]$x) do not match and stay fail-closed.
     # -------------------------------------------------
+    if ($trimmed -match '^\[[\w.]+\]\s*\$[\w:]+\s*=\s*') {
+        $stripped = [regex]::Replace($trimmed, '^\[[\w.]+\]\s*\$[\w:]+\s*=\s*', '', 1)
+        if ($stripped -and $stripped -ne $trimmed) {
+            return Get-CommandDomain -Command $stripped
+        }
+    }
     if ($trimmed -match '\$[\w:]+\s*=\s*') {
         $stripped = [regex]::Replace($trimmed, '\$[\w:]+\s*=\s*', '', 1)
         if ($stripped -and $stripped -ne $trimmed) {
@@ -1617,6 +1631,14 @@ function Get-AstCommands {
         # --------------------------------------------
         # Wrapper detection — if this is a known wrapper, extract inner commands
         # --------------------------------------------
+        # $suppressOuter: when the wrapper yields a TERMINAL extraction (pwsh -File),
+        # the extracted script path IS the command and the outer 'pwsh -File ...' text
+        # is redundant. Suppressing it keeps a standalone trusted-script run at ONE
+        # sub-command (below the LLM scope threshold) instead of two. Mirrors the
+        # regex fallback, which already drops the wrapper when its text equals a
+        # nested command's ParentCommand. Non-terminal wrappers (-Command/-ScriptBlock/
+        # bash -c/...) leave this $false so their outer entry is preserved as before.
+        $suppressOuter = $false
         if ($commandName -and $commandElements.Count -ge 2) {
             $wrapperResults = Get-AstWrapperInnerCommands `
                 -CommandAst $cmd `
@@ -1624,6 +1646,7 @@ function Get-AstCommands {
                 -CommandName $commandName
 
             foreach ($wr in $wrapperResults) {
+                if ($wr.IsTerminal) { $suppressOuter = $true }
                 $innerCmd = $wr.CommandText
                 $innerDom = $wr.Domain
 
@@ -1657,10 +1680,13 @@ function Get-AstCommands {
             }
         }
 
-        # Add the outer command itself
-        AddResult -ResultsList $results -SeenMap $seenKeys `
-            -CmdText $commandText -Domain $domain `
-            -IsPipeline $isPipeline -Parent $ParentCommand
+        # Add the outer command itself (skipped for terminal -File wrappers, whose
+        # extracted script path already represents the command — see $suppressOuter).
+        if (-not $suppressOuter) {
+            AddResult -ResultsList $results -SeenMap $seenKeys `
+                -CmdText $commandText -Domain $domain `
+                -IsPipeline $isPipeline -Parent $ParentCommand
+        }
     }
 
     # =========================================================================
@@ -1828,10 +1854,16 @@ function Get-AstWrapperInnerCommands {
                     $filePath = $nextArg.Extent.Text
                 }
                 if ($filePath) {
+                    # IsTerminal marks a -File extraction: the script path IS the
+                    # command (powershell.exe -File consumes everything after it as
+                    # $args). The caller uses this to suppress the outer 'pwsh -File
+                    # ...' wrapper entry so a standalone trusted-script run counts as
+                    # ONE sub-command (not two) and stays below the LLM scope threshold.
                     $null = $results.Add([PSCustomObject]@{
                         CommandText = $filePath
                         Domain      = 'powershell'
                         IsPipeline  = $false
+                        IsTerminal  = $true
                     })
                 }
                 return $results.ToArray()

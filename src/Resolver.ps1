@@ -37,10 +37,19 @@ function Get-EffectiveStrictness {
         [PSCustomObject]$Config,
 
         [Parameter(Mandatory = $true)]
-        [string]$Domain
+        [string]$Domain,
+
+        # Optional parameter_commands entry carrying its own modifying_strictness.
+        # Consulted AFTER the global guard and BEFORE the domain value (2026-09-16
+        # subcommand framework). Existing callers pass nothing -> unchanged behavior.
+        $Entry = $null
     )
 
     if ($Config.global_modifying_strictness -ne 'normal') { return $Config.global_modifying_strictness }
+
+    if ($Entry -and (Get-Member -InputObject $Entry -Name 'modifying_strictness' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+        return $Entry.modifying_strictness
+    }
 
     foreach ($key in $Config.commands.PSObject.Properties.Name) {
         if ($key.ToLowerInvariant() -eq $Domain.ToLowerInvariant()) {
@@ -186,27 +195,10 @@ function Resolve-Command {
         }
     }
 
-    # -------------------------------------------------
-    # Step 0d: Git global option stripping
-    #   "git -C /opt/repo status" → "git status"
-    #   "git -c user.name=foo -C /path log" → "git log"
-    #   Strips -C, -c, --git-dir, --work-tree, --namespace, --exec-path
-    #   Handles quoted paths: git -C "C:\Program Files\repo" status
-    # -------------------------------------------------
-    if ($domainLower -eq 'git' -and $Command -match '^\s*git\s') {
-        $stripped = $Command
-        # Quoted or unquoted value: "path with spaces", 'path', unquoted
-        $val = '("[^"]*"|''[^'']*''|\S+)'
-        do {
-            $prev = $stripped
-            $stripped = $stripped -replace "^\s*git\s+-C\s+$val\s+", 'git '
-            $stripped = $stripped -replace "^\s*git\s+-c\s+$val\s+", 'git '
-            $stripped = $stripped -replace "^\s*git\s+--(git-dir|work-tree|namespace|exec-path)=?$val\s+", 'git '
-        } while ($stripped -ne $prev)
-        if ($stripped -ne $Command) {
-            return Resolve-Command -Command $stripped.Trim() -Domain $Domain -Config $Config
-        }
-    }
+    # NOTE: the former "Step 0d: Git global option stripping" block was REMOVED
+    # (2026-09-16 parameter_commands rework). git no longer routes to a 'git'
+    # domain, so it classifies via Linux.parameter_commands.git (Step 7), whose
+    # subcommand walker consumes global_value_flags (-C/-c/--git-dir/...) directly.
 
     # -------------------------------------------------
     # Step 0e: AWS flag stripping (normal mode)
@@ -793,12 +785,15 @@ function Resolve-Command {
             -MatchedPattern $null -Risk "unknown" -Tier "unregistered_static"
     }
 
-    # Known first-token tool (docker/kubectl/terraform/git) whose subcommand
-    # is not in the config lists: name the tool AND the subcommand instead of
-    # the generic wording. Up to 3 leading global flags are skipped when
-    # locating the subcommand (e.g. terraform -chdir=x frobnicate). Decision/
-    # tier unchanged: fail-closed ask, empty tier (mirrors the AWS fallback).
-    if ($domainLower -in @('docker', 'kubernetes', 'terraform', 'git') -and
+    # Known first-token tool (docker/kubectl/terraform) whose subcommand is not
+    # in the config lists: name the tool AND the subcommand instead of the
+    # generic wording. Up to 3 leading global flags are skipped when locating
+    # the subcommand (e.g. terraform -chdir=x frobnicate). Decision/tier
+    # unchanged: fail-closed ask, empty tier (mirrors the AWS fallback).
+    # NOTE: 'git' was trimmed from this list (2026-09-16 rework) — git now
+    # classifies via Linux.parameter_commands.git and produces its own
+    # equivalent unregistered-subcommand message in Evaluate-ParameterRules.
+    if ($domainLower -in @('docker', 'kubernetes', 'terraform') -and
         $Command -match '^\s*([a-zA-Z][\w-]*)\s+(?:-\S+\s+){0,3}([^\s-][\w-]*)') {
         $toolName = $Matches[1]
         $subName = $Matches[2]
@@ -1015,6 +1010,48 @@ function Get-ShellParameterMap {
     $map = @{}
     if ($tokens.Count -lt 2) { return $map }   # only program token (or none)
 
+    # --- Subcommand / positionals capture (2026-09-16 subcommand framework) ---
+    # Opt-in: runs ONLY for entries that declare at least one 'subcommand' rule,
+    # so curl/python (flag-only entries) keep byte-identical behavior. This is a
+    # SEPARATE walk that precedes the flag-map loop below (which is unchanged).
+    #   - dash-tokens (-x / --x) are skipped as flags;
+    #   - a dash-token in global_value_flags ALSO consumes its next token (the
+    #     value) unconditionally — this is what makes `git -C /path status` work;
+    #   - the first non-dash token is the subcommand, and ALL remaining positional
+    #     tokens are collected into the reserved '_positionals' list.
+    # Exact-token equality (case-insensitive): --git-dir=C:\x does NOT equal
+    # --git-dir, so =-attached values are boolean and their glued value can never
+    # be mistaken for a subcommand. Undeclared flags are boolean (no value eaten).
+    $hasSubcommandRules = $false
+    foreach ($rule in $Entry.rules) {
+        if (Get-Member -InputObject $rule -Name 'subcommand' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $hasSubcommandRules = $true; break
+        }
+    }
+    if ($hasSubcommandRules) {
+        $gvf = @{}
+        if ((Get-Member -InputObject $Entry -Name 'global_value_flags' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and $Entry.global_value_flags) {
+            foreach ($g in $Entry.global_value_flags) { $gvf["$g".ToLowerInvariant()] = $true }
+        }
+        $positionals = New-Object System.Collections.Generic.List[string]
+        $sawFlag = $false
+        for ($i = 1; $i -lt $tokens.Count; $i++) {
+            $tok = $tokens[$i]
+            if ($tok.StartsWith('-')) {
+                $sawFlag = $true
+                if ($gvf.ContainsKey($tok.ToLowerInvariant()) -and ($i + 1) -lt $tokens.Count) {
+                    $i++   # consume the value token of a declared global value-flag
+                }
+                continue
+            }
+            $positionals.Add($tok)   # subcommand (first) + all later positionals
+        }
+        $map['_positionals'] = @($positionals.ToArray())
+        # Distinguishes truly-bare (no flags, no subcommand => usage/allow) from
+        # flags-without-subcommand (e.g. `git --online -3` => fail-closed ask).
+        $map['_hadFlags'] = $sawFlag
+    }
+
     for ($i = 1; $i -lt $tokens.Count; $i++) {
         $tok = $tokens[$i]
         $lower = $tok.ToLowerInvariant()
@@ -1092,6 +1129,43 @@ function Test-ParamRule {
     return $false
 }
 
+function Test-RuleMatch {
+    # Unified rule matcher for parameter_commands rules (2026-09-16 subcommand
+    # framework). A rule matches when BOTH of its present conditions hold:
+    #   - if it has a 'subcommand' list: the positional sequence (_positionals)
+    #     STARTS WITH one of the phrases (case-insensitive, multi-word OK); AND
+    #   - if it has a 'param' list: Test-ParamRule passes (present / values).
+    # A rule with neither subcommand nor param never matches. Flag-only rules
+    # (no subcommand) reduce to the legacy Test-ParamRule behavior.
+    param($Rule, $ParamMap)
+    $hasSub = Get-Member -InputObject $Rule -Name 'subcommand' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    $hasParam = Get-Member -InputObject $Rule -Name 'param' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if (-not $hasSub -and -not $hasParam) { return $false }
+
+    if ($hasSub) {
+        $pos = @()
+        if ($ParamMap.ContainsKey('_positionals')) { $pos = @($ParamMap['_positionals']) }
+        $phrases = @($Rule.subcommand)
+        if ($phrases -is [string]) { $phrases = @($phrases) }
+        $matched = $false
+        foreach ($phrase in $phrases) {
+            $words = @("$phrase".Trim().ToLowerInvariant() -split '\s+' | Where-Object { $_ })
+            if ($words.Count -eq 0 -or $pos.Count -lt $words.Count) { continue }
+            $ok = $true
+            for ($w = 0; $w -lt $words.Count; $w++) {
+                if ($pos[$w].ToLowerInvariant() -ne $words[$w]) { $ok = $false; break }
+            }
+            if ($ok) { $matched = $true; break }
+        }
+        if (-not $matched) { return $false }
+    }
+
+    if ($hasParam) {
+        if (-not (Test-ParamRule $Rule $ParamMap)) { return $false }
+    }
+    return $true
+}
+
 function Evaluate-ParameterRules {
     param(
         $Entry,
@@ -1102,9 +1176,21 @@ function Evaluate-ParameterRules {
         [string]$Domain
     )
 
-    # 1. modifying rules first (fail-safe: any modifying match => ask)
+    # Does this entry declare any subcommand rule? Drives the usage/unregistered
+    # fallback (section 5.4). Flag-only entries (curl/python) keep the legacy path.
+    $hasSubcommandRules = $false
     foreach ($rule in $Entry.rules) {
-        if ($rule.decision -eq 'modifying' -and (Test-ParamRule $rule $ParamMap)) {
+        if (Get-Member -InputObject $rule -Name 'subcommand' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $hasSubcommandRules = $true; break
+        }
+    }
+
+    # Effective strictness for gated rules: global forces -> entry -> domain.
+    $effectiveStrict = Get-EffectiveStrictness -Config $Config -Domain $Domain -Entry $Entry
+
+    # 1. Modifying rules (compound + subcommand + flag-only), config order.
+    foreach ($rule in $Entry.rules) {
+        if ($rule.decision -eq 'modifying' -and (Test-RuleMatch $rule $ParamMap)) {
             $risk = 'unknown'
             if (Get-Member -InputObject $rule -Name 'risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $risk = $rule.risk }
             return [PSCustomObject]@{
@@ -1113,16 +1199,68 @@ function Evaluate-ParameterRules {
             }
         }
     }
-    # 2. read-only rules
+
+    # 2. Strictness_gated rules: allow in normal/loose, ask when effective strict.
     foreach ($rule in $Entry.rules) {
-        if ($rule.decision -eq 'read-only' -and (Test-ParamRule $rule $ParamMap)) {
+        if ($rule.decision -eq 'strictness_gated' -and (Test-RuleMatch $rule $ParamMap)) {
+            $risk = 'unknown'
+            if (Get-Member -InputObject $rule -Name 'risk' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $risk = $rule.risk }
+            if ($effectiveStrict -eq 'strict') {
+                return [PSCustomObject]@{
+                    Command = $Command; Decision = 'ask'
+                    Reason = "$DisplayName (parameter rule: strictness-gated, strict mode)"; MatchedPattern = $DisplayName; Risk = $risk; Tier = 'strictness_gated'
+                }
+            }
             return [PSCustomObject]@{
                 Command = $Command; Decision = 'allow'
-                Reason = "$DisplayName (parameter rule: read-only)"; MatchedPattern = $DisplayName; Risk = 'none'; Tier = 'param_rule'
+                Reason = "$DisplayName (parameter rule: strictness-gated)"; MatchedPattern = $DisplayName; Risk = 'none'; Tier = 'strictness_gated'
             }
         }
     }
-    # 3. no rule matched
+
+    # 3. Read-only rules (compound + subcommand + flag-only).
+    foreach ($rule in $Entry.rules) {
+        if ($rule.decision -eq 'read-only' -and (Test-RuleMatch $rule $ParamMap)) {
+            # Tier: read_only for subcommand/compound matches, param_rule for flag-only.
+            $tier = 'param_rule'
+            if (Get-Member -InputObject $rule -Name 'subcommand' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $tier = 'read_only' }
+            return [PSCustomObject]@{
+                Command = $Command; Decision = 'allow'
+                Reason = "$DisplayName (parameter rule: read-only)"; MatchedPattern = $DisplayName; Risk = 'none'; Tier = $tier
+            }
+        }
+    }
+
+    # 4. No rule matched.
+    if ($hasSubcommandRules) {
+        $pos = @()
+        if ($ParamMap.ContainsKey('_positionals')) { $pos = @($ParamMap['_positionals']) }
+        if ($pos.Count -eq 0) {
+            $hadFlags = $false
+            if ($ParamMap.ContainsKey('_hadFlags')) { $hadFlags = [bool]$ParamMap['_hadFlags'] }
+            if (-not $hadFlags) {
+                # Truly bare (no flags, no subcommand) => usage/help semantics => allow.
+                return [PSCustomObject]@{
+                    Command = $Command; Decision = 'allow'
+                    Reason = "$DisplayName (no subcommand: usage)"; MatchedPattern = $DisplayName; Risk = 'none'; Tier = 'read_only'
+                }
+            }
+            # Flags present but no recognized subcommand and no rule matched =>
+            # cannot positively classify as safe (e.g. `git --online -3` is an
+            # invalid command) => fail closed.
+            return [PSCustomObject]@{
+                Command = $Command; Decision = 'ask'
+                Reason = "$DisplayName invoked with flags but no recognized subcommand (fail-closed)"; MatchedPattern = ""; Risk = 'unknown'; Tier = 'unregistered'
+            }
+        }
+        # Positional seen but no rule matched => unregistered, fail-closed ask.
+        return [PSCustomObject]@{
+            Command = $Command; Decision = 'ask'
+            Reason = "$DisplayName subcommand '$($pos[0])' not registered (fail-closed)"; MatchedPattern = ""; Risk = 'unknown'; Tier = 'unregistered'
+        }
+    }
+
+    # Flag-only entries (no subcommand rules): preserve the legacy behavior.
     $unrecognized = $false
     foreach ($rule in $Entry.rules) {
         if ($rule.match -eq 'values') {

@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GIT PARAMETER_COMMANDS SUITE (normal mode).
+     Validates the subcommand framework after git migrates to
+     Linux.parameter_commands.git. Run against test/config/live/config.json
+     (migrated) with default strictness (normal).
+     Wired into Run-AllTests.ps1 $suiteConfig. -->
+<commands>
+  <category-group name="GitParam-Normal">
+
+    <!-- === Original production failure === -->
+    <test-case expected="allow" reason="read-only subcommand with global flag" category="GitParam-GlobalFlag">
+      <description>git --no-pager log -1 --format=%B (original 2026-09-16 production failure)</description>
+      <copilot-command><![CDATA[git --no-pager log -1 --format=%B]]></copilot-command>
+    </test-case>
+
+    <!-- === Global value-flag consumption (walker) === -->
+    <test-case expected="allow" reason="declared value-flag consumes path" category="GitParam-ValueFlag">
+      <description>git -C /path status (value-flag + absolute path value)</description>
+      <copilot-command><![CDATA[git -C /path status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="multiple global flags incl. quoted path" category="GitParam-ValueFlag">
+      <description>git -c user.name=x -C "C:\Program Files\repo" log (quoted path, multiple flags)</description>
+      <copilot-command><![CDATA[git -c user.name=x -C "C:\Program Files\repo" log]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="=-form value flag (exact-token match: --git-dir != --git-dir=C:\x)" category="GitParam-ValueFlag">
+      <description>git --git-dir=C:\x status (= attached; flag token is boolean, value glued)</description>
+      <copilot-command><![CDATA[git --git-dir=C:\x status]]></copilot-command>
+    </test-case>
+
+    <!-- === Bare / recognized flag => allow; flags-without-subcommand => ask === -->
+    <test-case expected="allow" reason="bare git = usage (no flags, no subcommand)" category="GitParam-Bare">
+      <description>bare git (prints usage, read-only)</description>
+      <copilot-command><![CDATA[git]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="recognized read-only flag rule (--version)" category="GitParam-Bare">
+      <description>git --version (matches explicit read-only flag rule, not the fallback)</description>
+      <copilot-command><![CDATA[git --version]]></copilot-command>
+    </test-case>
+
+    <!-- === Read-only subcommands === -->
+    <test-case expected="allow" reason="read-only subcommand" category="GitParam-ReadOnly">
+      <description>git status</description>
+      <copilot-command><![CDATA[git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="case-insensitive subcommand match" category="GitParam-ReadOnly">
+      <description>git LOG (uppercase subcommand, case-insensitive)</description>
+      <copilot-command><![CDATA[git LOG --oneline]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only compound (list flag)" category="GitParam-ReadOnly">
+      <description>git branch -a (list branches)</description>
+      <copilot-command><![CDATA[git branch -a]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="multi-word phrase" category="GitParam-ReadOnly">
+      <description>git worktree list</description>
+      <copilot-command><![CDATA[git worktree list]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only compound (tag list)" category="GitParam-ReadOnly">
+      <description>git tag -l</description>
+      <copilot-command><![CDATA[git tag -l]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="read-only subcommand (fetch stays read-only per user decision)" category="GitParam-ReadOnly">
+      <description>git fetch origin</description>
+      <copilot-command><![CDATA[git fetch origin]]></copilot-command>
+    </test-case>
+
+    <!-- === Modifying subcommands => ask === -->
+    <test-case expected="ask" reason="modifying subcommand" category="GitParam-Modifying">
+      <description>git push origin main</description>
+      <copilot-command><![CDATA[git push origin main]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying compound (branch delete)" category="GitParam-Modifying">
+      <description>git branch --delete log 1 (user's misclassification concern: 'log' is NOT the subcommand here)</description>
+      <copilot-command><![CDATA[git branch --delete log 1]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying compound (branch -D)" category="GitParam-Modifying">
+      <description>git branch -D x</description>
+      <copilot-command><![CDATA[git branch -D x]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="modifying subcommand (reset)" category="GitParam-Modifying">
+      <description>git reset --hard HEAD</description>
+      <copilot-command><![CDATA[git reset --hard HEAD]]></copilot-command>
+    </test-case>
+
+    <!-- === GATED flag rule outranks read-only subcommand (point 1 fix) === -->
+    <test-case expected="allow" reason="gated flag rule (--output) beats read-only subcommand (diff); allow in normal mode" category="GitParam-FlagOutranksSub">
+      <description>git diff --output=C:\temp\out.txt (writes a file; gated flag rule fires before read-only subcommand; normal => allow, strict => ask [see git-param-strict suite])</description>
+      <copilot-command><![CDATA[git diff --output=C:\temp\out.txt]]></copilot-command>
+    </test-case>
+
+    <!-- === Strictness-gated: allow in normal mode === -->
+    <test-case expected="allow" reason="gated allow in normal" category="GitParam-GatedNormal">
+      <description>git worktree add x (gated, normal => allow)</description>
+      <copilot-command><![CDATA[git worktree add c:\temp\wt]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated compound allow in normal" category="GitParam-GatedNormal">
+      <description>git tag -a v1 -m msg (gated compound, normal => allow)</description>
+      <copilot-command><![CDATA[git tag -a v1 -m "release"]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated multi-word phrase allow in normal" category="GitParam-GatedNormal">
+      <description>git remote add origin url (gated, normal => allow)</description>
+      <copilot-command><![CDATA[git remote add origin https://github.com/x/y.git]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="gated subcommand allow in normal" category="GitParam-GatedNormal">
+      <description>git commit -m "fix" (gated, normal => allow)</description>
+      <copilot-command><![CDATA[git commit -m "fix bug"]]></copilot-command>
+    </test-case>
+
+    <!-- === Fail-closed: unregistered subcommand === -->
+    <test-case expected="ask" reason="unregistered subcommand (fail-closed, tier=unregistered)" category="GitParam-FailClosed">
+      <description>git frobnicate (unknown subcommand)</description>
+      <copilot-command><![CDATA[git frobnicate]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="token equality: 'logg' != 'log'" category="GitParam-FailClosed">
+      <description>git logg (must NOT prefix-match 'log'; exact token equality)</description>
+      <copilot-command><![CDATA[git logg]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="undeclared value-taking flag: value becomes positional => unregistered" category="GitParam-FailClosed">
+      <description>git --undeclared-flag somevalue (somevalue read as subcommand => fail-closed ask)</description>
+      <copilot-command><![CDATA[git --undeclared-flag somevalue]]></copilot-command>
+    </test-case>
+    <test-case expected="ask" reason="flags but no recognized subcommand => fail-closed" category="GitParam-FailClosed">
+      <description>git --online -3 (invalid: --online is not a git option and there is no subcommand; flags-without-subcommand cannot be positively classified as safe => ask. Distinct from truly-bare `git`, which allows via usage.)</description>
+      <copilot-command><![CDATA[git --online -3]]></copilot-command>
+    </test-case>
+
+    <!-- === Routing: full-path and wrapped forms === -->
+    <test-case expected="allow" reason="full-path git -> linux domain -> param lookup" category="GitParam-Routing">
+      <description>/usr/bin/git status (full-path strip, re-detect to linux, Step 7 finds entry)</description>
+      <copilot-command><![CDATA[/usr/bin/git status]]></copilot-command>
+    </test-case>
+    <test-case expected="allow" reason="ssh-wrapped inner git re-routed to linux" category="GitParam-Routing">
+      <description>ssh user@host "git --no-pager log" (inner command domain-detected as linux)</description>
+      <copilot-command><![CDATA[ssh user@host "git --no-pager log"]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

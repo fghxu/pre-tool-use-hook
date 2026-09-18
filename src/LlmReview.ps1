@@ -273,6 +273,9 @@ function Test-LlmReviewScope {
 function ConvertFrom-BalancedJsonObject {
     param([AllowNull()][AllowEmptyString()][string]$Text)
     if ([string]::IsNullOrEmpty($Text)) { return @() }
+
+    # Primary pass: quote-aware (tracks double-quoted strings + backslash
+    # escapes). Correct for well-formed prose where quotes are balanced.
     $objs = New-Object System.Collections.Generic.List[string]
     $depth = 0; $inStr = $false; $escape = $false; $start = -1
     for ($i = 0; $i -lt $Text.Length; $i++) {
@@ -295,6 +298,34 @@ function ConvertFrom-BalancedJsonObject {
             }
         }
     }
+
+    # Fallback pass (2026-09-15): if the quote-aware scan found NOTHING, a stray
+    # double-quote in the prose (e.g. 'rg "stage' — a " inside single-quoted
+    # text) desynced it into permanent "inside string" mode and hid a valid
+    # {"modifying":[...]} glued to the end -> unusable -> fail-closed ask even
+    # though local AND LLM both said read-only (2026-09-15 14:00:24 log). Re-scan
+    # IGNORING quotes entirely (pure balanced-brace counting). Candidates may
+    # include prose fragments, but Layer 3.5a still validates each with
+    # ConvertFrom-Json + schema check, so garbage is rejected — the scanner only
+    # proposes, the JSON parser disposes. Conservative: fires ONLY when the
+    # primary scan found zero objects (never overrides a successful quote-aware
+    # extraction).
+    if ($objs.Count -eq 0) {
+        $depth = 0; $start = -1
+        for ($i = 0; $i -lt $Text.Length; $i++) {
+            $c = $Text[$i]
+            if ($c -eq '{') { if ($depth -eq 0) { $start = $i }; $depth++ }
+            elseif ($c -eq '}') {
+                if ($depth -gt 0) {
+                    $depth--
+                    if ($depth -eq 0 -and $start -ge 0) {
+                        $objs.Add($Text.Substring($start, $i - $start + 1)); $start = -1
+                    }
+                }
+            }
+        }
+    }
+
     return ,$objs
 }
 
@@ -791,11 +822,33 @@ function Invoke-LlmReview {
                 $vetoIdx = @()
                 $suppIdx = @()
                 $pgDenied = @()
+                # strict_gate_override_llm (2026-09-16, default false): when true, a
+                # local strictness_gated decision UNCONDITIONALLY overpowers an online
+                # LLM veto (trusted_program-style; path guard bypassed). When false/
+                # absent, today's reconciliation stands (the path guard decides).
+                $gateOverride = ($Config._compiled.llmSecondOpinion -and
+                    $Config._compiled.llmSecondOpinion.StrictGateOverrideLlm)
                 foreach ($ix in $verdict.Indices) {
                     if ($ix -eq 0) { $vetoIdx += 0; continue }   # unlisted danger: never suppressible (P3)
                     $sub = $scope.SubCommands[$ix - 1]
                     $isGated = ($sub -and $sub.Tier -eq 'strictness_gated')
-                    if ($isGated -and (Test-GatedInvocationSafe -Command $sub.Command -Config $Config)) {
+                    # Option B: a trusted_program sub-command is UNCONDITIONALLY
+                    # suppressible. The user explicitly whitelisted this program in
+                    # trusted_programs, and the local engine already validated it via
+                    # Test-StatementContainsModifying (no embedded modifying command)
+                    # before stamping the tier. That explicit trust overrides a remote
+                    # LLM veto - no path guard is applied (the trust IS the safety
+                    # decision; gating it would contradict the whitelist).
+                    $isTrusted = ($sub -and $sub.Tier -eq 'trusted_program')
+                    if ($isTrusted) {
+                        $suppIdx += $ix
+                    }
+                    elseif ($isGated -and $gateOverride) {
+                        # Switch on: local gated decision overpowers the LLM, exactly
+                        # like trusted_program (path guard bypassed).
+                        $suppIdx += $ix
+                    }
+                    elseif ($isGated -and (Test-GatedInvocationSafe -Command $sub.Command -Config $Config)) {
                         $suppIdx += $ix
                     }
                     else {

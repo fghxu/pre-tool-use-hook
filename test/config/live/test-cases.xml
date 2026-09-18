@@ -2844,8 +2844,8 @@ done]]></copilot-command>
       <description>git -C C:\repo reset --hard HEAD~1 (modifying, high risk)</description>
       <copilot-command><![CDATA[git -C C:\repo reset --hard HEAD~1]]></copilot-command>
     </test-case>
-    <test-case expected="ask" reason="unknown command" category="DOS-Git-Unknown">
-      <description>git -C C:\repo --online -3 (unknown git subcommand)</description>
+    <test-case expected="ask" reason="flags but no recognized subcommand => fail-closed" category="DOS-Git-Unknown">
+      <description>git -C C:\repo --online -3 (invalid: --online is not a git option and there is no subcommand; flags-without-subcommand cannot be positively classified as safe => ask. Truly-bare `git` still allows via usage semantics.)</description>
       <copilot-command><![CDATA[git -C C:\repo --online -3]]></copilot-command>
     </test-case>
   </category-group>
@@ -3790,8 +3790,8 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
 
   <category-group name="AST-Arbiter-Guard">
 
-    <test-case expected="ask" reason="git" category="AST-Arbiter-Guard">
-      <description>Unknown git subcommand stays ask (arbiter inconclusive)</description>
+    <test-case expected="ask" reason="flags but no recognized subcommand => fail-closed" category="AST-Arbiter-Guard">
+      <description>git --online -3 (invalid: --online is not a git option and there is no subcommand; flags-without-subcommand cannot be positively classified as safe => ask. Truly-bare `git` still allows via usage semantics.)</description>
       <copilot-command><![CDATA[git --online -3]]></copilot-command>
     </test-case>
 
