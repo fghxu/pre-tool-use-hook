@@ -117,6 +117,20 @@ test("missing arguments produce an empty tool_input (hook will fail closed)", ()
   assert.deepEqual(payload.tool_input, {});
 });
 
+test("payload carries cwd from the session header when present", () => {
+  // The bridge spawns the hook with the DSH server's cwd, not the session
+  // workspace — the hook needs the workspace in the payload (like Claude
+  // Code's cwd field) for the editable-CWD path check.
+  const agent = { id: "agent-1", session: { id: "session-1", header: { cwd: "D:\\work\\proj" } } };
+  const payload = buildHookPayload(fakeExec("write", { file_path: "D:\\work\\proj\\a.txt" }, { agent }));
+  assert.equal(payload.cwd, "D:\\work\\proj");
+});
+
+test("cwd is omitted when the session header has none", () => {
+  const payload = buildHookPayload(fakeExec("bash", { command: "ls" }));
+  assert.equal("cwd" in payload, false);
+});
+
 console.log("=== Part A: parseHookOutput ===");
 
 test("parses allow", () => {

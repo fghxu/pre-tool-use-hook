@@ -53,6 +53,7 @@ existing classifier needs no changes, then stamps it with a `dsh` object:
   "tool_use_id": "call_xxx",
   "timestamp": "2026-08-15T12:00:00.123Z",
   "session_id": "session-…",
+  "cwd": "C:\\git\\project",           // from session.header.cwd — see below
   "transcript_path": "…",              // only when DSH_SESSION_JSONL is set
   "dsh": {
     "harness": "DeepSeek Harness",
@@ -62,6 +63,16 @@ existing classifier needs no changes, then stamps it with a `dsh` object:
   }
 }
 ```
+
+**`cwd` (2026-08-27):** the bridge spawns `pwsh -File Hook.ps1` with the DSH
+*server's* working directory, not the session workspace, so the hook's
+`Get-Location`-based editable-CWD check would wrongly ask on in-workspace file
+writes. The bridge therefore stamps `payload.cwd` from the session header
+(`exec.agent.session.header.cwd`, a validated absolute path), and `Hook.ps1`
+honors a payload `cwd` over the process cwd (`Set-ConfigCwd`, fail-safe:
+absent/relative/empty → process cwd as before). Claude Code, Copilot, and Codex
+already send `cwd` themselves, where it is a no-op (their spawn cwd already is
+the project dir); only DSH behavior changes.
 
 `Detect-IDE` (HookAdapter.ps1) treats `dsh.harness == "DeepSeek Harness"` as a
 **decisive** signal (checked before every other signal) and returns `"DSH"`.
@@ -75,11 +86,12 @@ No other IDE sends this field. Output/behavior for `DSH` matches Claude Code:
 |------|------|
 | `src/HookAdapter.ps1` | `Detect-IDE` DSH signal (decisive); `Format-Output` doc for DSH |
 | `src/Logger.ps1` | `dsh` per-IDE log suffix |
-| `src/Hook.ps1` | header/step comments |
+| `src/Hook.ps1` | header/step comments; Step 6b payload-`cwd` override (2026-08-27) |
+| `src/ConfigLoader.ps1` | `Set-ConfigCwd` — fail-safe payload-`cwd` normalization (2026-08-27) |
 | `test/config/live/test-cases.dsh.ps1` | DSH unit tests (17) — detection, mapping, logging |
-| `test/config/live/test-fullpipe.xml` | `DeepSeekHarness-FullPipe` group (8 cases) |
+| `test/config/live/test-fullpipe.xml` | `DeepSeekHarness-FullPipe` group (11 cases, incl. 3 payload-`cwd` cases) |
 | `src/Run-AllTests.ps1` | registers the two new suites |
-| `dsh-plugin/` | the Cordis bridge plugin (`index.js` + tests) |
+| `dsh-plugin/` | the Cordis bridge plugin (`index.js` + tests; payload stamps `cwd` from the session header) |
 
 ## Plugin configuration
 
@@ -153,10 +165,10 @@ A hook failure can never let a gated tool run unchecked:
 ```powershell
 # hook side
 pwsh -NoProfile -File test/config/live/test-cases.dsh.ps1          # 17 unit tests
-pwsh -NoProfile -File test/config/live/FullPipeTestRunner.ps1      # +8 DSH full-pipe cases
+pwsh -NoProfile -File test/config/live/FullPipeTestRunner.ps1      # +11 DSH full-pipe cases (36 total)
 
 # plugin side (Part B spawns the real Hook.ps1)
-node dsh-plugin/test/run-tests.mjs                                 # 19 tests
+node dsh-plugin/test/run-tests.mjs                                 # 21 tests
 
 # everything
 powershell.exe -ExecutionPolicy Bypass -File src/Run-AllTests.ps1

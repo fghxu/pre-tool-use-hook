@@ -38,6 +38,10 @@
       <description>ClaudeCode: Edit to foreign (non-editable, non-system) path (ask, exit 0)</description>
       <hook-input><![CDATA[{"tool_name":"Edit","tool_input":{"file_path":"D:\\work\\notes.txt","old_string":"a","new_string":"b"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:08.123Z","tool_use_id":"call_test009","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="under current directory" category="CC-FullPipe-CwdEditable">
+      <description>ClaudeCode: Edit under payload cwd (allow — Claude Code/Copilot/Codex all send cwd; honoring it is IDE-agnostic, not DSH-only)</description>
+      <hook-input><![CDATA[{"tool_name":"Edit","tool_input":{"file_path":"D:\\work\\proj\\notes.txt","old_string":"a","new_string":"b"},"cwd":"D:\\work\\proj","hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:09.123Z","tool_use_id":"call_test010","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+    </test-case>
   </category-group>
 
   <category-group name="Copilot-FullPipe" ide="Copilot">
@@ -143,6 +147,24 @@
     <test-case expected-decision="allow" expected-exit="0" expected-reason="ignored tool" category="DSH-FullPipe-Skip">
       <description>DSH: Read (ignored tool, exit 0 — the bridge skips read-only tools, but the hook still classifies them correctly if asked)</description>
       <hook-input><![CDATA[{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:07.123Z","tool_use_id":"call_dsh008","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh008","root_call_id":"call_dsh008"}}]]></hook-input>
+    </test-case>
+    <!-- Payload-cwd cases: the DSH bridge spawns the hook with the SERVER's cwd,
+         not the session workspace, so Get-Location alone wrongly asks on
+         in-workspace writes. The payload `cwd` (stamped by the bridge from
+         session.header.cwd) must be authoritative for the editable-CWD check.
+         D:\work\proj is deliberately NOT under editable_paths, NOT a system
+         path, and NOT the runner's own cwd. -->
+    <test-case expected-decision="allow" expected-exit="0" expected-reason="under current directory" category="DSH-FullPipe-CwdEditable">
+      <description>DSH: Write under payload cwd (allow — payload cwd overrides the spawned process cwd for the editable-CWD check)</description>
+      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"D:\\work\\proj\\notes.txt","content":"x"},"cwd":"D:\\work\\proj","hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:08.123Z","tool_use_id":"call_dsh009","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh009","root_call_id":"call_dsh009"}}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="file write to" category="DSH-FullPipe-CwdForeign">
+      <description>DSH: Write OUTSIDE payload cwd (ask — cwd override must not widen the editable scope beyond the payload cwd subtree)</description>
+      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"D:\\other\\notes.txt","content":"x"},"cwd":"D:\\work\\proj","hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:09.123Z","tool_use_id":"call_dsh010","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh010","root_call_id":"call_dsh010"}}]]></hook-input>
+    </test-case>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="file write to" category="DSH-FullPipe-CwdSiblingPrefix">
+      <description>DSH: Write to a SIBLING prefix of payload cwd (ask — trailing-separator normalization must stop D:\work\proj-evil matching D:\work\proj)</description>
+      <hook-input><![CDATA[{"tool_name":"Write","tool_input":{"file_path":"D:\\work\\proj-evil\\notes.txt","content":"x"},"cwd":"D:\\work\\proj","hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:10.123Z","tool_use_id":"call_dsh011","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh011","root_call_id":"call_dsh011"}}]]></hook-input>
     </test-case>
   </category-group>
 

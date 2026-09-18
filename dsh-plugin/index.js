@@ -66,6 +66,12 @@ export function buildHookPayload(exec, extra = {}) {
   };
   const sessionId = exec.agent?.session?.id;
   if (sessionId) payload.session_id = sessionId;
+  // The bridge spawns the hook with the DSH server's cwd, not the session
+  // workspace — stamp the workspace (validated absolute, from the durable
+  // session header) so the hook's editable-CWD path check can use it, the
+  // same way Claude Code's native `cwd` field works.
+  const sessionCwd = exec.agent?.session?.header?.cwd;
+  if (sessionCwd) payload.cwd = sessionCwd;
   const transcriptPath =
     extra.transcriptPath ??
     (typeof process !== "undefined" ? process.env.DSH_SESSION_JSONL : undefined);

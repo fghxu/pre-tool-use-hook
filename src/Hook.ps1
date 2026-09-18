@@ -79,6 +79,19 @@ catch {
 }
 
 # ----------------------------------------------------
+# Step 6b: Payload cwd override — IDEs send the agent's project directory in
+# `cwd` (Claude Code, Copilot, Codex; the DSH bridge stamps it from the
+# session header). When present it is authoritative for the editable-CWD path
+# check: the spawned hook process may inherit a DIFFERENT working directory
+# (e.g. the DSH server's cwd, not the session workspace), which would wrongly
+# ask on in-workspace file writes. Absent/invalid cwd -> the Load-Config
+# Get-Location capture stays in effect (fail-safe, unchanged behavior).
+# ----------------------------------------------------
+if ($parsedInput.PSObject.Properties['cwd'] -and -not [string]::IsNullOrWhiteSpace([string]$parsedInput.cwd)) {
+    Set-ConfigCwd -Config $config -Cwd ([string]$parsedInput.cwd)
+}
+
+# ----------------------------------------------------
 # Step 7: Detect IDE (ClaudeCode, Copilot, Codex, or DSH)
 # ----------------------------------------------------
 $ide = Detect-IDE -InputObject $parsedInput

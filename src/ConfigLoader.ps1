@@ -739,3 +739,45 @@ function Load-Config {
     # 5. Return the config object
     return $config
 }
+
+function Set-ConfigCwd {
+    <#
+    .SYNOPSIS
+        Overrides the config's captured CWD (_cwd/_cwdNorm) with a caller-supplied
+        directory.
+
+    .DESCRIPTION
+        Used when the hook payload carries an authoritative `cwd` (the agent's
+        project directory, sent by Claude Code / Copilot / Codex and stamped by
+        the DSH bridge from the session header) that may differ from the hook
+        process's own working directory captured by Load-Config — e.g. the DSH
+        bridge spawns the hook from the server process's cwd, so Get-Location
+        alone would wrongly ask on in-workspace file writes.
+
+        Fail-safe: null/empty/whitespace or non-rooted paths are IGNORED (the
+        Load-Config capture of Get-Location stays in effect). Normalization
+        matches Load-Config exactly: unified separators + trailing separator,
+        lowercased _cwdNorm for prefix comparison.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        $Config,
+
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Cwd
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Cwd)) { return }
+    $trimmed = $Cwd.Trim()
+    # Rooted paths only: drive-absolute, UNC, or POSIX-absolute. A relative cwd
+    # would anchor to the hook process cwd ambiguously — ignore it (fail-safe).
+    if ($trimmed -notmatch '^[A-Za-z]:[\\/]' -and -not $trimmed.StartsWith('\\') -and -not $trimmed.StartsWith('/')) { return }
+
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $unified = ($trimmed -replace '[/\\]', $sep)
+    if (-not $unified.EndsWith($sep)) { $unified += $sep }
+    $Config | Add-Member -MemberType NoteProperty -Name '_cwd' -Value $unified -Force
+    $Config | Add-Member -MemberType NoteProperty -Name '_cwdNorm' -Value $unified.ToLowerInvariant() -Force
+}
