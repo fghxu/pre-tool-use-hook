@@ -55,14 +55,14 @@
   "_comment_trusted_programs": "Programs trusted to run. Matched AFTER decomposition, against the program token of each decomposed sub-command (the & call-target / first token). A match grants 'allow' for that sub-command ONLY IF no modifying command also appears in its arguments or sibling statements (Option B: args are scanned; unknown args ignored). Entry forms: full path, partial path (path-suffix match; '/' and '\\' are equivalent), or bare name (basename match). Case-insensitive. Covers the & path / bare-path invocation forms; pwsh -File is NOT unwrapped (those invocations are already allowed by the pwsh read_only pattern). The entries below are the project's OWN dev/test scripts (tracked in the repo, used by the test suites); add any machine-specific programs in your private config.local.json (see _comment_local_override).",
   "trusted_programs": [
 	"TestRunner.ps1",
-	"src\\Parser.ps1",
-	"src\\Resolver.ps1",
 	"live\\Sync-Fixtures.ps1",
 	"llm-review\\Run-Tests.ps1",
 	"test-strictness-gate\\Run-Tests.ps1",
-	"src\\Run-AllTests.ps1",
-	"src\\ConfigLoader.ps1",
 	"Classifier.ps1"
+  ],
+  "_comment_trusted_programs_regex": "Regex entries (R1, 2026-09-18) matched AFTER literals miss, against the normalized program token (lowercased, '/' -> '\\'), unanchored -match, case-insensitive. src\\\\.*\\.ps1$ covers all src\\*.ps1 scripts including future agent-invented names (replaces the 4 former literal entries).",
+  "trusted_programs_regex": [
+	"src\\\\.*\\.ps1$"
   ],
 
 
@@ -329,7 +329,6 @@
     
 	
 	"dotnet_static_method_allowlist": [
-      "regex::Matches", "regex::Match", "regex::IsMatch", "regex::Replace", "regex::Split", "regex::Escape", "regex::Unescape",
       "System.Management.Automation.PSParser::Tokenize", "System.Management.Automation.Language.Parser::ParseInput","System.Management.Automation.Language.Parser::ParseFile",
       "System.IO.Path::Combine", "System.IO.Path::Join", "System.IO.Path::GetFileName", "System.IO.Path::GetFileNameWithoutExtension", "System.IO.Path::GetExtension", "System.IO.Path::GetDirectoryName", "System.IO.Path::GetFullPath", "System.IO.Path::ChangeExtension", "System.IO.Path::HasExtension", "System.IO.Path::IsPathRooted", "System.IO.Path::GetPathRoot", "System.IO.Path::GetRandomFileName", "System.IO.Path::GetRelativePath", "System.IO.Path::TrimEndingDirectorySeparator", "System.IO.Path::GetInvalidPathChars", "System.IO.Path::GetInvalidFileNameChars", "System.IO.Path::GetTempPath",
       "System.IO.File::ReadAllText", "System.IO.File::ReadAllBytes", "System.IO.File::ReadAllLines", "System.IO.File::ReadLines", "System.IO.File::OpenRead", "System.IO.File::Exists", "System.IO.File::GetAttributes", "System.IO.File::GetCreationTime", "System.IO.File::GetCreationTimeUtc", "System.IO.File::GetLastAccessTime", "System.IO.File::GetLastAccessTimeUtc", "System.IO.File::GetLastWriteTime", "System.IO.File::GetLastWriteTimeUtc",
@@ -353,6 +352,10 @@
       "System.ServiceProcess.ServiceController::GetServices",
       "System.Console::ReadLine",
       "System.Enum::GetNames", "System.Enum::GetValues", "System.Enum::GetName", "System.Enum::IsDefined"
+    ],
+    "_comment_dotnet_static_method_allowlist_regex": "Regex entries (R3, 2026-09-18) tried AFTER the exact set misses, against the written key AND the reflected full-name key, unanchored -match, case-insensitive. The single pattern below covers all 7 former regex::* literal entries (Match/Matches/IsMatch/Replace/Split/Escape/Unescape).",
+    "dotnet_static_method_allowlist_regex": [
+      "^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch|replace|split|escape|unescape)$"
     ]
   },
 
@@ -444,7 +447,7 @@
 
     "PowerShell": {
       "modifying_strictness": "normal",
-      "description": "PowerShell cmdlets — classified primarily by approved verb",
+      "description": "PowerShell cmdlets â€” classified primarily by approved verb",
       "_comment_tiers": "Explicit read_only/modifying pattern entries (if present) decide first; otherwise the cmdlet verb decides: read_only_verbs => allow, modifying_verbs => ask by risk tier (low/medium/high). strictness_gated covers explicit command patterns only, not verb tiers. Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Compare-*", "Group-*", "Format-*", "ForEach-*", "Out-GridView", "Out-Null", "Out-String", "Out-Host", "Out-Default", "Write-Host", "Write-Output", "Write-Information", "Write-Verbose", "Write-Debug", "Write-Warning", "Read-Host", "Show-*", "Trace-*", "Wait-*", "Connect-*", "Disconnect-*", "Receive-*", "Start-Sleep"],
       "modifying_verbs": {
@@ -876,7 +879,7 @@
 
     "AWS_CLI": {
       "modifying_strictness": "normal",
-      "description": "AWS CLI commands — classified by service and operation verb",
+      "description": "AWS CLI commands â€” classified by service and operation verb",
       "_comment_tiers": "The operation verb is matched against read_only_prefixes => allow, modifying_prefixes => ask by risk tier; unmatched operations ask. In normal strictness, --flags are stripped before classification so only service + operation decide (disabled in strict mode). Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-", "search"],
       "modifying_prefixes": {

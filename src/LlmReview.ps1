@@ -597,26 +597,10 @@ $script:LlmGuardWriterCommands = @(
     'ni', 'md', 'mkdir', 'ln', 'unzip'
 )
 
-# Split-GuardTokens: quote-aware whitespace tokenizer. Quoted spans keep their
-# content whole (quotes stripped), so "C:\Windows\my file.txt" survives as one
-# token and cannot smuggle a protected path past the path-shape scan.
-# Unbalanced quotes keep the remainder as one token (fail-safe direction).
-function Split-GuardTokens {
-    param([string]$Command)
-    $tokens = @()
-    $cur = ''
-    $inS = $false; $inD = $false
-    foreach ($ch in $Command.ToCharArray()) {
-        if ($inS) { if ($ch -eq "'") { $inS = $false } else { $cur += $ch }; continue }
-        if ($inD) { if ($ch -eq '"') { $inD = $false } else { $cur += $ch }; continue }
-        if ($ch -eq "'") { $inS = $true; continue }
-        if ($ch -eq '"') { $inD = $true; continue }
-        if ($ch -match '\s') { if ($cur) { $tokens += $cur; $cur = '' }; continue }
-        $cur += $ch
-    }
-    if ($cur) { $tokens += $cur }
-    return $tokens
-}
+# NOTE (2026-09-18, R2): Split-GuardTokens was relocated to Parser.ps1 so that
+# Resolver.ps1's Step 0g-delete can use it under the TestRunner load graph
+# (TestRunner dot-sources Parser but NOT LlmReview). It is defined there and
+# loaded before this file in every entry path, so the calls below still resolve.
 
 function Test-GatedInvocationSafe {
     <#
@@ -716,6 +700,31 @@ function Invoke-LlmReview {
     # check_blindspot fires when the scope reason starts with "check_blindspot:".
     $log.check_blindspot_triggered = ($scope.CheckBlindspotTier -ne $null)
     $isCheckBlindspot = $log.check_blindspot_triggered
+
+    # ----------------------------------------------------------------
+    # R2 (2026-09-18, spec 4.6 / OQ-1): SKIP the LLM call entirely when EVERY
+    # in-scope sub-command tier is in {trusted_program, editable_path,
+    # editable_delete}. Those tiers are locally authoritative AND unconditionally
+    # veto-suppressed (spec 4.4), so the LLM's answer cannot change the decision
+    # either way — the call is pure latency plus an LLM-DOWN failure mode. Skipping
+    # makes fully trusted/editable blocks immune to gateway outages. The list is the
+    # SAME one the LLM would receive (post scope-filtering, redirection-target
+    # entries already excluded). Empty list -> no skip (out of scope anyway).
+    # check_blindspot blocks are NOT skipped: their trigger tiers (unclassified,
+    # unregistered_*, unknown_domain) are by construction absent from an all-
+    # trusted/editable block, so this cannot suppress a blindspot consult.
+    # ----------------------------------------------------------------
+    if ($scope.InScope -and -not $isCheckBlindspot -and $scope.SubCommands.Count -gt 0) {
+        $skipTiers = @('trusted_program', 'editable_path', 'editable_delete')
+        $allTrustedEditable = $true
+        foreach ($sub in $scope.SubCommands) {
+            if ("$($sub.Tier)" -notin $skipTiers) { $allTrustedEditable = $false; break }
+        }
+        if ($allTrustedEditable) {
+            $log.effect = 'llm-skipped-trusted-editable'
+            return [PSCustomObject]@{ Result = $ClassifyResult; Log = $log }
+        }
+    }
 
     # Numbered list for the prompt AND the index lookup (spec P2: same list).
     $subTexts = @($scope.SubCommands | ForEach-Object { "$($_.Command)" })
@@ -840,7 +849,22 @@ function Invoke-LlmReview {
                     # LLM veto - no path guard is applied (the trust IS the safety
                     # decision; gating it would contradict the whitelist).
                     $isTrusted = ($sub -and $sub.Tier -eq 'trusted_program')
+                    # R2 (2026-09-18, spec 4.4): a path-policy allow tier (editable_path
+                    # from a redirect to an editable/CWD/temp target, or editable_delete
+                    # from Step 0g-delete) is UNCONDITIONALLY suppressible — the user's
+                    # editable_paths are trusted territory and the local engine already
+                    # validated every target via the path-policy ladder. INV-2: this
+                    # authority trumps a remote LLM veto.
+                    $isPathPolicyAllow = ($sub -and $sub.Tier -in @('editable_path', 'editable_delete'))
                     if ($isTrusted) {
+                        $suppIdx += $ix
+                    }
+                    elseif ($isPathPolicyAllow -and -not (Test-CommandTargetsSystemPaths -Command $sub.Command -Config $Config)) {
+                        # Belt-and-braces INV-3 guard: by construction the ladder can
+                        # never produce an allow tier for a system target, so this only
+                        # defends against future regressions. If ANY literal path token in
+                        # the sub-command text canonicalizes to a system path, DENY the
+                        # suppression (veto stands) and record why.
                         $suppIdx += $ix
                     }
                     elseif ($isGated -and $gateOverride) {
@@ -857,6 +881,9 @@ function Invoke-LlmReview {
                         # (protected-path target / unproven variable) - recorded
                         # so the reconciliation log can say WHY.
                         if ($isGated) { $pgDenied += $ix }
+                        # R2: a path-policy tier the INV-3 system guard REFUSED to
+                        # suppress (a system path appears in the command text).
+                        if ($isPathPolicyAllow) { $pgDenied += $ix }
                     }
                 }
                 $log.suppressed = @($suppIdx)

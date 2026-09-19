@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SAFE-EXPR-REGEX SUITE (R3) - isolated fixture (test/config/safe-expr-regex/config.json).
+     Exact allowlists EMPTY; only the *_regex keys are populated, proving regex-only operation.
+     Static cases route through Test-SafeAst via two paths:
+       - pure-expression certifier (needs a PowerShell marker like @() to detect powershell domain)
+       - AST-arbiter gate (linux-detected ;-chain with an unknown static blocker)
+     Run:
+       pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/config/safe-expr-regex/test-cases.xml -ConfigPath test/config/safe-expr-regex/config.json -->
+<commands>
+  <category-group name="SafeExprRegex">
+
+    <!-- R3 static core: short alias form, written key 'regex::IsMatch' matched by the regex entry (certifier path) -->
+    <test-case expected="allow" reason="static regex hit on written short-alias form" category="SER-Allow-StaticWritten" subresult-tier="safe_expr">
+      <description>$z = @(); $null = [regex]::IsMatch("abc","a") - zero cmdlets, safe-expression certifier</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null = [regex]::IsMatch("abc","a")]]></copilot-command>
+    </test-case>
+
+    <!-- Reflected full-name form: written key 'System.Text.RegularExpressions.Regex::Matches' matched by the same regex entry (arbiter path) -->
+    <test-case expected="allow" reason="static regex hit on reflected full-name form" category="SER-Allow-StaticReflected">
+      <description>$null = [System.Text.RegularExpressions.Regex]::Matches("abc","a"); Get-ChildItem c:\temp - full type name, ;-chain</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.Text.RegularExpressions.Regex]::Matches("abc","a"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- Regex miss fail-closed: Replace is not in the alternation -->
+    <test-case expected="ask" reason="static regex miss => ask (fail-closed)" category="SER-Ask-StaticMiss">
+      <description>$z = @(); $null = [regex]::Replace("abc","a","b") - Replace not matched by the regex entry</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null = [regex]::Replace("abc","a","b")]]></copilot-command>
+    </test-case>
+
+    <!-- Instance regex: ToCharArray is NOT in the built-in default instance list, so an allow can only come from the regex key -->
+    <test-case expected="allow" reason="instance regex hit (method not in default exact list)" category="SER-Allow-InstanceRegex" subresult-tier="safe_expr">
+      <description>$z = @(); $s.ToCharArray() - instance method matched by dotnet_method_allowlist_regex</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $s.ToCharArray()]]></copilot-command>
+    </test-case>
+
+    <!-- Instance miss fail-closed: Mutate is in neither the default list nor the regex -->
+    <test-case expected="ask" reason="instance regex miss => ask (fail-closed)" category="SER-Ask-InstanceMiss">
+      <description>$z = @(); $s.Mutate() - instance method not allowlisted</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $s.Mutate()]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

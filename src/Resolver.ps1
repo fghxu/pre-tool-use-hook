@@ -20,6 +20,17 @@
          static .NET method call)
 #>
 
+# Step 0g-delete (R2, 2026-09-18): canonical list of deletion commands. A
+# sub-command whose first token (basename, extension stripped, case-insensitive)
+# is in this set enters the path-aware deletion branch: if EVERY extracted target
+# canonicalizes under an editable path / CWD / temp form it is allowed (tier
+# editable_delete); system/foreign/unresolvable targets still ask. Domain-agnostic
+# — 'rm' (Linux) and 'Remove-Item' (PowerShell) both enter the branch. Single
+# obvious place to extend (same pattern as $script:LlmGuardWriterCommands).
+$script:PathPolicyDeleters = @(
+    'remove-item', 'rm', 'del', 'ri', 'erase', 'rd', 'rmdir', 'unlink', 'clear-content'
+)
+
 function Get-EffectiveStrictness {
     <#
     .SYNOPSIS
@@ -107,7 +118,14 @@ function Resolve-Command {
         [string]$Domain,
 
         [Parameter(Mandatory = $true)]
-        [PSCustomObject]$Config
+        [PSCustomObject]$Config,
+
+        # R2 (2026-09-18): true when this sub-command executes on a REMOTE host
+        # (ssh / docker exec / kubectl exec). Local path policy (editable_paths /
+        # CWD / temp) must NOT auto-allow deletions that run remotely — the target
+        # is not on this machine. Step 0g-delete skips remote sub-commands so they
+        # fall through to the existing tiers (pre-change ask behavior preserved).
+        [bool]$IsRemote = $false
     )
 
     # -------------------------------------------------
@@ -160,7 +178,7 @@ function Resolve-Command {
         $strippedCmd = $Command -replace '^\s*\$[\w:]+\s*=\s*', ''
         if ($strippedCmd -and $strippedCmd -ne $Command) {
             $redetectedDomain = Get-CommandDomain -Command $strippedCmd
-            return Resolve-Command -Command $strippedCmd -Domain $redetectedDomain -Config $Config
+            return Resolve-Command -Command $strippedCmd -Domain $redetectedDomain -Config $Config -IsRemote $IsRemote
         }
     }
 
@@ -190,7 +208,7 @@ function Resolve-Command {
             $remainingCommand = ($tokens[$startIdx..($tokens.Count - 1)] -join ' ').Trim()
             if ($remainingCommand) {
                 $redetectedDomain = Get-CommandDomain -Command $remainingCommand
-                return Resolve-Command -Command $remainingCommand -Domain $redetectedDomain -Config $Config
+                return Resolve-Command -Command $remainingCommand -Domain $redetectedDomain -Config $Config -IsRemote $IsRemote
             }
         }
     }
@@ -243,7 +261,7 @@ function Resolve-Command {
         # If it would leave bare "aws" (e.g., "aws --version"), keep the original
         # command so explicit read_only entries like "aws --version" can match.
         if ($awsNormalized -ne $Command.Trim() -and ($awsNormalized -split '\s+').Count -ge 2) {
-            return Resolve-Command -Command $awsNormalized -Domain $Domain -Config $Config
+            return Resolve-Command -Command $awsNormalized -Domain $Domain -Config $Config -IsRemote $IsRemote
         }
     }
 
@@ -296,14 +314,19 @@ function Resolve-Command {
     if ($firstToken) {
         $trustedProg = Test-TrustedProgram -Token $firstToken -Config $Config
         if ($trustedProg) {
+            # R1: a regex hit is returned as 'regex:<pattern>'. Report the
+            # pattern (not the 'regex:' marker) in the human-facing reason.
+            $isRegexTrust = $trustedProg.StartsWith('regex:')
+            $trustDisplay = if ($isRegexTrust) { $trustedProg.Substring(6) } else { $trustedProg }
             $modToken = Test-StatementContainsModifying -ArgsText $rest -Config $Config
             if ($modToken) {
                 return New-ResolutionResult -Decision "ask" `
-                    -Reason "trusted program '$trustedProg' invoked with modifying arg '$modToken'" `
+                    -Reason "trusted program '$trustDisplay' invoked with modifying arg '$modToken'" `
                     -MatchedPattern $trustedProg -Risk "unknown" -Tier "trusted_program"
             }
+            $trustReason = if ($isRegexTrust) { "trusted program (regex): $trustDisplay" } else { "trusted program: $trustDisplay" }
             return New-ResolutionResult -Decision "allow" `
-                -Reason "trusted program: $trustedProg" -MatchedPattern "trusted-program:$trustedProg" -Risk "none" -Tier "trusted_program"
+                -Reason $trustReason -MatchedPattern "trusted-program:$trustedProg" -Risk "none" -Tier "trusted_program"
         }
     }
 
@@ -332,7 +355,160 @@ function Resolve-Command {
         $newCmd = if ($rest) { "$programName $rest" } else { $programName }
         if ($newCmd -ne $Command.Trim()) {
             $redetectedDomain = Get-CommandDomain -Command $newCmd
-            return Resolve-Command -Command $newCmd -Domain $redetectedDomain -Config $Config
+            return Resolve-Command -Command $newCmd -Domain $redetectedDomain -Config $Config -IsRemote $IsRemote
+        }
+    }
+
+    # -------------------------------------------------
+    # Step 0g-delete: path-aware deletion classification (R2, 2026-09-18)
+    #   If the program token is a known deleter, extract its filesystem targets
+    #   and decide by the path-policy ladder (system -> fail-closed -> editable/
+    #   CWD/temp allow -> foreign ask). Placed AFTER full-path recursion so
+    #   'c:\tools\rm.exe x' normalizes to 'rm x' first, and BEFORE the pattern
+    #   tiers so a modifying DB entry never fires when the path policy already
+    #   decided. Mirrors how redirects bypass command tiers via a dedicated
+    #   path check. If NO target can be extracted the branch does NOT decide —
+    #   the command falls through to the existing tiers (today's behavior).
+    # -------------------------------------------------
+    if ($firstToken -and -not $IsRemote) {
+        # R2: local deletions only. A remote sub-command (ssh / docker exec /
+        # kubectl exec) deletes on ANOTHER host, so this machine's editable_paths /
+        # CWD / temp policy must not auto-allow it — skip the carve-out and let the
+        # existing tiers decide (pre-change ask behavior preserved).
+        # Preserve the ORIGINAL casing of the program token for MatchedPattern: the
+        # Classifier's top-level reason is built as "<MatchedPattern> (<Risk>)", so
+        # 'Remove-Item' must keep its capital to read naturally and to match the
+        # pre-change modifying-tier convention (the config entry name). A lowercased
+        # copy drives only the $script:PathPolicyDeleters membership test.
+        $delName = $firstToken.Trim()
+        try { $delName = [System.IO.Path]::GetFileNameWithoutExtension($delName) } catch { }
+        $delNameLower = $delName.ToLowerInvariant()
+        if ($script:PathPolicyDeleters -contains $delNameLower) {
+            # --- Target extraction (quote-aware tokenizer, shared from Parser.ps1) ---
+            $argTokens = @(Split-GuardTokens $rest)
+            $pathParams  = @('path', 'literalpath', 'lp', 'p')
+            $nonTargets  = @('filter', 'include', 'exclude')
+            $targets = @()
+            $i = 0
+            while ($i -lt $argTokens.Count) {
+                $t = $argTokens[$i]
+                if (-not $t) { $i++; continue }
+                # Path-bearing parameter: its VALUE (next token, or :value same-token) is a target.
+                if ($t.StartsWith('-') -and $t.Length -gt 1) {
+                    $pname = $t.Substring(1).ToLowerInvariant()
+                    if ($pathParams -contains $pname) {
+                        if ($t.Contains(':')) {
+                            $val = $t.Substring($t.IndexOf(':') + 1)
+                            if ($val) { $targets += $val }
+                        } elseif (($i + 1) -lt $argTokens.Count) {
+                            $targets += $argTokens[$i + 1]; $i++
+                        }
+                    }
+                    # Non-target params (-Filter/-Include/-Exclude): skip their value too.
+                    elseif ($nonTargets -contains $pname) {
+                        if (-not $t.Contains(':') -and (($i + 1) -lt $argTokens.Count)) { $i++ }
+                    }
+                    # Other flags (-Recurse, -Force, ...): ignored data.
+                }
+                else {
+                    # Bare token: a target only if it carries a path signal.
+                    if ($t -match '^[A-Za-z]:[\\/]' -or $t.Contains('\') -or $t.Contains('/') -or $t.StartsWith('~') -or $t -match '\.[A-Za-z0-9]+$') {
+                        $targets += $t
+                    }
+                }
+                $i++
+            }
+            # Split comma lists into separate targets.
+            $splitTargets = @()
+            foreach ($tg in $targets) {
+                foreach ($part in ($tg -split ',')) {
+                    $p = $part.Trim()
+                    if ($p) { $splitTargets += $p }
+                }
+            }
+            # R2: drop PowerShell PROVIDER paths (HKLM:\, HKCU:\, env:, function:,
+            # registry:, cert:, ...) — they are NOT filesystem locations, so the
+            # editable/CWD/temp policy must not govern them. A provider path has a
+            # word+colon prefix that is NOT a drive letter (single letter + \ or /).
+            $fsTargets = @()
+            foreach ($tg in $splitTargets) {
+                if ($tg -match '^[A-Za-z][A-Za-z0-9_]*:' -and $tg -notmatch '^[A-Za-z]:[\\/]') { continue }
+                $fsTargets += $tg
+            }
+            $targets = $fsTargets
+
+            # No target extracted -> do NOT decide; fall through to existing tiers.
+            if ($targets.Count -gt 0) {
+            # --- Decision ladder (order matters: system before editable = INV-3 structural) ---
+            $canonicals = @()
+            foreach ($tg in $targets) {
+                $c = ConvertTo-CanonicalWritePath -TargetPath $tg -Config $Config
+                if (-not $c) { $canonicals += $null } else { $canonicals += $c }
+            }
+
+            # Row 1: any canonical matches a system path -> ask/high/modifying.
+            foreach ($c in $canonicals) {
+                if ($c -and $Config._systemPathRegex -and ($c -match $Config._systemPathRegex)) {
+                    return New-ResolutionResult -Decision "ask" `
+                        -Reason "delete of system path: $c (high risk)" `
+                        -MatchedPattern $delName -Risk "high" -Tier "modifying"
+                }
+            }
+
+            # Row 2: drive root / bare UNC root / canonicalization failure / variable-only -> ask/high/modifying.
+            foreach ($tg in $targets) {
+                if ($tg -match '^\$' -or $tg -match '^%') {
+                    return New-ResolutionResult -Decision "ask" `
+                        -Reason "delete of unresolvable target: $tg (high risk)" `
+                        -MatchedPattern $delName -Risk "high" -Tier "modifying"
+                }
+            }
+            foreach ($c in $canonicals) {
+                if (-not $c) {
+                    return New-ResolutionResult -Decision "ask" `
+                        -Reason "delete of unresolvable target (canonicalization failed) (high risk)" `
+                        -MatchedPattern $delName -Risk "high" -Tier "modifying"
+                }
+                if ($c -match '^[A-Za-z]:\\?$') {
+                    return New-ResolutionResult -Decision "ask" `
+                        -Reason "delete of drive root: $c (high risk)" `
+                        -MatchedPattern $delName -Risk "high" -Tier "modifying"
+                }
+                if ($c -match '^\\\\[^\\]+\\?$') {
+                    return New-ResolutionResult -Decision "ask" `
+                        -Reason "delete of UNC root: $c (high risk)" `
+                        -MatchedPattern $delName -Risk "high" -Tier "modifying"
+                }
+            }
+
+            # Row 3: EVERY target passes editable/CWD or the temp-form check -> allow/low/editable_delete.
+            $allSafe = $true
+            foreach ($tg in $targets) {
+                $isTemp = [bool]($tg -match '^/tmp/|^/var/tmp/|^%TEMP%|^%TMP%|^\$env:TEMP|^\$env:TMP')
+                $writableReason = Test-EditableOrCwd -TargetPath $tg -Config $Config
+                if (-not $isTemp -and -not $writableReason) { $allSafe = $false; break }
+            }
+            if ($allSafe) {
+                # Reason reflects the first target's classification (editable vs CWD).
+                $firstReason = Test-EditableOrCwd -TargetPath $targets[0] -Config $Config
+                $isFirstTemp = [bool]($targets[0] -match '^/tmp/|^/var/tmp/|^%TEMP%|^%TMP%|^\$env:TEMP|^\$env:TMP')
+                if ($firstReason -eq 'under current directory') {
+                    $delReason = "delete under current directory: $($canonicals[0])"
+                } elseif ($isFirstTemp) {
+                    $delReason = "delete under temp path: $($targets[0])"
+                } else {
+                    $delReason = "delete under editable path: $($canonicals[0])"
+                }
+                return New-ResolutionResult -Decision "allow" `
+                    -Reason $delReason `
+                    -MatchedPattern $delName -Risk "low" -Tier "editable_delete"
+            }
+
+            # Row 4: otherwise (foreign non-system target, or mixed sets) -> ask/high/modifying.
+            return New-ResolutionResult -Decision "ask" `
+                -Reason "delete of non-editable path: $($canonicals[0]) (high risk)" `
+                -MatchedPattern $delName -Risk "high" -Tier "modifying"
+            }  # end if ($targets.Count -gt 0) — no target => fall through to existing tiers
         }
     }
 
@@ -827,6 +1003,13 @@ function Test-TrustedProgram {
           - Bare entry (no '\'): the token's BASENAME (text after the last '\')
             equals the entry. Covers bare names ('abc.ps1').
         Case-insensitive; '/' and '\' are equivalent.
+
+        R1 (2026-09-18): AFTER all literal entries miss, the regex entries from
+        $Config._compiled.trustedProgramRegexes are tried in order against the
+        normalized token with unanchored -match (substring semantics, like
+        trusted_pattern). A match returns 'regex:<pattern>' so the caller can
+        distinguish a regex hit from a literal one. Absent/empty key = no regex
+        pass (byte-identical behavior to before R1).
     #>
     param([string]$Token, [PSCustomObject]$Config)
 
@@ -837,7 +1020,6 @@ function Test-TrustedProgram {
         (Get-Member -InputObject $Config._compiled -Name 'trustedPrograms' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
         $entries = @($Config._compiled.trustedPrograms)
     }
-    if ($entries.Count -eq 0) { return $null }
 
     $tok = $Token.ToLowerInvariant() -replace '/', '\'
     $basename = if ($tok.Contains('\')) { $tok -replace '^.*\\', '' } else { $tok }
@@ -854,6 +1036,18 @@ function Test-TrustedProgram {
         else {
             if ($basename -eq $e) { return $e }
         }
+    }
+
+    # R1 regex pass: literals exhausted. Unanchored, case-insensitive (the
+    # token is already lowercased; the compiled regexes are IgnoreCase).
+    $regexEntries = @()
+    if ($Config._compiled -and
+        (Get-Member -InputObject $Config._compiled -Name 'trustedProgramRegexes' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+        $regexEntries = @($Config._compiled.trustedProgramRegexes)
+    }
+    foreach ($re in $regexEntries) {
+        if ($null -eq $re) { continue }
+        if ($tok -match $re) { return "regex:$($re.ToString())" }
     }
     return $null
 }

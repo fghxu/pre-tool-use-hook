@@ -96,7 +96,16 @@ $extraSuites = @(
     @{ Name = 'dsh-hook.unit';       File = (Join-Path $repoRoot 'test\config\live\test-cases.dsh.ps1'); Args = @() },
     @{ Name = 'dsh-plugin.node';     File = (Join-Path $repoRoot 'dsh-plugin\test\Run-NodeTests.ps1'); Args = @() },
     @{ Name = 'tool-gate';           File = (Join-Path $repoRoot 'test\config\tool-gate\Run-Tests.ps1'); Args = @() },
-    @{ Name = 'tool-gate.strictness'; File = (Join-Path $repoRoot 'test\config\test-strictness-gate\tool-gate\Run-Tests.ps1'); Args = @() }
+    @{ Name = 'tool-gate.strictness'; File = (Join-Path $repoRoot 'test\config\test-strictness-gate\tool-gate\Run-Tests.ps1'); Args = @() },
+    # R1/R2/R3 (2026-09-18): regex allowlists + editable_paths deletion authority.
+    # trusted-programs-regex (R1) and safe-expr-regex (R3) are self-contained runners.
+    # editable-delete (R2) is the Step 0g-delete XML fixture (wrapper runs TestRunner
+    # under powershell.exe with Cwd=d:\work); editable-delete.llm is the R2 LLM
+    # sub-suite run by the llm-review fixture runner (mock verdicts, no network).
+    @{ Name = 'trusted-programs-regex'; File = (Join-Path $repoRoot 'test\config\trusted-programs-regex\Run-Tests.ps1'); Args = @() },
+    @{ Name = 'safe-expr-regex';        File = (Join-Path $repoRoot 'test\config\safe-expr-regex\Run-Tests.ps1'); Args = @() },
+    @{ Name = 'editable-delete';        File = (Join-Path $repoRoot 'test\config\editable-delete\Run-Tests.ps1'); Args = @() },
+    @{ Name = 'editable-delete.llm';    File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\editable-delete\test-cases.llm.xml')) }
 )
 if ($Filter) {
     $extraSuites = @($extraSuites | Where-Object { $_.Name -like "*$Filter*" })

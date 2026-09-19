@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "description": "BAD-REGEX FIXTURE for trusted_programs_regex (R1). Load-Config MUST throw: 'Invalid regex in trusted_programs_regex'.",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "trusted_programs": [
+    "barename.ps1"
+  ],
+
+  "trusted_programs_regex": [
+    "("
+  ],
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*"],
+      "modifying_verbs": {
+        "high":   ["Remove-*"],
+        "medium": [],
+        "low":    []
+      },
+      "read_only": [],
+      "modifying": []
+    }
+  }
+}

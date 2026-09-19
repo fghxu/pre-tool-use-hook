@@ -659,7 +659,7 @@ else {
 
     <test-case expected="ask" reason="modifying: Remove-Item" category="PowerShell-FileModification">
       <description>Remove-Item deletes a file</description>
-      <copilot-command><![CDATA[Remove-Item -Path "C:\temp\oldfile.log" -Force]]></copilot-command>
+      <copilot-command><![CDATA[Remove-Item -Path "C:\data\oldfile.log" -Force]]></copilot-command>
     </test-case>
 
     <test-case expected="allow" reason="gated: Copy-Item (allow in normal)" category="PowerShell-FileModification">
@@ -957,7 +957,7 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
     </test-case>
     <test-case expected="ask" reason="modifying: flags skipped, inner Remove-Item" category="PSWrapper-FlagSkipping">
       <description>powershell.exe -ExecutionPolicy Bypass -Command with modifying inner (unwrap must not weaken modifying detection)</description>
-      <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -Command "Remove-Item C:\temp\old.log"]]></copilot-command>
+      <copilot-command><![CDATA[powershell.exe -ExecutionPolicy Bypass -Command "Remove-Item C:\data\old.log"]]></copilot-command>
     </test-case>
     <test-case expected="ask" reason="modifying: flags skipped, inner docker run" category="PSWrapper-FlagSkipping">
       <description>powershell.exe -NoProfile -Command wrapping cross-domain modifying (docker run)</description>
@@ -1054,7 +1054,7 @@ Register-ScheduledTask -TaskName "HealthCheck" -Action $action -Trigger $trigger
     </test-case>
     <test-case expected="ask" reason="modifying: compound cd; powershell -Command Remove-Item — per-segment unwrap must still catch modifying inner" category="PSWrapper-Compound">
       <description>cd c:\git\cc\pretoolhook; powershell -NoProfile -Command "Remove-Item C:\temp\x" — compound form, modifying inner => ask</description>
-      <copilot-command><![CDATA[cd c:\git\cc\pretoolhook; powershell -NoProfile -Command "Remove-Item C:\temp\x"]]></copilot-command>
+      <copilot-command><![CDATA[cd c:\git\cc\pretoolhook; powershell -NoProfile -Command "Remove-Item C:\data\x"]]></copilot-command>
     </test-case>
 
     <test-case expected="ask" reason="modifying: Remove-LocalUser" category="PowerShell-UserManagement">
@@ -1359,7 +1359,7 @@ done]]></copilot-command>
 
     <test-case expected="ask" reason="modifying: rm -f" category="Linux-FileModification">
       <description>rm deletes files and directories</description>
-      <copilot-command><![CDATA[rm -rf /tmp/cache/*]]></copilot-command>
+      <copilot-command><![CDATA[rm -rf /srv/cache/*]]></copilot-command>
     </test-case>
 
     <test-case expected="ask" reason="modifying: sed -i" category="Linux-FileModification">
@@ -3152,7 +3152,7 @@ if ($retries -ge 3) { "Service still down after 3 attempts" }
     </test-case>
     <test-case expected="ask" reason="rm (modifying, high)" category="FullPath-Linux-Modifying">
       <description>/bin/rm deletes files recursively (modifying, high risk)</description>
-      <copilot-command><![CDATA[/bin/rm -rf /tmp/build/]]></copilot-command>
+      <copilot-command><![CDATA[/bin/rm -rf /srv/build/]]></copilot-command>
     </test-case>
     <test-case expected="ask" reason="systemctl stop (modifying)" category="FullPath-Linux-Modifying">
       <description>/usr/bin/systemctl stop stops a service (modifying)</description>
@@ -3192,7 +3192,7 @@ if ($retries -ge 3) { "Service still down after 3 attempts" }
     </test-case>
     <test-case expected="ask" reason="Remove-Item" category="FullPath-PSRemoting-Windows-Modifying">
       <description>Invoke-Command with Remove-Item (PowerShell cmdlet, modifying)</description>
-      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { Remove-Item -Path "C:\temp\test.txt" -Force }]]></copilot-command>
+      <copilot-command><![CDATA[Invoke-Command -ScriptBlock { Remove-Item -Path "C:\data\test.txt" -Force }]]></copilot-command>
     </test-case>
     <test-case expected="allow" reason="read-only" category="FullPath-PSRemoting-Linux-ReadOnly">
       <description>pwsh -Command with Linux full path: /usr/bin/grep pattern file (inner grep read-only)</description>
@@ -3200,7 +3200,7 @@ if ($retries -ge 3) { "Service still down after 3 attempts" }
     </test-case>
     <test-case expected="ask" reason="rm" category="FullPath-PSRemoting-Linux-Modifying">
       <description>pwsh -Command with Linux full path: /bin/rm -rf /tmp/cache (inner rm modifying)</description>
-      <copilot-command><![CDATA[pwsh -Command "/bin/rm -rf /tmp/cache"]]></copilot-command>
+      <copilot-command><![CDATA[pwsh -Command "/bin/rm -rf /srv/cache"]]></copilot-command>
     </test-case>
   </category-group>
 
@@ -3363,7 +3363,7 @@ if ($retries -ge 3) { "Service still down after 3 attempts" }
     </test-case>
     <test-case expected="ask" reason="Remove-Item" category="VarAssignment-PS-Modifying">
       <description>$var = Remove-Item (Remove-* modifying verb)</description>
-      <copilot-command><![CDATA[$x = Remove-Item -Path C:\temp\test.txt]]></copilot-command>
+      <copilot-command><![CDATA[$x = Remove-Item -Path C:\data\test.txt]]></copilot-command>
     </test-case>
     <test-case expected="ask" reason="Set-Service" category="VarAssignment-PS-Modifying">
       <description>$var = Set-Service (Set-* modifying verb)</description>
@@ -4225,7 +4225,13 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
     </test-case>
 
     <test-case expected="ask" reason="not a trusted program => unknown => ask (baseline)" category="TrustedPrograms">
-      <description>&amp; src\other.ps1 Get-ChildItem c:\temp - program not in trusted_programs</description>
+      <description>&amp; c:\temp\other.ps1 Get-ChildItem c:\temp - program not in trusted_programs (outside src\, so the R1 regex does not cover it)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& c:\temp\other.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="R1 regex: src\\*.ps1 all trusted, incl. agent-invented names not in the literal list" category="TrustedPrograms">
+      <description>&amp; src\other.ps1 Get-ChildItem c:\temp - covered by trusted_programs_regex (src\\\\.*\.ps1$)</description>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[& src\other.ps1 Get-ChildItem c:\temp]]></copilot-command>
     </test-case>
@@ -4517,19 +4523,19 @@ see commit"; git log --oneline -3; git tag -l | Sort-Object -Descending | Select
     <test-case expected="ask" reason="aws pipeline tail is a modifying cmdlet (Remove-Item) - pipe split now applies to aws_cli" category="Decomp-ParenPipeline">
       <description>aws read piped into a modifying cmdlet</description>
       <tool-name>Bash</tool-name>
-      <copilot-command><![CDATA[aws s3 ls | Remove-Item c:\temp\x.txt]]></copilot-command>
+      <copilot-command><![CDATA[aws s3 ls | Remove-Item c:\data\x.txt]]></copilot-command>
     </test-case>
 
     <test-case expected="ask" reason="docker pipeline tail is a modifying cmdlet - pipe split now applies to docker domain" category="Decomp-ParenPipeline">
       <description>docker read piped into a modifying cmdlet</description>
       <tool-name>Bash</tool-name>
-      <copilot-command><![CDATA[docker ps | Remove-Item c:\temp\x.txt]]></copilot-command>
+      <copilot-command><![CDATA[docker ps | Remove-Item c:\data\x.txt]]></copilot-command>
     </test-case>
 
     <test-case expected="ask" reason="terraform pipeline tail is a modifying cmdlet - pipe split now applies to terraform domain" category="Decomp-ParenPipeline">
       <description>terraform read piped into a modifying cmdlet</description>
       <tool-name>Bash</tool-name>
-      <copilot-command><![CDATA[terraform plan | Remove-Item c:\temp\x.txt]]></copilot-command>
+      <copilot-command><![CDATA[terraform plan | Remove-Item c:\data\x.txt]]></copilot-command>
     </test-case>
 
     <test-case expected="allow" reason="read-only" category="Decomp-ParenPipeline">

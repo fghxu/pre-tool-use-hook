@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- EDITABLE-DELETE SUITE (R2) - isolated fixture (test/config/editable-delete/config.json).
+     Proves Step 0g-delete: a deletion whose EVERY target canonicalizes under an
+     editable path / CWD / temp form is ALLOWED (tier editable_delete); system,
+     foreign, mixed, and unresolvable targets still ask (fail-closed). Deleters
+     stay registered as modifying/high so the carve-out (not a tier change) flips them.
+     Case 8 runs with -Cwd c:\temp\ so the relative target anchors under editable.
+     Run:
+       pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/config/editable-delete/test-cases.xml -ConfigPath test/config/editable-delete/config.json -Cwd c:\temp\ -->
+<commands>
+  <category-group name="EditableDelete">
+
+    <!-- INV-1: recursive depth under editable path -->
+    <test-case expected="allow" reason="delete under editable path (recursive depth)" category="ED-Allow-Depth" subresult-tier="editable_delete" subresult-reason-contains="delete under editable path">
+      <description>Remove-Item c:\temp\1\2\a.txt - deep target under editable folder</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item c:\temp\1\2\a.txt]]></copilot-command>
+    </test-case>
+
+    <!-- Flags skipped, recursive delete -->
+    <test-case expected="allow" reason="delete under editable path with -Recurse -Force" category="ED-Allow-RecurseFlags" subresult-tier="editable_delete">
+      <description>Remove-Item c:\temp\1 -Recurse -Force - flags are not targets</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item c:\temp\1 -Recurse -Force]]></copilot-command>
+    </test-case>
+
+    <!-- linux-detected deleter (rm) on an editable Windows path -->
+    <test-case expected="allow" reason="linux rm deleting under editable path" category="ED-Allow-LinuxRm" subresult-tier="editable_delete">
+      <description>rm c:\temp\log.txt - rm is a deleter, target under editable</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[rm c:\temp\log.txt]]></copilot-command>
+    </test-case>
+
+    <!-- POSIX temp form (unconditional, like redirects) -->
+    <test-case expected="allow" reason="POSIX /tmp delete reuses temp-form allow" category="ED-Allow-PosixTemp" subresult-tier="editable_delete">
+      <description>rm -rf /tmp/foo - /tmp is a temp form</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[rm -rf /tmp/foo]]></copilot-command>
+    </test-case>
+
+    <!-- Comma list, all under editable -->
+    <test-case expected="allow" reason="comma list all under editable" category="ED-Allow-CommaList" subresult-tier="editable_delete">
+      <description>Remove-Item c:\temp\a.txt, c:\temp\b.txt - both targets editable</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item c:\temp\a.txt, c:\temp\b.txt]]></copilot-command>
+    </test-case>
+
+    <!-- Quote-aware tokenizer (path with a space) -->
+    <test-case expected="allow" reason="quoted path with space under editable" category="ED-Allow-QuotedSpace" subresult-tier="editable_delete">
+      <description>Remove-Item "c:\temp\my file.txt" - quote-aware target extraction</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item "c:\temp\my file.txt"]]></copilot-command>
+    </test-case>
+
+    <!-- Wildcard under editable -->
+    <test-case expected="allow" reason="wildcard target under editable" category="ED-Allow-Wildcard" subresult-tier="editable_delete">
+      <description>Remove-Item c:\temp\*.tmp - wildcard survives canonicalization</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item c:\temp\*.tmp]]></copilot-command>
+    </test-case>
+
+    <!-- CWD subtree (run with -Cwd d:\work, a non-editable dir whose subtree is always editable) -->
+    <test-case expected="allow" reason="relative target under CWD (always editable)" category="ED-Allow-CwdSubtree" subresult-tier="editable_delete" subresult-reason-contains="delete under current directory">
+      <description>Remove-Item log.txt - relative, anchors to CWD d:\work\log.txt (CWD subtree always editable)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item log.txt]]></copilot-command>
+    </test-case>
+
+    <!-- INV-3: system path always asks -->
+    <test-case expected="ask" reason="system path delete always asks" category="ED-Ask-SystemPath" subresult-tier="modifying">
+      <description>Remove-Item c:\windows\system32\x.dll - system target</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item c:\windows\system32\x.dll]]></copilot-command>
+    </test-case>
+
+    <!-- INV-3: .. canonicalizes into system -->
+    <test-case expected="ask" reason=".. collapses into system path" category="ED-Ask-DotDotSystem" subresult-tier="modifying">
+      <description>Remove-Item c:\temp\..\windows\x.dll - canonicalizes to c:\windows\x.dll</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item c:\temp\..\windows\x.dll]]></copilot-command>
+    </test-case>
+
+    <!-- INV-4: foreign non-system target asks -->
+    <test-case expected="ask" reason="foreign target asks (fail-closed)" category="ED-Ask-Foreign" subresult-tier="modifying">
+      <description>Remove-Item c:\other\x.txt - not editable, not system</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item c:\other\x.txt]]></copilot-command>
+    </test-case>
+
+    <!-- INV-4: mixed editable+foreign set fails closed -->
+    <test-case expected="ask" reason="mixed editable+foreign set asks (INV-4)" category="ED-Ask-Mixed" subresult-tier="modifying">
+      <description>Remove-Item c:\temp\a.txt, c:\other\b.txt - one foreign target poisons the set</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item c:\temp\a.txt, c:\other\b.txt]]></copilot-command>
+    </test-case>
+
+    <!-- INV-4: variable target fails closed -->
+    <test-case expected="ask" reason="variable target asks (fail-closed)" category="ED-Ask-Variable" subresult-tier="modifying">
+      <description>Remove-Item $target - unresolvable variable</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item $target]]></copilot-command>
+    </test-case>
+
+    <!-- INV-4: drive root fails closed -->
+    <test-case expected="ask" reason="drive root asks (fail-closed)" category="ED-Ask-DriveRoot" subresult-tier="modifying">
+      <description>Remove-Item c:\ - drive root is never deletable</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item c:\]]></copilot-command>
+    </test-case>
+
+    <!-- Parameter-value extraction (-LiteralPath) -->
+    <test-case expected="allow" reason="-LiteralPath value is the target" category="ED-Allow-LiteralPath" subresult-tier="editable_delete">
+      <description>Remove-Item -LiteralPath c:\temp\x - path-bearing parameter value</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item -LiteralPath c:\temp\x]]></copilot-command>
+    </test-case>
+
+    <!-- No target: fall through to existing tiers (unchanged) -->
+    <test-case expected="ask" reason="no extractable target falls through to modifying tier" category="ED-Ask-NoTarget" subresult-tier="modifying">
+      <description>Remove-Item -Filter *.tmp - no path target, existing tier decides</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Remove-Item -Filter *.tmp]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

@@ -1192,6 +1192,64 @@ function Split-SubshellCommands {
 # }
 # =============================================================================
 
+# Split-GuardTokens: quote-aware whitespace tokenizer. Quoted spans keep their
+# content whole (quotes stripped), so "C:\Windows\my file.txt" survives as one
+# token and cannot smuggle a protected path past the path-shape scan.
+# Unbalanced quotes keep the remainder as one token (fail-safe direction).
+# SHARED helper: relocated here from LlmReview.ps1 (2026-09-18, R2) so that
+# Resolver.ps1's Step 0g-delete can use it under the TestRunner load graph
+# (TestRunner dot-sources Parser but NOT LlmReview). LlmReview.ps1 keeps calling
+# it; Parser loads before both in every entry path.
+function Split-GuardTokens {
+    param([string]$Command)
+    $tokens = @()
+    $cur = ''
+    $inS = $false; $inD = $false
+    foreach ($ch in $Command.ToCharArray()) {
+        if ($inS) { if ($ch -eq "'") { $inS = $false } else { $cur += $ch }; continue }
+        if ($inD) { if ($ch -eq '"') { $inD = $false } else { $cur += $ch }; continue }
+        if ($ch -eq "'") { $inS = $true; continue }
+        if ($ch -eq '"') { $inD = $true; continue }
+        if ($ch -match '\s') { if ($cur) { $tokens += $cur; $cur = '' }; continue }
+        $cur += $ch
+    }
+    if ($cur) { $tokens += $cur }
+    return $tokens
+}
+
+# Test-CommandTargetsSystemPaths: belt-and-braces INV-3 guard for the LLM
+# attributed merge (R2, 2026-09-18). Returns $true if ANY literal absolute-path
+# token in the command text canonicalizes to a system path. Takes COMMAND TEXT
+# (not a path array — that is Test-SystemPathsOnly's job for tool payloads).
+# Conservative by design: it scans EVERY path-like token (including flag values
+# such as '-Exclude C:\Windows\*'), so it can only DENY suppression more often,
+# never less. By construction Step 0g-delete rows 1/2 can never produce an allow
+# tier for a system target, so this guard only defends against future regressions
+# — cheap, and it makes INV-3 auditable in the merge (mirrors how the 2026-08-26
+# tool-gate spec made system_paths absolute for tools).
+function Test-CommandTargetsSystemPaths {
+    param(
+        [string]$Command,
+        $Config
+    )
+    if (-not $Command -or -not $Config) { return $false }
+    if (-not (Get-Member -InputObject $Config -Name '_systemPathRegex' -MemberType NoteProperty -ErrorAction SilentlyContinue)) { return $false }
+    $sysRe = $Config._systemPathRegex
+    if (-not $sysRe) { return $false }
+
+    $tokens = @(Split-GuardTokens $Command)
+    foreach ($t in $tokens) {
+        if (-not $t) { continue }
+        # Only literal absolute-path tokens: drive letter (C:\ or C:/), POSIX root
+        # (/), or UNC (\\). Skip flags, relative paths, variables, provider paths.
+        if ($t -match '^[A-Za-z]:[\\/]' -or $t -match '^/' -or $t -match '^\\\\') {
+            $c = ConvertTo-CanonicalWritePath -TargetPath $t -Config $Config
+            if ($c -and ($c -match $sysRe)) { return $true }
+        }
+    }
+    return $false
+}
+
 function Test-EditableOrCwd {
     <#
     Returns a reason string if the target write-path is auto-writable — either
@@ -2203,6 +2261,16 @@ function Test-SafeAst {
                     $allowSet = $Config._dotnetMethodAllowlist
                 }
                 if ($allowSet -and $allowSet.Contains($methodName)) { $ok = $true }
+                # R3 (2026-09-18): exact-set miss -> try the instance regex array
+                # against the bare method name as written. Absent/empty key = no
+                # regex pass (byte-identical behavior).
+                if (-not $ok -and $Config -and
+                    (Get-Member -InputObject $Config -Name '_dotnetMethodAllowlistRegex' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+                    foreach ($re in @($Config._dotnetMethodAllowlistRegex)) {
+                        if ($null -eq $re) { continue }
+                        if ($methodName -match $re) { $ok = $true; break }
+                    }
+                }
             }
 
             # (2) Type-qualified STATIC allowlist ([Type]::Method(...)) — checks the
@@ -2210,17 +2278,29 @@ function Test-SafeAst {
             # reflected full name (e.g. System.Text.RegularExpressions.Regex::Matches),
             # so either spelling matches one canonical config entry.
             if (-not $ok -and $isStaticCall) {
+                $writtenKey = "$($Ast.Expression.TypeName.FullName)::$methodName"
+                $refl = $null
+                try { $refl = $Ast.Expression.TypeName.GetReflectionType() } catch { $refl = $null }
+
+                # (2a) Exact type-qualified set: written key, then reflected key.
                 $staticSet = $null
                 if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetStaticMethodAllowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
                     $staticSet = $Config._dotnetStaticMethodAllowlist
                 }
                 if ($staticSet -and $staticSet.Count -gt 0) {
-                    $writtenKey = "$($Ast.Expression.TypeName.FullName)::$methodName"
                     if ($staticSet.Contains($writtenKey)) { $ok = $true }
-                    if (-not $ok) {
-                        $refl = $null
-                        try { $refl = $Ast.Expression.TypeName.GetReflectionType() } catch { $refl = $null }
-                        if ($refl -and $staticSet.Contains("$($refl.FullName)::$methodName")) { $ok = $true }
+                    if (-not $ok -and $refl -and $staticSet.Contains("$($refl.FullName)::$methodName")) { $ok = $true }
+                }
+
+                # (2b) R3 (2026-09-18): exact-set miss -> try the static regex
+                # array against the written key, then the reflected full-name key.
+                # Absent/empty key = no regex pass (byte-identical behavior).
+                if (-not $ok -and $Config -and
+                    (Get-Member -InputObject $Config -Name '_dotnetStaticMethodAllowlistRegex' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+                    foreach ($re in @($Config._dotnetStaticMethodAllowlistRegex)) {
+                        if ($null -eq $re) { continue }
+                        if ($writtenKey -match $re) { $ok = $true; break }
+                        if ($refl -and "$($refl.FullName)::$methodName" -match $re) { $ok = $true; break }
                     }
                 }
             }

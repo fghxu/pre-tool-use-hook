@@ -87,7 +87,7 @@
          Type-cast assignment whose RHS is a modifying cmdlet must still ask. -->
     <test-case expected="ask" reason="modifying: Remove-Item on RHS of [xml] type-cast assignment" category="TypeCast-Domain">
       <description>[xml]$x = Remove-Item ... (RHS is modifying, must still ask)</description>
-      <copilot-command><![CDATA[[xml]$x = Remove-Item "C:\temp\old.log" -Force]]></copilot-command>
+      <copilot-command><![CDATA[[xml]$x = Remove-Item "C:\data\old.log" -Force]]></copilot-command>
     </test-case>
 
     <!-- Test 4: Guard - static member access is NOT a type-cast variable assignment.

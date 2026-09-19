@@ -77,9 +77,13 @@
       <copilot-command><![CDATA[ls /tmp]]></copilot-command>
     </test-case>
     <test-case expected="ask" reason="modifying: rm" category="TG-Normal-Control">
-      <description>Bash rm /tmp/x — intercepted command tool classifies modifying</description>
+      <!-- R2 (2026-09-18): /tmp/ is an editable_paths.linux entry in this fixture, so
+           'rm /tmp/x' now classifies allow (editable_delete) per the path-policy ladder.
+           Retarget to a non-editable, non-temp path so this control still proves that an
+           intercepted command tool classifies modifying (ask). -->
+      <description>Bash rm /srv/x — intercepted command tool classifies modifying</description>
       <tool-name>Bash</tool-name>
-      <copilot-command><![CDATA[rm /tmp/x]]></copilot-command>
+      <copilot-command><![CDATA[rm /srv/x]]></copilot-command>
     </test-case>
 
   </category-group>

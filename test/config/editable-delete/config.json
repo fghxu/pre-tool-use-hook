@@ -1,0 +1,56 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for editable_paths deletion authority (R2). Proves Step 0g-delete: deletions whose every target canonicalizes under an editable path / CWD / temp form are ALLOWED (tier editable_delete); system/foreign/unresolvable targets still ask. Deleters stay registered as modifying/high so the carve-out (not a tier change) is what flips them.",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "_comment_editable_paths": "c:\\temp\\ is the editable folder. Everything under it (any depth) is deletable without an ask. NOTE: windows entries are RAW REGEX (not escaped), so backslashes must be doubled in JSON -> C:\\\\\\\\temp\\\\\\\\ compiles to regex C:\\\\temp\\\\ which matches literal c:\\temp\\.",
+  "editable_paths": {
+    "linux": [ "/tmp/" ],
+    "windows": [ "C:\\\\temp\\\\" ]
+  },
+
+  "_comment_system_paths": "Default Windows system set. Deletions touching these ALWAYS ask (INV-3), never over-rulable. windows entries are RAW REGEX too -> double the backslashes.",
+  "system_paths": {
+    "linux": [ "/etc", "/usr", "/bin", "/sbin" ],
+    "windows": [ "[A-Za-z]:\\\\Windows\\\\", "[A-Za-z]:\\\\Program Files\\\\", "[A-Za-z]:\\\\ProgramData\\\\" ]
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*"],
+      "modifying_verbs": {
+        "high":   ["Remove-*", "Clear-Content"],
+        "medium": [],
+        "low":    []
+      },
+      "read_only": [
+        { "name": "Get-ChildItem", "patterns": ["Get-ChildItem *"], "description": "List directory contents" }
+      ],
+      "_comment_modifying": "Deleters registered as modifying/high (today's behavior). Step 0g-delete carves out editable/CWD/temp targets BEFORE these tiers fire.",
+      "modifying": [
+        { "name": "Remove-Item", "patterns": ["Remove-Item *"], "risk": "high", "description": "Remove files/directories" },
+        { "name": "Clear-Content", "patterns": ["Clear-Content *"], "risk": "high", "description": "Clear file contents" }
+      ]
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" },
+        { "name": "del", "patterns": ["del *"], "risk": "high", "description": "Delete files" }
+      ]
+    }
+  }
+}

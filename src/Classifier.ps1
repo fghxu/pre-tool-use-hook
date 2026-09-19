@@ -634,10 +634,26 @@ function Invoke-Classify {
         if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetStaticMethodAllowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
             $staticSet = $Config._dotnetStaticMethodAllowlist
         }
+        # R3 (2026-09-18): static regex array for the miss-then-regex fallback.
+        $staticRegexes = @()
+        if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetStaticMethodAllowlistRegex' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+            $staticRegexes = @($Config._dotnetStaticMethodAllowlistRegex)
+        }
         $isUnlistedStatic = $false
         if ($command -match '\[([^\]]+)\]\s*::\s*([A-Za-z_]\w*)\s*\(') {
             $writtenKey = "$($Matches[1].Trim())::$($Matches[2])"
-            $isUnlistedStatic = (-not $staticSet) -or (-not $staticSet.Contains($writtenKey))
+            $onExact = $staticSet -and $staticSet.Contains($writtenKey)
+            # Regex fallback: an allowlisted-by-regex static is "on the allowlist"
+            # for truthfulness purposes (avoids a misleading 'not on allowlist'
+            # message). Decision stays ask either way.
+            $onRegex = $false
+            if (-not $onExact) {
+                foreach ($re in $staticRegexes) {
+                    if ($null -eq $re) { continue }
+                    if ($writtenKey -match $re) { $onRegex = $true; break }
+                }
+            }
+            $isUnlistedStatic = (-not $onExact) -and (-not $onRegex)
         }
         if ($isUnlistedStatic) {
             $atomicReason = "static method not on allowlist: [$($Matches[1].Trim())]::$($Matches[2]) (see safe_expressions.dotnet_static_method_allowlist)"
@@ -699,7 +715,19 @@ function Invoke-Classify {
     $subResults = [System.Collections.Generic.List[PSCustomObject]]::new()
     $blockingCommands = [System.Collections.Generic.List[PSCustomObject]]::new()
 
+    # R2 (2026-09-18): a sub-command that executes on a REMOTE host must not be
+    # auto-allowed by this machine's editable_paths/CWD/temp policy. If the command
+    # contains a remote wrapper, treat its sub-commands as remote so Resolve-Command's
+    # Step 0g-delete skips them (pre-change ask behavior preserved). Remote wrappers:
+    # ssh / docker exec / kubectl exec / Invoke-Command -ComputerName. Local wrappers
+    # (pwsh -Command, bash -c, cmd /c, plain Invoke-Command) run on this machine and
+    # are NOT remote. Command-level (not per-sub-command) because the AST path drops
+    # ParentCommand; this is fail-closed — it can only over-ask a rare mixed local+
+    # remote compound, never under-ask (a security hole).
+    $remoteWrapperRe = '(?:\bssh\s|\bdocker\s+exec\b|\bkubectl\s+exec\b|\bInvoke-Command\s+.*?-ComputerName\b)'
+
     foreach ($sc in $allCommands) {
+        $isRemote = [bool]($command -match $remoteWrapperRe)
         # Atomic-unknown marker (2026-09-17 Layer 2): the reason was computed
         # at the combination step for the WHOLE statement. Re-resolving would
         # emit the generic 'unknown command' fallback, so use it verbatim.
@@ -714,8 +742,28 @@ function Invoke-Classify {
             }
         }
         else {
-            $r = Resolve-Command -Command $sc.CommandText -Domain $sc.Domain -Config $Config
+            $r = Resolve-Command -Command $sc.CommandText -Domain $sc.Domain -Config $Config -IsRemote $isRemote
         }
+
+        # R2 tier stamp (§4.3, merge-relevant): if this segment is an allow with a
+        # redirect whose target is editable/CWD/temp, stamp Tier='editable_path' so
+        # the LLM merge can suppress vetoes on it (INV-2 for writes). Never overwrite
+        # an existing MEANINGFUL tier (e.g. 'trusted_program', 'safe_expr'). A plain
+        # 'read_only' tier is NOT meaningful here — a read-only cmdlet that also writes
+        # to an editable/temp target via redirect IS path-policy-governed, so upgrade it
+        # to 'editable_path' (this is what makes INV-2-for-writes work: the segment the
+        # LLM's flagged index points at must carry the suppressible tier).
+        $curTier = "$($r.Tier)"
+        if ($r.Decision -eq 'allow' -and ($curTier -eq '' -or $curTier -eq 'read_only')) {
+            $segRedir = Test-RedirectionTarget -Command $sc.CommandText -Config $Config
+            if ($segRedir.HasRedirection -and $segRedir.Decision -eq 'allow') {
+                $rr = "$($segRedir.Reason)"
+                if ($rr -match 'temp path|under current directory|editable path') {
+                    $r | Add-Member -MemberType NoteProperty -Name 'Tier' -Value 'editable_path' -Force
+                }
+            }
+        }
+
         $subResults.Add($r)
 
         if ($r.Decision -eq "ask") {
@@ -725,12 +773,27 @@ function Invoke-Classify {
 
     # -- 4e-2: Integrate redirection target classification --
     if ($redirectionResult.HasRedirection) {
+        # R2 tier stamp (§4.3, display/logging only): this entry is EXCLUDED from the
+        # LLM's indexed list (scope filter drops MatchedPattern='redirection-target'),
+        # so the stamp changes nothing in the merge — it makes logs, subresult-tier
+        # assertions, and check_blindspot tier display truthful. ask -> modifying;
+        # allow with a real path-write target (temp/CWD/editable) -> editable_path.
+        $redirTier = ''
+        if ($redirectionResult.Decision -eq 'ask') {
+            $redirTier = 'modifying'
+        } elseif ($redirectionResult.Decision -eq 'allow') {
+            $rr = "$($redirectionResult.Reason)"
+            if ($rr -match 'temp path|under current directory|editable path') {
+                $redirTier = 'editable_path'
+            }
+        }
         $redirSubResult = [PSCustomObject]@{
             Command        = $command
             Decision       = $redirectionResult.Decision
             Reason         = $redirectionResult.Reason
             MatchedPattern = "redirection-target"
             Risk           = $redirectionResult.Risk
+            Tier           = $redirTier
         }
         $subResults.Add($redirSubResult)
 

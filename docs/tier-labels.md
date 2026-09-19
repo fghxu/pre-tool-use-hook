@@ -113,6 +113,62 @@ $null = [math]::Sqrt(4)
 
 ---
 
+### `editable_delete`
+
+**Decision:** allow (low risk)  
+**Set by:** `Resolver.ps1` Step 0g-delete (R2, 2026-09-18)  
+
+A deletion command (`remove-item`, `rm`, `del`, `ri`, `erase`, `rd`, `rmdir`, `unlink`,
+`clear-content`) whose **every** extracted target canonicalizes under an `editable_paths`
+folder, the current working directory subtree, or a temp form (`/tmp/`, `%TEMP%`,
+`$env:TEMP`, …). The path-policy ladder (system → fail-closed → editable/CWD/temp allow →
+foreign ask) decides; this tier is the allow outcome. Recursion and wildcards are covered
+(`c:\temp\1\2\a.txt`, `c:\temp\*.tmp`). Applies in **every** global strictness mode
+(OQ-2: editable folders are trusted territory). System-path, drive-root, UNC-root,
+unresolvable, variable-only, or foreign targets do NOT get this tier — they stay `modifying`
+(ask).
+
+**Sample command (allow):**
+```
+Remove-Item c:\temp\1\2\a.txt
+```
+→ `tiers: [1]=editable_delete` (reason: `delete under editable path: c:\temp\1\2\a.txt`)
+
+**Sample command (NOT this tier — system target stays modifying/ask):**
+```
+Remove-Item c:\windows\system32\x.dll
+```
+→ `tiers: [1]=modifying` (reason: `delete of system path: c:\windows\system32\x.dll (high risk)`)
+
+---
+
+### `editable_path`
+
+**Decision:** allow (low risk)  
+**Set by:** `Classifier.ps1` STEP 4e per-segment stamp + STEP 4e-2 redirect sub-result (R2, 2026-09-18)  
+
+Two distinct uses, both for **writes** (redirects), not deletions:
+
+1. **Underlying segment (merge-relevant):** when a sub-command segment resolves to `allow`
+   and its text contains a redirect whose target is editable/CWD/temp, the segment's tier is
+   stamped `editable_path` (upgrading an empty or plain `read_only` tier; never overwriting a
+   meaningful tier like `trusted_program`/`safe_expr`). This is the entry the LLM's flagged
+   index points at, so it is what makes INV-2-for-writes work: an LLM veto on that segment is
+   suppressed as policy.
+2. **Redirect sub-result (display/logging only):** the dedicated `redirection-target`
+   sub-result carries `editable_path` when its target is editable/CWD/temp (or `modifying`
+   when ask). This entry is EXCLUDED from the LLM's indexed list, so this stamp changes
+   nothing in the merge — it makes logs, `subresult-tier` assertions, and check_blindspot
+   tier display truthful.
+
+**Sample command (allow; segment stamped editable_path):**
+```
+Get-Date ; Write-Host hi > c:\temp\o.txt
+```
+→ `tiers: [1]=read_only [2]=editable_path` (the redirect target is under an editable path)
+
+---
+
 ### `unregistered_verb`
 
 **Decision:** ask  
@@ -199,12 +255,31 @@ A safety-net fallback in the log formatter. Under normal operation this should n
 
 ## LLM Merge Behavior
 
-In `LlmReview.ps1` attributed-verdict merge, only one tier has special treatment:
+In `LlmReview.ps1` attributed-verdict merge, several tiers get special treatment:
 
 | Tier | LLM flags this sub-command? | Effect |
 |---|---|---|
-| `strictness_gated` | yes | **Suppressed** (`veto-suppressed-policy`) — the user already accepted gated risk at normal strictness |
+| `trusted_program` | yes | **Suppressed** (`veto-suppressed-policy`) — the user explicitly whitelisted the program; no path guard applied (the trust IS the safety decision) |
+| `editable_path`, `editable_delete` | yes | **Suppressed** (`veto-suppressed-policy`) — R2: editable folders are trusted territory and the local engine already validated every target via the path-policy ladder. INV-2: this authority trumps a remote LLM veto. Subject to the belt-and-braces INV-3 guard below |
+| `strictness_gated` | yes | **Suppressed** (`veto-suppressed-policy`) — the user already accepted gated risk at normal strictness (or via `strict_gate_override_llm`) |
 | All others | yes | **Veto** — LLM disagreement in the dangerous direction forces `ask` |
+
+**INV-3 belt-and-braces guard (R2):** before suppressing an `editable_path`/`editable_delete`
+flag, the sub-command text is run through `Test-CommandTargetsSystemPaths` (tokenize,
+canonicalize each literal absolute-path token, match `_systemPathRegex`). If ANY path token
+targets a system path, suppression is DENIED — the veto stands and the index is recorded in
+`path_guard_denied`. By construction the Step 0g-delete ladder can never produce an allow tier
+for a system target, so this guard only defends against future regressions; it makes INV-3
+auditable in the merge (mirrors how the 2026-08-26 tool-gate spec made `system_paths` absolute
+for tools).
+
+**LLM-call skip for fully trusted/editable blocks (R2, OQ-1):** when EVERY in-scope
+sub-command tier is in `{trusted_program, editable_path, editable_delete}`, the remote LLM call
+is skipped entirely — no HTTP call, no LLM-DOWN/UNUSABLE check, `verdict=not_called`,
+`effect=llm-skipped-trusted-editable`. Those tiers are locally authoritative AND unconditionally
+veto-suppressed, so the LLM's answer cannot change the decision either way; skipping makes such
+blocks immune to gateway outages. Mixed blocks (any other tier present) keep today's behavior:
+the LLM is consulted and an LLM-DOWN still forces `ask`.
 
 Flags on sub-commands that are already `ask` locally (modifying, unregistered_verb, unregistered_static, unregistered, unclassified, unknown_domain) cannot cause a veto because `LLM never downgrades` — the local decision is already `ask`, so LLM agreement is moot.
 

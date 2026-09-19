@@ -22,26 +22,51 @@ For anything touching patterns or prefixes, run the full differential (`src/Run-
 | `global_modifying_strictness` | `normal` or `strict` (or `loose`). Global strictness — renamed from `modifying_strictness` 2026-07-28; the loader **rejects** the legacy key fail-closed. Governs redirect-write policy and some AWS/mixed cases. Per-domain `commands.<domain>.modifying_strictness` keeps the old name. | Test suites run both values (`-Strictness normal/strict`); changes here shift redirect-suite results. |
 | `risk_legend` | Text descriptions of low/medium/high. | Documentation only — not read by logic. |
 
-## 2. `editable_paths` / `system_paths` — redirect write policy
+## 2. `editable_paths` / `system_paths` — write + deletion path policy
 
-**What they do:** applied by the Parser's redirect analysis (`echo x > target`) to the *target path* of `>` / `>>` inside **shell commands**.
+**What they do:** applied to *target paths* in two places:
 
-- `editable_paths`: writes under these roots auto-approve in **every** strictness mode (the CWD/editable check runs before the strictness fallbacks in `Resolve-PathPolicy`).
-- `system_paths`: writes under these roots **always prompt**, any strictness. Windows entries are raw regex; linux entries too (see ConfigLoader notes).
+1. **Shell redirects** (`echo x > target`) — the Parser's redirect analysis checks the `>` / `>>` target via `Resolve-PathPolicy`.
+2. **Deletions (R2, 2026-09-18)** — `Resolver.ps1` Step 0g-delete extracts the filesystem targets of a deletion command (`remove-item`, `rm`, `del`, `ri`, `erase`, `rd`, `rmdir`, `unlink`, `clear-content`) and runs them through the same path-policy ladder.
+
+- `editable_paths`: writes AND deletions under these roots auto-approve in **every** strictness mode (the CWD/editable check runs before the strictness fallbacks). Deletion is recursive at any depth (`c:\temp\1\2\a.txt`) and wildcard-safe (`c:\temp\*.tmp`).
+- `system_paths`: writes AND deletions under these roots **always prompt**, any strictness. Windows entries are raw regex; linux entries too (see ConfigLoader notes). A deletion whose target canonicalizes to a system path is NEVER allowed — this is absolute (INV-3) and cannot be over-rulled by the remote LLM.
+
+**Deletion decision ladder (Step 0g-delete, order matters):**
+
+| # | Condition (over ALL extracted targets, canonicalized) | Decision | Tier |
+|---|---|---|---|
+| 1 | any target matches `system_paths` | ask | `modifying` |
+| 2 | any target is a drive root / bare UNC root / fails canonicalization / variable-only (`$v`, `%V%`) | ask | `modifying` |
+| 3 | EVERY target is under an editable path / CWD subtree / temp form (`/tmp/`, `%TEMP%`, `$env:TEMP`, …) | **allow** | `editable_delete` |
+| 4 | otherwise (foreign non-system target, or mixed sets) | ask | `modifying` |
+
+If NO filesystem target can be extracted (e.g. `Remove-Item -Filter *.tmp`, or a registry provider path like `HKLM:\…`), the command falls through to the existing tiers — today's behavior is preserved. Remote deletions (`ssh host "rm …"`, `docker exec … rm …`) are NOT auto-allowed by this machine's policy (they run on another host).
 - **POSIX-path gotcha (Windows host):** redirect targets like `/home/user/x` are resolved through `GetFullPath` inside `Test-EditableOrCwd`, so the regex sees `C:\home\user\x` — a plain `/home/user/` pattern never matches. Use the `([A-Za-z]:)?[/\\]home[/\\](user|dev)[/\\]` form (see the shipped `linux` entries and their `_comment_linux`). `~` home paths keep their `~\` form.
 
 **When adding entries:**
-- These apply **only to shell redirection**, NOT to file-tool writes (Write/Edit). File-tool writes are governed by `trusted_pattern`/`untrusted_pattern` (see companion doc).
-- Windows backslashes are JSON-escaped twice: `"C:\\\\temp\\\\"` → regex `C:\\temp\\`.
+- These apply to **shell redirection AND deletions**, NOT to file-tool writes (Write/Edit). File-tool writes are governed by `trusted_pattern`/`untrusted_pattern` (see companion doc) and the path-branch (§7.5).
+- Windows backslashes are JSON-escaped twice: `"C:\\\\temp\\\\"` → regex `C:\\temp\\`. A trailing single backslash is an invalid regex escape — always end a directory pattern with a doubled backslash (`\\\\`).
 - Entries are regex, not plain prefixes — escape `(` `)` etc. (see the `Program Files \(x86\)` entry).
-- Overlap between the two lists: system_paths wins (checked first in the redirect analysis).
+- Overlap between the two lists: system_paths wins (checked first in both the redirect analysis and the deletion ladder).
 
 ## 3. `safe_expressions`
 
 **What it does:** the AST arbiter's .NET method allowlist. A PowerShell expression that the AST certifier (`Test-SafeAst`) proves contains no commands may still call .NET methods; only methods listed here are permitted (matched case-insensitively). Anything else → ask.
 
+Two lists, two shapes:
+- `dotnet_method_allowlist` — **instance-style** calls (`$obj.Name(...)`), name-only.
+- `dotnet_static_method_allowlist` — **static** calls (`[Type]::Method(...)`), `TypeName::Method` form matched against the type as written AND its reflected full name.
+
+**Regex entries (R3, 2026-09-18):** each list has a sibling `*_regex` key:
+- `dotnet_method_allowlist_regex` — regexes tried AFTER the exact instance names miss, against the method name.
+- `dotnet_static_method_allowlist_regex` — regexes tried AFTER the exact static entries miss, against both the written key (`regex::IsMatch`) and the reflected full-name key (`System.Text.RegularExpressions.Regex::IsMatch`).
+
+This lets one pattern collapse many literals (e.g. `"^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch)$"` covers `regex::Matches`, `regex::Match`, `regex::IsMatch` and their reflected forms). Matching is unanchored `-match`, case-insensitive; anchor with `^…$` when you want exact semantics. Invalid patterns throw at load time (fail-fast). Absent/empty regex keys = byte-identical behavior to before R3.
+
 **When adding entries:**
 - Add only methods with **no side effects** (pure readers/transforms). A single mutating method (e.g. `Kill`, `Delete`, `WriteAllText`) silently auto-approves destructive code. The `AST-Arbiter-Guard` adhoc group pins this — add a guard test for every new method.
+- Regex entries widen the allow surface: prefer anchored patterns and keep them narrow. An over-broad static regex (e.g. `.*::.*`) would auto-approve arbitrary static calls.
 
 ## 4. `known_command_prefixes`
 
@@ -63,6 +88,17 @@ Cardinal rules (violating these is how you get `rm -rf /` auto-approved):
 - **Never** an unanchored or catch-all `trusted_pattern` (`.*`, `^(?!…).*$`). Trusted short-circuits all classification.
 - Always anchor with `^` (and usually `.*$`).
 - Keep the command-side exe asker in `untrusted_pattern` — without it, bare full-path executables (`C:\temp\tool.exe` via Bash) hit the zero-command allow.
+
+## 5b. `trusted_programs` / `trusted_programs_regex`
+
+**What they do:** matched AFTER decomposition, against the **program token** (the `&` call-target / first token) of each sub-command — distinct from §5, which gates whole command text. A match grants `allow` for that sub-command ONLY IF no modifying command appears in its arguments or sibling statements (Option B: args are scanned; unknown args ignored). Tier `trusted_program`.
+
+- `trusted_programs` — literal entries: full path, partial path (path-suffix), or bare name (basename). Case-insensitive; `/` and `\` equivalent.
+- `trusted_programs_regex` (R1, 2026-09-18) — regex entries tried AFTER all literals miss, against the normalized token (lowercased, `/` → `\`), unanchored `-match`, case-insensitive. This is how you trust a whole family of agent-invented script names with one entry: `"src\\\\.*\\.ps1$"` matches `src\Parser.ps1`, `src\Resolver.ps1`, and any future `src\*.ps1`.
+
+**When adding entries:**
+- Regex entries widen the auto-allow surface. Prefer anchored patterns (`^…$`) and keep them scoped to a directory you control. Option B still arg-scans, so a trusted script invoked with a modifying argument (e.g. `& src\x.ps1 Remove-Item c:\temp`) still asks.
+- Invalid regex entries throw at load time (fail-fast). Absent/empty key = byte-identical behavior to before R1.
 
 ## 6. `intercept_tool_name` / `ignore_tool_name` / `strictness_gated_tool_name`
 

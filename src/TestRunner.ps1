@@ -156,10 +156,23 @@ for ($i = 0; $i -lt $total; $i++) {
         $subresultTier = $tc.GetAttribute('subresult-tier').Trim()
     }
 
+    # Optional subresult-reason-contains assertion (pins a SubResult's Reason
+    # text, not the top-level aggregated reason). Needed when the per-sub-command
+    # wording matters but the top-level reason is a generic aggregate (e.g. an
+    # all-allow command reports "read-only" at the top level while the trusted
+    # sub-result carries "trusted program (regex): <pattern>"). Mirrors
+    # subresult-tier: passes if ANY SubResult's Reason contains the substring.
+    # Absent on all pre-existing cases -> behavior unchanged (decision-only).
+    $subresultReasonContains = ""
+    if ($tc -is [System.Xml.XmlElement]) {
+        $subresultReasonContains = $tc.GetAttribute('subresult-reason-contains').Trim()
+    }
+
     $decisionOk = ($result.Decision -eq $tc.expected)
     $reasonOk   = (-not $reasonContains) -or ("$($result.Reason)" -like "*$reasonContains*")
     $tierOk     = (-not $subresultTier) -or (@($result.SubResults | Where-Object { "$($_.Tier)" -eq $subresultTier }).Count -gt 0)
-    if ($decisionOk -and $reasonOk -and $tierOk) {
+    $subReasonOk = (-not $subresultReasonContains) -or (@($result.SubResults | Where-Object { "$($_.Reason)" -like "*$subresultReasonContains*" }).Count -gt 0)
+    if ($decisionOk -and $reasonOk -and $tierOk -and $subReasonOk) {
         $passed++
     }
     else {
@@ -185,6 +198,10 @@ for ($i = 0; $i -lt $total; $i++) {
         if ($subresultTier) {
             $tiers = (@($result.SubResults | ForEach-Object { "$($_.Command)=$($_.Tier)" }) -join ', ')
             Write-Host "  SubResult tier must include: '$subresultTier'  (actual: $tiers)"
+        }
+        if ($subresultReasonContains) {
+            $reasons = (@($result.SubResults | ForEach-Object { "$($_.Command)=$($_.Reason)" }) -join ', ')
+            Write-Host "  SubResult reason must contain: '$subresultReasonContains'  (actual: $reasons)"
         }
         Write-Host "  Expected: $($fail.Expected)  Got: $($fail.Got)"
         Write-Host "  Classifier said: $($fail.Reason)"

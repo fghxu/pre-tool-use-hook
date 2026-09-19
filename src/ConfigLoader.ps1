@@ -73,6 +73,30 @@ function Test-ConfigSchema {
         throw "Configuration validation failed: 'trusted_programs' must be an array"
     }
 
+    # Validate optional "trusted_programs_regex" (R1, 2026-09-18): regex entries
+    # matched AFTER the literal trusted_programs list, against the normalized
+    # program token (lowercased, '/' -> '\'), unanchored -match. OPTIONAL: absent
+    # = byte-identical behavior to before this key existed. If present it must be
+    # an array of non-empty strings; each entry is compile-checked here so a bad
+    # regex surfaces at load time, not at first tool call.
+    $hasTrustedProgramsRegex = Get-Member -InputObject $Config -Name 'trusted_programs_regex' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasTrustedProgramsRegex) {
+        if ($Config.trusted_programs_regex -isnot [array]) {
+            throw "Configuration validation failed: 'trusted_programs_regex' must be an array"
+        }
+        foreach ($p in $Config.trusted_programs_regex) {
+            if ($null -eq $p -or "$($p)".Trim() -eq '') {
+                throw "Configuration validation failed: 'trusted_programs_regex' entries must be non-empty strings"
+            }
+            try {
+                [void][regex]::new("$($p)")
+            }
+            catch {
+                throw "Invalid regex in trusted_programs_regex: $($p)"
+            }
+        }
+    }
+
     # Validate optional "llm_second_opinion" block (second-opinion LLM cross-check).
     # OPTIONAL: absent = feature off. When present it is validated even with
     # enabled=false so bad values surface at load time, not at first use.
@@ -388,6 +412,46 @@ function Test-ConfigSchema {
     }
     $Config | Add-Member -MemberType NoteProperty -Name '_dotnetStaticMethodAllowlist' -Value $staticSet -Force
 
+    # safe_expressions: REGEX allowlists (R3, 2026-09-18). Sibling regex arrays
+    # tried AFTER the exact HashSets above miss. OPTIONAL: absent = empty array =
+    # byte-identical behavior to before R3. Compiled IgnoreCase; invalid pattern
+    # throws at load time (fail-fast, like trusted_programs_regex).
+    $methodRegexes = @()
+    if ($hasSafeExprs -and $Config.safe_expressions -and
+        (Get-Member -InputObject $Config.safe_expressions -Name 'dotnet_method_allowlist_regex' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $Config.safe_expressions.dotnet_method_allowlist_regex) {
+        if ($Config.safe_expressions.dotnet_method_allowlist_regex -isnot [array]) {
+            throw "Configuration validation failed: 'safe_expressions.dotnet_method_allowlist_regex' must be an array"
+        }
+        foreach ($p in $Config.safe_expressions.dotnet_method_allowlist_regex) {
+            try {
+                $methodRegexes += [regex]::new("$($p)", [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            }
+            catch {
+                throw "Invalid regex in safe_expressions.dotnet_method_allowlist_regex: $($p)"
+            }
+        }
+    }
+    $Config | Add-Member -MemberType NoteProperty -Name '_dotnetMethodAllowlistRegex' -Value $methodRegexes -Force
+
+    $staticRegexes = @()
+    if ($hasSafeExprs -and $Config.safe_expressions -and
+        (Get-Member -InputObject $Config.safe_expressions -Name 'dotnet_static_method_allowlist_regex' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $Config.safe_expressions.dotnet_static_method_allowlist_regex) {
+        if ($Config.safe_expressions.dotnet_static_method_allowlist_regex -isnot [array]) {
+            throw "Configuration validation failed: 'safe_expressions.dotnet_static_method_allowlist_regex' must be an array"
+        }
+        foreach ($p in $Config.safe_expressions.dotnet_static_method_allowlist_regex) {
+            try {
+                $staticRegexes += [regex]::new("$($p)", [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            }
+            catch {
+                throw "Invalid regex in safe_expressions.dotnet_static_method_allowlist_regex: $($p)"
+            }
+        }
+    }
+    $Config | Add-Member -MemberType NoteProperty -Name '_dotnetStaticMethodAllowlistRegex' -Value $staticRegexes -Force
+
     # Validate regex patterns in trusted_pattern compile successfully
     foreach ($pattern in $Config.trusted_pattern) {
         try {
@@ -612,6 +676,23 @@ function Load-Config {
         }
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'trustedPrograms' -Value $compiledTrustedPrograms -Force
+
+    # Compile trusted_programs_regex (R1, 2026-09-18; optional): [regex] array
+    # matched AFTER the literal list by Test-TrustedProgram. Unanchored +
+    # IgnoreCase (the token is already lowercased). Empty array when absent -
+    # consumers treat an empty array as "feature off" (byte-identical behavior).
+    $compiledTrustedProgramRegexes = @()
+    if (Get-Member -InputObject $config -Name 'trusted_programs_regex' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        foreach ($p in $config.trusted_programs_regex) {
+            try {
+                $compiledTrustedProgramRegexes += [regex]::new("$($p)", [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            }
+            catch {
+                throw "Invalid regex in trusted_programs_regex: $($p)"
+            }
+        }
+    }
+    $config._compiled | Add-Member -MemberType NoteProperty -Name 'trustedProgramRegexes' -Value $compiledTrustedProgramRegexes -Force
 
     # Compile llm_second_opinion (optional): normalized runtime block.
     # $null when the block is absent (feature off; every consumer null-checks).

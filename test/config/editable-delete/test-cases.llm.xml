@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LLM SUB-SUITE for R2 (editable_paths deletion authority) - spec 2026-09-18 section 7.2, L-table.
+     Run by the llm-review fixture runner (NOT TestRunner, which does not load LlmReview.ps1):
+       pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/editable-delete/test-cases.llm.xml
+     Uses the llm-review fixture config (test/config/llm-review/config.json) via that runner.
+     LLM verdicts are injected via PRETOOLHOOK_LLMREVIEW_MOCK - NO network.
+
+     DESIGN NOTES (verified against source 2026-09-18):
+       * The llm-review fixture has NO editable_paths, so deletion targets use the
+         UNCONDITIONAL temp form (/tmp/...) which Step 0g-delete Row 3 allows in every
+         strictness mode. system_paths.linux includes /etc (and windows C:\Windows).
+       * level="all" is REQUIRED on every case: the default scope is complex_remote with
+         min=2, so a single-sub-command case would be out of scope and prove nothing.
+       * A bare mock="modifying" yields Indices=$null -> the FULL-VETO path (nothing
+         suppressible). Suppression cases therefore use mock="idx:N" to flag a specific
+         sub-command index (1-based, over the scope list which EXCLUDES redirection-target
+         entries).
+       * section 4.6 skip: when EVERY in-scope sub-command tier is in
+         {trusted_program, editable_path, editable_delete} the LLM call is skipped entirely.
+         So L1/L2 (suppression tests) are MIXED blocks (read_only + editable) to avoid the
+         skip and actually exercise the attributed merge; L6 is an ALL-editable block that
+         exercises the skip itself.
+
+     RED PHASE expectation: L1, L2, L6 FAIL today (no path-policy suppression / no skip).
+     L3, L4, L5 are controls that pass today and must keep passing (L5 specifically guards
+     the Test-CommandTargetsSystemPaths belt-and-braces guard added in Green D). -->
+<commands>
+  <category-group name="LlmEditableDelete">
+
+    <!-- L1: INV-2 - an editable_delete sub-command's LLM veto is suppressed by policy.
+         Mixed block (read_only + editable_delete) so the section 4.6 skip does NOT fire;
+         the attributed merge must suppress the flagged editable index. -->
+    <test-case expected="allow" category="LlmED-L1-SuppressEditableDelete" level="all" mock="idx:2" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" reason="INV-2: LLM veto on an editable_delete sub-command is suppressed as policy; local allow stands">
+      <description>L1: Get-Date ; rm /tmp/x - LLM flags the rm (idx 2) modifying; suppression keeps allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; rm /tmp/x]]></copilot-command>
+    </test-case>
+
+    <!-- L2: INV-2 for writes - the UNDERLYING segment of a redirect to an editable/temp
+         target carries tier editable_path (the redirection-target entry itself is
+         scope-filtered out). Mixed block so the skip does not fire; the merge must
+         suppress the veto on the stamped segment. -->
+    <test-case expected="allow" category="LlmED-L2-SuppressEditablePathWrite" level="all" mock="idx:2" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" reason="INV-2 writes: redirect to /tmp stamps the segment editable_path; LLM veto on it is suppressed">
+      <description>L2: Get-Date ; Write-Host hi &gt; /tmp/o.txt - LLM flags the write segment (idx 2); suppression keeps allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; Write-Host hi > /tmp/o.txt]]></copilot-command>
+    </test-case>
+
+    <!-- L3: INV-3 merge side - a system-path deletion is a LOCAL ask; an LLM read-only
+         verdict never downgrades it (disagree-kept-ask). Control: passes today and must
+         keep passing. -->
+    <test-case expected="ask" category="LlmED-L3-SystemPathKeptAsk" level="all" mock="read-only" in-scope="true" verdict="read-only" effect="disagree-kept-ask" reason="INV-3: system-path delete is a local ask; LLM read-only never downgrades it">
+      <description>L3: rm /etc/x - system path, local ask kept despite LLM read-only</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[rm /etc/x]]></copilot-command>
+    </test-case>
+
+    <!-- L4: LLM-DOWN on a MIXED block still forces ask (section 4.6 residual: only fully
+         trusted/editable blocks are skipped; mixed blocks keep today's fail-closed
+         behavior). Control: guards against an over-broad skip. -->
+    <test-case expected="ask" category="LlmED-L4-DownMixedForcedAsk" level="all" mock="down" in-scope="true" verdict="down" effect="forced-ask" reason="LLM-DOWN on a mixed (read_only + editable) block still forces ask; the skip does not over-apply">
+      <description>L4: Get-Date ; rm /tmp/x - LLM down; mixed block is consulted and forced to ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; rm /tmp/x]]></copilot-command>
+    </test-case>
+
+    <!-- L5: belt-and-braces INV-3 guard (section 4.4). The flagged sub-command carries an
+         editable_delete tier (so Green D's isPathPolicyAllow WOULD suppress it) BUT its
+         command text contains a system path (C:\Windows\*). Test-CommandTargetsSystemPaths
+         must deny suppression -> veto stands, path_guard_denied recorded. MIXED block
+         (read_only + editable_delete) so the section 4.6 skip does NOT fire and the merge
+         is actually reached. This case passes today (no suppression at all) and would FAIL
+         if Green D added isPathPolicyAllow WITHOUT the guard - it is the regression probe
+         for the guard. -->
+    <test-case expected="ask" category="LlmED-L5-SystemGuardDeniesSuppression" level="all" mock="idx:2" in-scope="true" verdict="modifying" effect="veto" reason="INV-3 guard: editable_delete tier but a system path appears in the command text; suppression is denied (path_guard_denied) and the veto stands">
+      <description>L5: Get-Date ; rm /tmp/x -Exclude C:\Windows\* - editable tier + system path in text; guard denies suppression</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date ; rm /tmp/x -Exclude C:\Windows\*]]></copilot-command>
+    </test-case>
+
+    <!-- L6: section 4.6 skip - an ALL-editable block (every sub-command tier in the
+         trusted/editable set) skips the LLM call entirely: no HTTP call, verdict
+         not_called, effect llm-skipped-trusted-editable. RED today (the LLM is consulted
+         and the merge runs instead of skipping). -->
+    <test-case expected="allow" category="LlmED-L6-SkipAllEditable" level="all" mock="read-only" verdict="not_called" effect="llm-skipped-trusted-editable" reason="section 4.6: every sub-command is editable_delete, so the LLM call is skipped entirely (immune to gateway outages)">
+      <description>L6: rm /tmp/a ; rm /tmp/b - all-editable block; LLM skipped</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[rm /tmp/a ; rm /tmp/b]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

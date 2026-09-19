@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "description": "BAD-REGEX FIXTURE for safe_expressions regex allowlists (R3). Load-Config MUST throw: 'Invalid regex in safe_expressions.dotnet_static_method_allowlist_regex'.",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "safe_expressions": {
+    "dotnet_static_method_allowlist_regex": [
+      "^("
+    ]
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*"],
+      "modifying_verbs": {
+        "high":   ["Remove-*"],
+        "medium": [],
+        "low":    []
+      },
+      "read_only": [],
+      "modifying": []
+    }
+  }
+}

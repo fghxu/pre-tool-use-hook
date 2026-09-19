@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for safe_expressions regex allowlists (R3). Exact lists EMPTY; only the *_regex keys are populated, proving regex-only operation.",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "_comment_safe_expressions": "Exact lists intentionally EMPTY (absent) so every allow below can ONLY come from the regex keys. dotnet_static_method_allowlist defaults to empty (fail-closed); dotnet_method_allowlist would default to the built-in ~40-name list, so the instance positive case uses ToCharArray which is NOT in that default.",
+  "safe_expressions": {
+    "_comment_static_regex": "One pattern covers BOTH the short alias (regex::IsMatch) and the reflected full name (system.text.regularexpressions.regex::Matches), per spec 5.6. Case-insensitive.",
+    "dotnet_static_method_allowlist_regex": [
+      "^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch)$"
+    ],
+    "_comment_instance_regex": "ToCharArray is deliberately NOT in the built-in default instance list, so an allow can only come from this regex (proves regex-only operation).",
+    "dotnet_method_allowlist_regex": [
+      "^tochararray$"
+    ]
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*"],
+      "modifying_verbs": {
+        "high":   ["Remove-*"],
+        "medium": [],
+        "low":    []
+      },
+      "read_only": [
+        { "name": "Get-ChildItem", "patterns": ["Get-ChildItem *"], "description": "List directory contents" }
+      ],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" }
+      ],
+      "modifying": []
+    }
+  }
+}

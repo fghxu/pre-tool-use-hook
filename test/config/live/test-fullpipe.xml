@@ -8,7 +8,7 @@
     </test-case>
     <test-case expected-decision="ask" expected-exit="0" expected-reason="rm" category="CC-FullPipe-Modifying">
       <description>ClaudeCode: rm -rf (modifying, exit 0)</description>
-      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/build"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:01.123Z","tool_use_id":"call_test002","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"rm -rf /srv/build"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:01.123Z","tool_use_id":"call_test002","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
     <test-case expected-decision="ask" expected-exit="2" expected-reason="unknown tool" category="CC-FullPipe-Unknown">
       <description>ClaudeCode: unknown tool (exit 2, genuine error)</description>
@@ -47,7 +47,7 @@
     </test-case>
     <test-case expected-decision="ask" expected-exit="0" expected-reason="del" category="CP-FullPipe-Modifying">
       <description>Copilot: del (modifying, exit 0)</description>
-      <hook-input><![CDATA[{"tool_name":"run_in_terminal","tool_input":{"command":"del C:\\temp\\test.txt"},"hook_event_name":"preToolUse","timestamp":"1715568001"}]]></hook-input>
+      <hook-input><![CDATA[{"tool_name":"run_in_terminal","tool_input":{"command":"del C:\\data\\test.txt"},"hook_event_name":"preToolUse","timestamp":"1715568001"}]]></hook-input>
     </test-case>
     <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="CP-FullPipe-Docker">
       <description>Copilot: docker ps (read-only, exit 0)</description>
@@ -78,7 +78,7 @@
     </test-case>
     <test-case expected-decision="deny" expected-exit="0" expected-reason="rm" category="CX-FullPipe-Modifying">
       <description>Codex: rm -rf (modifying, exit 0, deny)</description>
-      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/build"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:01.123Z","tool_use_id":"call_cx002","turn_id":"turn_def456"}]]></hook-input>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"rm -rf /srv/build"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:01.123Z","tool_use_id":"call_cx002","turn_id":"turn_def456"}]]></hook-input>
     </test-case>
     <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="CX-FullPipe-Docker">
       <description>Codex: docker ps (read-only, exit 0)</description>
@@ -118,7 +118,7 @@
     </test-case>
     <test-case expected-decision="ask" expected-exit="0" expected-reason="rm" category="DSH-FullPipe-Modifying">
       <description>DSH: rm -rf via Bash tool (modifying, ask, exit 0)</description>
-      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/build"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:01.123Z","tool_use_id":"call_dsh002","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh002","root_call_id":"call_dsh002"}}]]></hook-input>
+      <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"rm -rf /srv/build"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:01.123Z","tool_use_id":"call_dsh002","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh002","root_call_id":"call_dsh002"}}]]></hook-input>
     </test-case>
     <test-case expected-decision="allow" expected-exit="0" expected-reason="read-only" category="DSH-FullPipe-PowerShell">
       <description>DSH: Get-Process via PowerShell tool (read-only, exit 0)</description>

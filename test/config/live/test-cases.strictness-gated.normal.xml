@@ -102,7 +102,7 @@
     </test-case>
     <test-case expected="ask" reason="modifying unaffected" category="SG-Normal-Controls">
       <description>rm -rf still asks</description>
-      <copilot-command><![CDATA[rm -rf /tmp/junk]]></copilot-command>
+      <copilot-command><![CDATA[rm -rf /srv/junk]]></copilot-command>
     </test-case>
 
     <test-case expected="allow" reason="gated allow in normal (var-assignment strip)" category="SG-Normal-VarAssignment">
