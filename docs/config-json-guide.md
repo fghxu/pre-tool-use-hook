@@ -56,7 +56,7 @@ If NO filesystem target can be extracted (e.g. `Remove-Item -Filter *.tmp`, or a
 
 Two lists, two shapes:
 - `dotnet_method_allowlist` — **instance-style** calls (`$obj.Name(...)`), name-only.
-- `dotnet_static_method_allowlist` — **static** calls (`[Type]::Method(...)`), `TypeName::Method` form matched against the type as written AND its reflected full name. Since the 2026-09-19 broad-patterns consolidation this list is tiny (one exact entry, `guid::NewGuid`); everything else is covered by the regex rows below. The 248 pruned entries are kept in the inert record key `dotnet_static_method_allowlist_removed` (NOT loaded).
+- `dotnet_static_method_allowlist` — **static** calls (`[Type]::Method(...)`), `TypeName::Method` form matched against the type as written AND its reflected full name. Since the 2026-09-19 broad-patterns consolidation this list is tiny (one exact entry, `guid::NewGuid`); everything else is covered by the regex rows below. The 248 pruned entries were temporarily kept in an inert record key (`dotnet_static_method_allowlist_removed`, never loaded) and removed from all configs on 2026-09-19 — they remain recoverable from git history (commit `2e4af9f`).
 
 **Regex entries (R3, 2026-09-18; broad-patterns consolidation 2026-09-19):** each list has a sibling `*_regex` key:
 - `dotnet_method_allowlist_regex` — regexes tried AFTER the exact instance names miss, against the method name.

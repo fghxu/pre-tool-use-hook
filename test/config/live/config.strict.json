@@ -1,4 +1,4 @@
-﻿{
+{
   "version": "1.0",
   
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
@@ -355,32 +355,6 @@
     "dotnet_static_method_denylist_regex": [
       "^[\\w.]*isolatedstoragefile::get\\w*$",
       "^[\\w.]*marshal::get\\w*$"
-    ],
-    "_comment_pruned_2026_09_19": "The 248 exact static entries removed by the 2026-09-19 broad-patterns consolidation, kept here as a record (NOT loaded - inert key). All are covered by dotnet_static_method_allowlist_regex above; proof: temp/collapse-proof.ps1. Former deliberate exclusions that STILL ask: writers/mutators (File::Write*/Append*/Delete/Copy/Move/Create/SetAttributes, Directory::Create/Delete/Move, Array::Sort/Reverse/Clear/Copy, Environment::SetEnvironmentVariable, Process::Start) - none start with a Class-C family prefix on a Class-A type; Path::GetTempFileName + String::Intern are now EXPLICIT denylist entries.",
-    "dotnet_static_method_allowlist_removed": [
-      "System.Management.Automation.PSParser::Tokenize", "System.Management.Automation.Language.Parser::ParseInput","System.Management.Automation.Language.Parser::ParseFile",
-      "System.IO.Path::Combine", "System.IO.Path::Join", "System.IO.Path::GetFileName", "System.IO.Path::GetFileNameWithoutExtension", "System.IO.Path::GetExtension", "System.IO.Path::GetDirectoryName", "System.IO.Path::GetFullPath", "System.IO.Path::ChangeExtension", "System.IO.Path::HasExtension", "System.IO.Path::IsPathRooted", "System.IO.Path::GetPathRoot", "System.IO.Path::GetRandomFileName", "System.IO.Path::GetRelativePath", "System.IO.Path::TrimEndingDirectorySeparator", "System.IO.Path::GetInvalidPathChars", "System.IO.Path::GetInvalidFileNameChars", "System.IO.Path::GetTempPath",
-      "System.IO.File::ReadAllText", "System.IO.File::ReadAllBytes", "System.IO.File::ReadAllLines", "System.IO.File::ReadLines", "System.IO.File::OpenRead", "System.IO.File::Exists", "System.IO.File::GetAttributes", "System.IO.File::GetCreationTime", "System.IO.File::GetCreationTimeUtc", "System.IO.File::GetLastAccessTime", "System.IO.File::GetLastAccessTimeUtc", "System.IO.File::GetLastWriteTime", "System.IO.File::GetLastWriteTimeUtc",
-      "System.IO.Directory::Exists", "System.IO.Directory::GetFiles", "System.IO.Directory::GetDirectories", "System.IO.Directory::GetFileSystemEntries", "System.IO.Directory::EnumerateFiles", "System.IO.Directory::EnumerateDirectories", "System.IO.Directory::EnumerateFileSystemEntries", "System.IO.Directory::GetCurrentDirectory", "System.IO.Directory::GetDirectoryRoot", "System.IO.Directory::GetLogicalDrives", "System.IO.Directory::GetParent", "System.IO.Directory::GetCreationTime", "System.IO.Directory::GetLastWriteTime", "System.IO.Directory::GetLastAccessTime",
-      "math::Abs", "math::Acos", "math::Asin", "math::Atan", "math::Atan2", "math::Ceiling", "math::Cos", "math::Cosh", "math::Exp", "math::Floor", "math::Log", "math::Log10", "math::Max", "math::Min", "math::Pow", "math::Round", "math::Sign", "math::Sin", "math::Sinh", "math::Sqrt", "math::Tan", "math::Tanh", "math::Truncate", "math::DivRem", "math::IEEERemainder", "math::Clamp", "math::BigMul", "math::Cbrt", "math::Log2",
-      "Convert::ToBase64String", "Convert::FromBase64String", "Convert::ToHexString", "Convert::FromHexString", "Convert::ToInt32", "Convert::ToInt64", "Convert::ToDouble", "Convert::ToBoolean", "Convert::ToByte", "Convert::ToChar", "Convert::ToDateTime", "Convert::ToDecimal", "Convert::ToString", "Convert::ChangeType", "Convert::ToBase64CharArray",
-      "System.BitConverter::ToString", "System.BitConverter::GetBytes", "System.BitConverter::ToInt16", "System.BitConverter::ToInt32", "System.BitConverter::ToInt64", "System.BitConverter::ToUInt16", "System.BitConverter::ToUInt32", "System.BitConverter::ToUInt64", "System.BitConverter::ToSingle", "System.BitConverter::ToDouble", "System.BitConverter::ToBoolean", "System.BitConverter::ToChar", "System.BitConverter::DoubleToInt64Bits", "System.BitConverter::Int64BitsToDouble", "System.BitConverter::SingleToInt32Bits", "System.BitConverter::Int32BitsToSingle",
-      "string::Format", "string::Join", "string::Concat", "string::IsNullOrEmpty", "string::IsNullOrWhiteSpace", "string::Compare", "string::CompareOrdinal", "string::Equals", "string::Copy",
-      "guid::NewGuid", "guid::Parse", "guid::TryParse", "guid::ParseExact",
-      "System.DateTime::Parse", "System.DateTime::ParseExact", "System.DateTime::TryParse", "System.DateTime::TryParseExact", "System.DateTime::FromBinary", "System.DateTime::FromFileTime", "System.DateTime::FromFileTimeUtc", "System.DateTime::FromOADate", "System.DateTime::IsLeapYear", "System.DateTime::DaysInMonth", "System.DateTime::Compare",
-      "System.DateTimeOffset::Parse", "System.DateTimeOffset::ParseExact", "System.DateTimeOffset::TryParse", "System.DateTimeOffset::TryParseExact", "System.DateTimeOffset::FromFileTime", "System.DateTimeOffset::FromUnixTimeSeconds", "System.DateTimeOffset::FromUnixTimeMilliseconds",
-      "System.TimeSpan::Parse", "System.TimeSpan::TryParse", "System.TimeSpan::FromDays", "System.TimeSpan::FromHours", "System.TimeSpan::FromMinutes", "System.TimeSpan::FromSeconds", "System.TimeSpan::FromMilliseconds", "System.TimeSpan::FromTicks",
-      "System.Version::Parse", "System.Version::TryParse",
-      "System.Array::BinarySearch", "System.Array::IndexOf", "System.Array::LastIndexOf", "System.Array::Find", "System.Array::FindAll", "System.Array::FindIndex", "System.Array::FindLast", "System.Array::FindLastIndex", "System.Array::Exists", "System.Array::TrueForAll", "System.Array::ConvertAll", "System.Array::Empty", "System.Array::AsReadOnly",
-      "System.Environment::GetEnvironmentVariable", "System.Environment::GetFolderPath", "System.Environment::ExpandEnvironmentVariables", "System.Environment::GetCommandLineArgs",
-      "int::Parse", "int::TryParse", "long::Parse", "long::TryParse", "double::Parse", "double::TryParse", "byte::Parse", "byte::TryParse", "bool::Parse", "bool::TryParse",
-      "System.Net.IPAddress::Parse", "System.Net.IPAddress::TryParse",
-      "System.Uri::EscapeDataString", "System.Uri::EscapeUriString", "System.Uri::UnescapeDataString", "System.Uri::CheckHostName", "System.Uri::CheckSchemeName", "System.Uri::IsWellFormedUriString", "System.Uri::IsHexDigit", "System.Uri::IsHexEncoding", "System.Uri::HexUnescape", "System.Uri::HexEscape",
-      "System.Linq.Enumerable::Where", "System.Linq.Enumerable::Select", "System.Linq.Enumerable::SelectMany", "System.Linq.Enumerable::OrderBy", "System.Linq.Enumerable::OrderByDescending", "System.Linq.Enumerable::ThenBy", "System.Linq.Enumerable::ThenByDescending", "System.Linq.Enumerable::GroupBy", "System.Linq.Enumerable::GroupJoin", "System.Linq.Enumerable::Join", "System.Linq.Enumerable::Distinct", "System.Linq.Enumerable::DistinctBy", "System.Linq.Enumerable::Union", "System.Linq.Enumerable::UnionBy", "System.Linq.Enumerable::Intersect", "System.Linq.Enumerable::IntersectBy", "System.Linq.Enumerable::Except", "System.Linq.Enumerable::ExceptBy", "System.Linq.Enumerable::Concat", "System.Linq.Enumerable::Zip", "System.Linq.Enumerable::Take", "System.Linq.Enumerable::TakeLast", "System.Linq.Enumerable::TakeWhile", "System.Linq.Enumerable::Skip", "System.Linq.Enumerable::SkipLast", "System.Linq.Enumerable::SkipWhile", "System.Linq.Enumerable::Chunk", "System.Linq.Enumerable::First", "System.Linq.Enumerable::FirstOrDefault", "System.Linq.Enumerable::Last", "System.Linq.Enumerable::LastOrDefault", "System.Linq.Enumerable::Single", "System.Linq.Enumerable::SingleOrDefault", "System.Linq.Enumerable::ElementAt", "System.Linq.Enumerable::ElementAtOrDefault", "System.Linq.Enumerable::Any", "System.Linq.Enumerable::All", "System.Linq.Enumerable::Count", "System.Linq.Enumerable::LongCount", "System.Linq.Enumerable::Sum", "System.Linq.Enumerable::Average", "System.Linq.Enumerable::Aggregate", "System.Linq.Enumerable::SequenceEqual", "System.Linq.Enumerable::Cast", "System.Linq.Enumerable::OfType", "System.Linq.Enumerable::ToArray", "System.Linq.Enumerable::ToList", "System.Linq.Enumerable::ToDictionary", "System.Linq.Enumerable::ToLookup", "System.Linq.Enumerable::ToHashSet", "System.Linq.Enumerable::DefaultIfEmpty", "System.Linq.Enumerable::MinBy", "System.Linq.Enumerable::MaxBy",
-      "System.Diagnostics.Process::GetProcesses", "System.Diagnostics.Process::GetProcessById", "System.Diagnostics.Process::GetCurrentProcess",
-      "System.ServiceProcess.ServiceController::GetServices",
-      "System.Console::ReadLine",
-      "System.Enum::GetNames", "System.Enum::GetValues", "System.Enum::GetName", "System.Enum::IsDefined"
     ]
   },
 
@@ -472,7 +446,7 @@
 
     "PowerShell": {
       "modifying_strictness": "normal",
-      "description": "PowerShell cmdlets â€” classified primarily by approved verb",
+      "description": "PowerShell cmdlets — classified primarily by approved verb",
       "_comment_tiers": "Explicit read_only/modifying pattern entries (if present) decide first; otherwise the cmdlet verb decides: read_only_verbs => allow, modifying_verbs => ask by risk tier (low/medium/high). strictness_gated covers explicit command patterns only, not verb tiers. Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Compare-*", "Group-*", "Format-*", "ForEach-*", "Out-GridView", "Out-Null", "Out-String", "Out-Host", "Out-Default", "Write-Host", "Write-Output", "Write-Information", "Write-Verbose", "Write-Debug", "Write-Warning", "Read-Host", "Show-*", "Trace-*", "Wait-*", "Connect-*", "Disconnect-*", "Receive-*", "Start-Sleep"],
       "modifying_verbs": {
@@ -904,7 +878,7 @@
 
     "AWS_CLI": {
       "modifying_strictness": "normal",
-      "description": "AWS CLI commands â€” classified by service and operation verb",
+      "description": "AWS CLI commands — classified by service and operation verb",
       "_comment_tiers": "The operation verb is matched against read_only_prefixes => allow, modifying_prefixes => ask by risk tier; unmatched operations ask. In normal strictness, --flags are stripped before classification so only service + operation decide (disabled in strict mode). Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-", "search"],
       "modifying_prefixes": {
