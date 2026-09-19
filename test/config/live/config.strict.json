@@ -1,4 +1,4 @@
-{
+﻿{
   "version": "1.0",
   
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
@@ -322,10 +322,42 @@
       "SelectNodes", "SelectSingleNode", "GetElementsByTagName", "GetElementById",
       "ReadLine", "ReadToEnd", "Next", "NextDouble", "GetTypeCode"
     ],
-    "_comment_dotnet_static_method_allowlist": "Type-qualified allowlist for STATIC .NET method calls ([Type]::Method(...)) in expression position, used by the safe-expression certifier + AST arbiter (Test-SafeAst InvokeMemberExpressionAst). Entry form 'TypeName::Method' matched case-insensitively against the type AS WRITTEN (e.g. regex::Matches) AND its reflected full name (e.g. System.Text.RegularExpressions.Regex::Matches). 183 entries, ALL verified via .NET reflection (public static, 2026-07-31, temp/verify-static-list.ps1). Only provably read-only statics: pure computations, conversions, parses, searches, and filesystem READS. Deliberately EXCLUDED (still ask): writers/mutators (File::Write*/Append*/Delete/Copy/Move/Create/SetAttributes, Directory::Create/Delete/Move, Array::Sort/Reverse/Clear/Copy, Environment::SetEnvironmentVariable, Path::GetTempFileName [creates a file], String::Intern, Process::Start). Distinct from dotnet_method_allowlist above (name-only, covers instance-style calls).",
-    
-	
-	"dotnet_static_method_allowlist": [
+    "_comment_dotnet_static_method_allowlist": "Type-qualified allowlist for STATIC .NET method calls ([Type]::Method(...)) in expression position, used by the safe-expression certifier + AST arbiter (Test-SafeAst InvokeMemberExpressionAst). Entry form 'TypeName::Method' matched case-insensitively against the type AS WRITTEN AND its reflected full name. COLLAPSED 2026-09-19: the former 248 entries are covered by dotnet_static_method_allowlist_regex below (mechanical preservation proof, temp/collapse-proof.ps1: every pruned entry matches >=1 allow row and no deny entry). Only guid::NewGuid stays exact because its bare alias spelling is not matched by the system.-prefixed Class-A guid row. Distinct from dotnet_method_allowlist above (name-only, covers instance-style calls).",
+    "dotnet_static_method_allowlist": [
+      "guid::NewGuid"
+    ],
+    "_comment_dotnet_static_method_allowlist_regex": "Broad-patterns rows (2026-09-19 consolidation; supersedes the R3 single-row form, which is retained as row 1). Every row anchored ^...$ (D1: an unanchored 'int::' would substring-match point::/printqueue::). Class A = whole-type wildcard (provably all-pure statics); Class B = type + pure method prefixes (mixed types); Class C = cross-type method-name families (the never-enumerate net). Tried AFTER the exact set; the denylist below is checked FIRST and outranks everything.",
+    "dotnet_static_method_allowlist_regex": [
+      "^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch|replace|split|escape|unescape)$",
+      "^(system\\.)?(math|convert|bitconverter|string)::\\w+$",
+      "^(system\\.io\\.)?path::\\w+$",
+      "^system\\.(uri|datetime|datetimeoffset|timespan|version|guid|enum|net\\.ipaddress)::\\w+$",
+      "^system\\.(text\\.encoding|linq\\.enumerable)::\\w+$",
+      "^(system\\.)?(int32|int|int64|long|int16|short|uint32|uint|uint64|ulong|uint16|ushort|single|float|double|decimal|byte|sbyte|char|boolean|bool)::\\w+$",
+      "^(system\\.io\\.)?file::(read\\w*|openread|opentext|exists|get\\w*)$",
+      "^(system\\.io\\.)?directory::(get|enumerate|exists)\\w*$",
+      "^(system\\.)?environment::(get|expand)\\w*$",
+      "^(system\\.)?array::(binarysearch|indexof|lastindexof|find\\w*|exists|trueforall|convertall|empty|asreadonly)$",
+      "^(system\\.)?console::read\\w*$",
+      "^\\w[\\w.]*::(try)?parse\\w*$",
+      "^\\w[\\w.]*::get\\w*$",
+      "^\\w[\\w.]*::is\\w*$",
+      "^\\w[\\w.]*::to\\w*$",
+      "^\\w[\\w.]*::from\\w*$"
+    ],
+    "_comment_dotnet_static_method_denylist": "STATIC denylist (2026-09-19): checked FIRST in Test-SafeAst, outranks every allow path (exact + regex). Exact entries may be 'Type::Method' OR bare 'Method' (matches the method on ANY type - closes the alias-spelling gap where a type cannot be reflection-resolved and only the written key exists). gettempfilename: Path::GetTempFileName creates a zero-byte file. getobject: Microsoft.VisualBasic.Interaction::GetObject launches COM via moniker. intern: Q4 explicit decision - string::Intern stays ask despite the whole-type string row.",
+    "dotnet_static_method_denylist": [
+      "gettempfilename",
+      "getobject",
+      "intern"
+    ],
+    "_comment_dotnet_static_method_denylist_regex": "Tail-anchored deny regexes (2026-09-19): catch BOTH reflected full names AND non-canonical written spellings. Leading segment optional ([\\w.]*) so a bare [Marshal]/[IsolatedStorageFile] spelling (written key only, no reflected key) is still denied - TDD fix 2026-09-19.",
+    "dotnet_static_method_denylist_regex": [
+      "^[\\w.]*isolatedstoragefile::get\\w*$",
+      "^[\\w.]*marshal::get\\w*$"
+    ],
+    "_comment_pruned_2026_09_19": "The 248 exact static entries removed by the 2026-09-19 broad-patterns consolidation, kept here as a record (NOT loaded - inert key). All are covered by dotnet_static_method_allowlist_regex above; proof: temp/collapse-proof.ps1. Former deliberate exclusions that STILL ask: writers/mutators (File::Write*/Append*/Delete/Copy/Move/Create/SetAttributes, Directory::Create/Delete/Move, Array::Sort/Reverse/Clear/Copy, Environment::SetEnvironmentVariable, Process::Start) - none start with a Class-C family prefix on a Class-A type; Path::GetTempFileName + String::Intern are now EXPLICIT denylist entries.",
+    "dotnet_static_method_allowlist_removed": [
       "System.Management.Automation.PSParser::Tokenize", "System.Management.Automation.Language.Parser::ParseInput","System.Management.Automation.Language.Parser::ParseFile",
       "System.IO.Path::Combine", "System.IO.Path::Join", "System.IO.Path::GetFileName", "System.IO.Path::GetFileNameWithoutExtension", "System.IO.Path::GetExtension", "System.IO.Path::GetDirectoryName", "System.IO.Path::GetFullPath", "System.IO.Path::ChangeExtension", "System.IO.Path::HasExtension", "System.IO.Path::IsPathRooted", "System.IO.Path::GetPathRoot", "System.IO.Path::GetRandomFileName", "System.IO.Path::GetRelativePath", "System.IO.Path::TrimEndingDirectorySeparator", "System.IO.Path::GetInvalidPathChars", "System.IO.Path::GetInvalidFileNameChars", "System.IO.Path::GetTempPath",
       "System.IO.File::ReadAllText", "System.IO.File::ReadAllBytes", "System.IO.File::ReadAllLines", "System.IO.File::ReadLines", "System.IO.File::OpenRead", "System.IO.File::Exists", "System.IO.File::GetAttributes", "System.IO.File::GetCreationTime", "System.IO.File::GetCreationTimeUtc", "System.IO.File::GetLastAccessTime", "System.IO.File::GetLastAccessTimeUtc", "System.IO.File::GetLastWriteTime", "System.IO.File::GetLastWriteTimeUtc",
@@ -349,10 +381,6 @@
       "System.ServiceProcess.ServiceController::GetServices",
       "System.Console::ReadLine",
       "System.Enum::GetNames", "System.Enum::GetValues", "System.Enum::GetName", "System.Enum::IsDefined"
-    ],
-    "_comment_dotnet_static_method_allowlist_regex": "Regex entries (R3, 2026-09-18) tried AFTER the exact set misses, against the written key AND the reflected full-name key, unanchored -match, case-insensitive. The single pattern below covers all 7 former regex::* literal entries (Match/Matches/IsMatch/Replace/Split/Escape/Unescape).",
-    "dotnet_static_method_allowlist_regex": [
-      "^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch|replace|split|escape|unescape)$"
     ]
   },
 

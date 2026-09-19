@@ -2282,6 +2282,30 @@ function Test-SafeAst {
                 $refl = $null
                 try { $refl = $Ast.Expression.TypeName.GetReflectionType() } catch { $refl = $null }
 
+                # (2-pre) STATIC DENYLIST gate (2026-09-19): checked BEFORE any allow
+                # path — deny always wins over exact AND regex allows. Exact entries
+                # may be 'Type::Method' OR bare 'Method' (matches the method on ANY
+                # type, closing the alias-spelling gap where a type cannot be
+                # reflection-resolved and only the written key exists). Regexes are
+                # matched against the written key, the reflected full-name key, and
+                # the bare method name. Absent/empty keys = no gate (byte-identical
+                # behavior to before this change).
+                $denySet = $null
+                if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetStaticMethodDenylist' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+                    $denySet = $Config._dotnetStaticMethodDenylist
+                }
+                if ($denySet -and $denySet.Count -gt 0) {
+                    if ($denySet.Contains($writtenKey) -or $denySet.Contains($methodName) -or
+                        ($refl -and $denySet.Contains("$($refl.FullName)::$methodName"))) { return $false }
+                }
+                if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetStaticMethodDenylistRegex' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+                    foreach ($re in @($Config._dotnetStaticMethodDenylistRegex)) {
+                        if ($null -eq $re) { continue }
+                        if ($writtenKey -match $re -or $methodName -match $re -or
+                            ($refl -and "$($refl.FullName)::$methodName" -match $re)) { return $false }
+                    }
+                }
+
                 # (2a) Exact type-qualified set: written key, then reflected key.
                 $staticSet = $null
                 if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetStaticMethodAllowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {

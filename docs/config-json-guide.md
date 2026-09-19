@@ -56,17 +56,28 @@ If NO filesystem target can be extracted (e.g. `Remove-Item -Filter *.tmp`, or a
 
 Two lists, two shapes:
 - `dotnet_method_allowlist` — **instance-style** calls (`$obj.Name(...)`), name-only.
-- `dotnet_static_method_allowlist` — **static** calls (`[Type]::Method(...)`), `TypeName::Method` form matched against the type as written AND its reflected full name.
+- `dotnet_static_method_allowlist` — **static** calls (`[Type]::Method(...)`), `TypeName::Method` form matched against the type as written AND its reflected full name. Since the 2026-09-19 broad-patterns consolidation this list is tiny (one exact entry, `guid::NewGuid`); everything else is covered by the regex rows below. The 248 pruned entries are kept in the inert record key `dotnet_static_method_allowlist_removed` (NOT loaded).
 
-**Regex entries (R3, 2026-09-18):** each list has a sibling `*_regex` key:
+**Regex entries (R3, 2026-09-18; broad-patterns consolidation 2026-09-19):** each list has a sibling `*_regex` key:
 - `dotnet_method_allowlist_regex` — regexes tried AFTER the exact instance names miss, against the method name.
 - `dotnet_static_method_allowlist_regex` — regexes tried AFTER the exact static entries miss, against both the written key (`regex::IsMatch`) and the reflected full-name key (`System.Text.RegularExpressions.Regex::IsMatch`).
 
-This lets one pattern collapse many literals (e.g. `"^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch)$"` covers `regex::Matches`, `regex::Match`, `regex::IsMatch` and their reflected forms). Matching is unanchored `-match`, case-insensitive; anchor with `^…$` when you want exact semantics. Invalid patterns throw at load time (fail-fast). Absent/empty regex keys = byte-identical behavior to before R3.
+The shipped static rows (2026-09-19) come in three classes, all anchored `^…$` (an unanchored `int::` would substring-match `point::`/`printqueue::`):
+- **Class A — whole-type wildcard** (`^(system\\.)?(math|convert|bitconverter|string)::\w+$`, …): types whose statics are provably all pure.
+- **Class B — type + pure method prefixes** (`file::(read\w*|openread|opentext|exists|\get\w*)$`): mixed-purity types, only the safe prefixes.
+- **Class C — cross-type method-name families** (`^\w[\w.]*::(try)?parse\w*$`, `…::get\w*$`, `…::is\w*$`, `…::to\w*$`, `…::from\w*$`): the never-enumerate net (any type, safe family).
+
+Matching is unanchored `-match`, case-insensitive; anchor with `^…$` when you want exact semantics. Invalid patterns throw at load time (fail-fast). Absent/empty regex keys = byte-identical behavior to before R3.
+
+**Static denylist (2026-09-19):** two NEW sibling keys, checked **FIRST** in `Test-SafeAst` — a deny hit returns ask and **outranks every allow path** (exact set AND all regex rows):
+- `dotnet_static_method_denylist` — exact entries, either `Type::Method` OR **bare `Method`** (matches that method on ANY type). The bare form closes the alias-spelling gap: when a type cannot be reflection-resolved (e.g. `[Marshal]` under PS 5.1) only the written key exists, and a bare entry still catches it. Shipped entries: `gettempfilename` (creates a file), `getobject` (COM launch via moniker), `intern` (explicit Q4 decision — `string::Intern` stays ask despite the whole-type string row).
+- `dotnet_static_method_denylist_regex` — **tail-anchored** deny regexes (`^[\w.]*marshal::get\w*$`) that catch BOTH reflected full names AND non-canonical written spellings. The leading segment is OPTIONAL (`[\w.]*`, not `\w[\w.]*`) so a bare `[Marshal]`/`[IsolatedStorageFile]` spelling (written key only, no reflected key) is still denied — this was a TDD-caught bug in the original design.
+
+Denylist entries are lowercased verbatim; invalid deny regexes throw at load time (fail-fast). Absent/empty deny keys = byte-identical behavior to before 2026-09-19. The ask reason wording is unchanged: a denied method is definitionally "not on allowlist".
 
 **When adding entries:**
 - Add only methods with **no side effects** (pure readers/transforms). A single mutating method (e.g. `Kill`, `Delete`, `WriteAllText`) silently auto-approves destructive code. The `AST-Arbiter-Guard` adhoc group pins this — add a guard test for every new method.
-- Regex entries widen the allow surface: prefer anchored patterns and keep them narrow. An over-broad static regex (e.g. `.*::.*`) would auto-approve arbitrary static calls.
+- Regex entries widen the allow surface: prefer anchored patterns and keep them narrow. An over-broad static regex (e.g. `.*::.*`) would auto-approve arbitrary static calls. Class C family rows are deliberately broad by threat model (LLMs emit official MS classes); any outlier a family row lets through goes into the denylist, not back into exact entries.
 
 ## 4. `known_command_prefixes`
 

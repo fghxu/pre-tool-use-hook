@@ -452,6 +452,46 @@ function Test-ConfigSchema {
     }
     $Config | Add-Member -MemberType NoteProperty -Name '_dotnetStaticMethodAllowlistRegex' -Value $staticRegexes -Force
 
+    # safe_expressions: STATIC denylist (2026-09-19). Checked FIRST in Test-SafeAst
+    # and outranks every allow path (exact + regex). Exact entries may be
+    # 'Type::Method' OR bare 'Method' (matches the method on ANY type — closes the
+    # alias-spelling gap where a type cannot be reflection-resolved). Both keys are
+    # OPTIONAL: absent = empty = byte-identical behavior to before this change.
+    $staticDenySet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($hasSafeExprs -and $Config.safe_expressions -and
+        (Get-Member -InputObject $Config.safe_expressions -Name 'dotnet_static_method_denylist' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $Config.safe_expressions.dotnet_static_method_denylist) {
+        if ($Config.safe_expressions.dotnet_static_method_denylist -isnot [array]) {
+            throw "Configuration validation failed: 'safe_expressions.dotnet_static_method_denylist' must be an array"
+        }
+        foreach ($d in $Config.safe_expressions.dotnet_static_method_denylist) {
+            [void]$staticDenySet.Add(("$d").ToLowerInvariant())
+        }
+    }
+    $Config | Add-Member -MemberType NoteProperty -Name '_dotnetStaticMethodDenylist' -Value $staticDenySet -Force
+
+    # safe_expressions: STATIC denylist REGEX (2026-09-19). Compiled IgnoreCase;
+    # invalid pattern throws at load time (fail-fast, parity with the allow regexes —
+    # config load failure = total hook outage). TAIL-anchored patterns are expected
+    # so they catch both reflected full names and non-canonical written spellings.
+    $staticDenyRegexes = @()
+    if ($hasSafeExprs -and $Config.safe_expressions -and
+        (Get-Member -InputObject $Config.safe_expressions -Name 'dotnet_static_method_denylist_regex' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $Config.safe_expressions.dotnet_static_method_denylist_regex) {
+        if ($Config.safe_expressions.dotnet_static_method_denylist_regex -isnot [array]) {
+            throw "Configuration validation failed: 'safe_expressions.dotnet_static_method_denylist_regex' must be an array"
+        }
+        foreach ($p in $Config.safe_expressions.dotnet_static_method_denylist_regex) {
+            try {
+                $staticDenyRegexes += [regex]::new("$($p)", [System.Text.RegularExpressions.RegexOptions]::Compiled -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            }
+            catch {
+                throw "Invalid regex in safe_expressions.dotnet_static_method_denylist_regex: $($p)"
+            }
+        }
+    }
+    $Config | Add-Member -MemberType NoteProperty -Name '_dotnetStaticMethodDenylistRegex' -Value $staticDenyRegexes -Force
+
     # Validate regex patterns in trusted_pattern compile successfully
     foreach ($pattern in $Config.trusted_pattern) {
         try {

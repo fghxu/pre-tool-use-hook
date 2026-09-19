@@ -2,7 +2,17 @@
 Maintenance mode: the PreToolUse safety hook (local classifier + llm_second_opinion cross-check) is feature-complete. Current work = fixing production mis-classifications and extending config coverage for new tools.
 
 ## Current Step
-(none — R1/R2/R3 regex-allowlists-and-editable-delete design fully implemented; full regression 1357/1357 green. Per user: NO merge into master yet — feature_fix soaks for days of regular testing before merging.)
+(none — static-method broad-patterns consolidation + denylist fully implemented; full regression pending final run. Per user: NO merge into master yet — feature_fix soaks for days of regular testing before merging.)
+
+## Static-method broad patterns + denylist (2026-09-19, DONE)
+- Design: docs/superpowers/specs/2026-09-19-static-method-broad-patterns-denylist-design.md (v3 + review patch; Q1–Q8 approved as recommended). Driver: "I am tired of keep adding the new command into this list."
+- **Broad allow rows** (`dotnet_static_method_allowlist_regex`, 16 anchored `^…$` rows): Class A whole-type wildcards (math/convert/bitconverter/string/path/uri/datetime*/timespan/version/guid/enum/ipaddress/primitives/text.encoding/linq.enumerable), Class B type+pure-prefix (file read/openread/opentext/exists/get; directory get/enumerate/exists; environment get/expand; array pure set; console read), Class C cross-type families (`::(try)?parse*`, `::get*`, `::is*`, `::to*`, `::from*`). R3 row retained as row 1.
+- **NEW static denylist** (checked FIRST, outranks every allow path): `dotnet_static_method_denylist` exact entries may be `Type::Method` OR bare `Method` (any type — closes the alias-spelling gap where a type can't reflection-resolve); `dotnet_static_method_denylist_regex` tail-anchored. Initial entries: `gettempfilename`, `getobject`, `intern` (Q4) + IsolatedStorageFile/Marshal `Get*` regexes. ConfigLoader compiles both (fail-fast throw on invalid regex, parity with R3); Parser gets a (2-pre) deny gate before the exact/regex allow ladder; Classifier unchanged (reason wording stays truthful).
+- **TDD**: RED = 7 failures (D1–D5 + D11 deny cases + SDEN-BadDenyRegex preflight); GREEN all pass. TDD caught a real design bug: the doc's `^\w[\w.]*marshal::get\w*$` required a non-empty prefix and missed the bare `[Marshal]` written key — fixed to `^[\w.]*…` (recorded in doc §4 + D5 comment).
+- **Exact-list collapse** (mechanical preservation proof, temp/collapse-proof.ps1): 248 of 249 root entries pruned (each matches ≥1 allow row and no deny entry); only `guid::NewGuid` stays exact (bare alias spelling not covered by the system.-prefixed guid row). Pruned list kept as inert record key `dotnet_static_method_allowlist_removed`.
+- **Live rollout** (3 files): root config.json pruned + rows + deny keys; LIVE config.local.json got the same PLUS R1 (`trusted_programs_regex`) and R3 backports — production had never received them (256 exact entries, no regex keys); test/config/live re-synced via Sync-Fixtures.ps1. Machine-specific extras preserved.
+- **Live XML audit**: zero flips — the only `::Get*` ask case (`Path::GetTempFileName`) stays ask (now via denylist).
+- New fixture cases: 11 in safe-expr-regex suite (D1–D11) + SDEN-BadDenyRegex + SDEN-Anchoring preflights; SER-Ask-StaticMiss retargeted Replace→Compile (intended flip: R3 row now allows Replace).
 
 ## R1/R2/R3: regex allowlists + editable-path deletion (2026-09-18, DONE, all suites green 1357/1357)
 - Design: docs/superpowers/specs/2026-09-18-regex-allowlists-and-editable-delete-design.md. Three requirements, strict red/green TDD (4 red/green phases A–D).
