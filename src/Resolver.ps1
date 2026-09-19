@@ -956,6 +956,14 @@ function Resolve-Command {
     if ($Command -match '^\s*\[([^\]]+)\]\s*::\s*([A-Za-z_]\w*)\s*\(') {
         $staticType = $Matches[1].Trim()
         $staticMethod = $Matches[2]
+        # F5 (2026-09-19): a DENIED static outranks the "not on allowlist"
+        # wording - name the denylist so the ask reason says WHY. Decision
+        # and tier unchanged (fail-closed ask either way); wording only.
+        if (Test-StaticDeniedByText -Config $Config -TypeName $staticType -MethodName $staticMethod) {
+            return New-ResolutionResult -Decision "ask" `
+                -Reason "static method denied by denylist: [$staticType]::$staticMethod (see safe_expressions.dotnet_static_method_denylist)" `
+                -MatchedPattern $null -Risk "unknown" -Tier "unregistered_static"
+        }
         return New-ResolutionResult -Decision "ask" `
             -Reason "static method not on allowlist: [$staticType]::$staticMethod (see safe_expressions.dotnet_static_method_allowlist)" `
             -MatchedPattern $null -Risk "unknown" -Tier "unregistered_static"

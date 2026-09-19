@@ -640,8 +640,18 @@ function Invoke-Classify {
             $staticRegexes = @($Config._dotnetStaticMethodAllowlistRegex)
         }
         $isUnlistedStatic = $false
+        $isDeniedStatic = $false
+        $atomType = $null
+        $atomMethod = $null
         if ($command -match '\[([^\]]+)\]\s*::\s*([A-Za-z_]\w*)\s*\(') {
-            $writtenKey = "$($Matches[1].Trim())::$($Matches[2])"
+            # Capture $Matches into locals IMMEDIATELY: the allow-regex loop
+            # below re-runs -match on $writtenKey and CLOBBERS $Matches (rows
+            # without capture groups, e.g. the Class-C families, leave
+            # $Matches[1] null -> method call on null crashed - caught by the
+            # F5 red/green run 2026-09-19).
+            $atomType = $Matches[1].Trim()
+            $atomMethod = $Matches[2]
+            $writtenKey = "$atomType::$atomMethod"
             $onExact = $staticSet -and $staticSet.Contains($writtenKey)
             # Regex fallback: an allowlisted-by-regex static is "on the allowlist"
             # for truthfulness purposes (avoids a misleading 'not on allowlist'
@@ -654,9 +664,16 @@ function Invoke-Classify {
                 }
             }
             $isUnlistedStatic = (-not $onExact) -and (-not $onRegex)
+            # F5 (2026-09-19): a DENIED static outranks both wordings - name the
+            # denylist so the ask reason says WHY (deny beats allow by design).
+            # Decision stays ask either way; wording only.
+            $isDeniedStatic = Test-StaticDeniedByText -Config $Config -TypeName $atomType -MethodName $atomMethod
         }
-        if ($isUnlistedStatic) {
-            $atomicReason = "static method not on allowlist: [$($Matches[1].Trim())]::$($Matches[2]) (see safe_expressions.dotnet_static_method_allowlist)"
+        if ($isDeniedStatic) {
+            $atomicReason = "static method denied by denylist: [$atomType]::$atomMethod (see safe_expressions.dotnet_static_method_denylist)"
+        }
+        elseif ($isUnlistedStatic) {
+            $atomicReason = "static method not on allowlist: [$atomType]::$atomMethod (see safe_expressions.dotnet_static_method_allowlist)"
         }
         else {
             $truncatedAtomic = $command.Substring(0, [Math]::Min(80, $command.Length))

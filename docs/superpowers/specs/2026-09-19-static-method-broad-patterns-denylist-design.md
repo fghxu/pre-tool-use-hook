@@ -160,7 +160,7 @@ Notes:
   ```
 - Allow ladder (2a)/(2b) unchanged.
 
-### `src/Classifier.ps1` — **no change** (§2: reason wording stays truthful).
+### `src/Classifier.ps1` — ~~no change~~ AMENDED (F5, 2026-09-19 post-implementation): the Layer-2 atomic-unknown reason now says `static method denied by denylist: [Type]::Method` when the matched static is denied (wording only; decision stays ask). The same wording was added to the Resolver Step-3 static fallback. Shared helper `Test-StaticDeniedByText` in Parser.ps1 (text-based: written key + bare method name — those sites have no AST/reflection). The TDD red/green run also caught and fixed a latent `$Matches`-clobber bug: the allow-regex loop re-runs `-match` and can null out `$Matches[1]` (groupless Class-C rows), so the atomic path now captures the type/method into locals immediately after the outer match.
 
 ## 8. Config rollout (three files, not one)
 

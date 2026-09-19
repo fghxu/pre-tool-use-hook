@@ -82,7 +82,7 @@
     </test-case>
 
     <!-- D5 RED: deny regex matches the SHORT written spelling of Marshal (unresolvable without namespace) -->
-    <test-case expected="ask" reason="deny regex ^\w[\w.]*marshal::get\w*$ matches written key marshal::getactiveobject" category="SDeny-RegexWrittenSpelling">
+    <test-case expected="ask" reason="deny regex ^[\w.]*marshal::get\w*$ matches written key marshal::getactiveobject (optional leading segment)" category="SDeny-RegexWrittenSpelling">
       <description>$z = @(); $o=[Marshal]::GetActiveObject('Excel.Application') - interop Get denied on any spelling</description>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[$z = @(); $o=[Marshal]::GetActiveObject('Excel.Application')]]></copilot-command>
@@ -128,6 +128,22 @@
       <description>$z = @(); $s=[string]::Intern("abc") - whole-type string row would allow; deny keeps it ask</description>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[$z = @(); $s=[string]::Intern("abc")]]></copilot-command>
+    </test-case>
+
+    <!-- D12 RED (F5 wording): zero-cmdlet atomic path - a DENIED static must say so,
+         not the generic 'unsafe PowerShell expression (fail-closed)' wording -->
+    <test-case expected="ask" reason="static deny wording beats generic fail-closed (Classifier Layer-2 atomic path)" category="SDeny-ReasonAtomic" reason-contains="denied by denylist">
+      <description>$z = @(); $f=[System.IO.Path]::GetTempFileName() - zero cmdlets, denied static -&gt; ask with deny-specific reason</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $f=[System.IO.Path]::GetTempFileName()]]></copilot-command>
+    </test-case>
+
+    <!-- D13 RED (F5 wording): Resolver Step-3 static fallback (leading static in a ;-chain) -
+         deny wording must outrank 'static method not on allowlist' -->
+    <test-case expected="ask" reason="static deny wording beats 'not on allowlist' (Resolver Step-3 fallback)" category="SDeny-ReasonResolverFallback" reason-contains="denied by denylist">
+      <description>[System.IO.Path]::GetTempFileName(); echo hi - leading denied static, regex-split fallback -&gt; ask with deny-specific reason</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[[System.IO.Path]::GetTempFileName(); echo hi]]></copilot-command>
     </test-case>
 
   </category-group>

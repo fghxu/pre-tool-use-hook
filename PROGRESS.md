@@ -2,7 +2,7 @@
 Maintenance mode: the PreToolUse safety hook (local classifier + llm_second_opinion cross-check) is feature-complete. Current work = fixing production mis-classifications and extending config coverage for new tools.
 
 ## Current Step
-(none — static-method broad-patterns consolidation + denylist fully implemented, audited line-by-line against the design doc, and green at 1360/1360. Per user: NO merge into master yet — feature_fix soaks for days of regular testing before merging.)
+ALL review findings CLOSED incl. F4/F5 (implemented by reviewer, red/green TDD). F4: D5 reason text fixed. F5: denied statics now say WHY — "static method denied by denylist: [Type]::Method (see safe_expressions.dotnet_static_method_denylist)" at both wording sites (Classifier Layer-2 atomic path + Resolver Step-3 static fallback) via new Test-StaticDeniedByText helper (Parser.ps1; text-based written-key+bare-name, no AST). New suite cases D12/D13 (reason-contains). RED=2 failures confirmed, then GREEN; full regression 1360/1360 zero flips. TDD BONUS: caught latent $Matches-clobber bug — the allow-regex foreach re-runs -match and groupless Class-C rows null $Matches[1]; first F5 version crashed 5 deny cases ("method on null"); fixed by capturing type/method into locals right after the outer match. Docs updated (config-json-guide denylist section; design doc §7 Classifier amendment). No config changes (code-only; live hook picks up src directly). Soak continues; merge when ready.
 
 ## Static-method broad patterns + denylist (2026-09-19, DONE)
 - Design: docs/superpowers/specs/2026-09-19-static-method-broad-patterns-denylist-design.md (v3 + review patch; Q1–Q8 approved as recommended). Driver: "I am tired of keep adding the new command into this list."

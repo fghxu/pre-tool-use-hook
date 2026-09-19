@@ -2170,6 +2170,33 @@ function Get-AstWrapperInnerCommands {
 # Anything unrecognized is unsafe (fail closed).
 # =============================================================================
 
+# F5 (2026-09-19): text-based static-deny probe for the two ASK-REASON sites
+# (Classifier Layer-2 atomic path, Resolver Step-3 static fallback). Those sites
+# have no AST/reflection - only the written type text and method name - so this
+# checks the written key and the bare method name against the compiled deny
+# structures. Mirrors the Test-SafeAst (2-pre) gate precedence (deny beats
+# allow); used ONLY for reason wording - the decision is ask either way.
+function Test-StaticDeniedByText {
+    param($Config, [string]$TypeName, [string]$MethodName)
+    if (-not $Config) { return $false }
+    $writtenKey = "${TypeName}::${MethodName}"
+    $denySet = $null
+    if (Get-Member -InputObject $Config -Name '_dotnetStaticMethodDenylist' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $denySet = $Config._dotnetStaticMethodDenylist
+    }
+    if ($denySet -and $denySet.Count -gt 0 -and
+        ($denySet.Contains($writtenKey) -or $denySet.Contains($MethodName))) {
+        return $true
+    }
+    if (Get-Member -InputObject $Config -Name '_dotnetStaticMethodDenylistRegex' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        foreach ($re in @($Config._dotnetStaticMethodDenylistRegex)) {
+            if ($null -eq $re) { continue }
+            if ($writtenKey -match $re -or $MethodName -match $re) { return $true }
+        }
+    }
+    return $false
+}
+
 function Test-SafeAst {
     param(
         $Ast,
