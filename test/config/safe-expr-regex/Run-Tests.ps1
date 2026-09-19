@@ -198,6 +198,42 @@ else {
 }
 
 # =============================================================================
+# G10 PARITY (design section 10): config WITHOUT the deny keys must behave exactly
+# like pre-denylist - the D1/D3/D5/D11 commands are ALLOWED under config.nodeny.json,
+# and a writer control still asks. Absent/empty deny keys = byte-identical behavior.
+# =============================================================================
+$nodenyXml    = Join-Path $fixtureDir "test-cases.nodeny.xml"
+$nodenyCfgJson = Join-Path $fixtureDir "config.nodeny.json"
+
+Write-Host ""
+Write-Host "--- G10 parity cases (TestRunner, powershell.exe, config WITHOUT deny keys) ---" -ForegroundColor Cyan
+
+$output2 = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -XmlPath $nodenyXml -ConfigPath $nodenyCfgJson 2>&1 | Out-String
+$childExit2 = $LASTEXITCODE
+
+$mTotal2  = [regex]::Match($output2, '(?m)^Total:\s+(\d+)')
+$mPassed2 = [regex]::Match($output2, '(?m)^Passed:\s+(\d+)')
+$mFailed2 = [regex]::Match($output2, '(?m)^Failed:\s+(\d+)')
+
+if (-not ($mTotal2.Success -and $mPassed2.Success -and $mFailed2.Success)) {
+    Record-Result -Ok $false -Name "SDEN-NoDenyParity" -Detail "could not parse TestRunner summary (exit=$childExit2). Output tail: $($output2.Substring([Math]::Max(0, $output2.Length - 800)))"
+}
+else {
+    $xTotal2  = [int]$mTotal2.Groups[1].Value
+    $xPassed2 = [int]$mPassed2.Groups[1].Value
+    $xFailed2 = [int]$mFailed2.Groups[1].Value
+
+    if ($xFailed2 -gt 0) {
+        $failIdx2 = $output2.IndexOf('Failed Tests:')
+        $detail2 = if ($failIdx2 -ge 0) { $output2.Substring($failIdx2).Trim() } else { "exit=$childExit2" }
+        Record-Result -Ok $false -Name "SDEN-NoDenyParity" -Detail "$xFailed2/$xTotal2 parity cases failed (absent deny keys must equal pre-denylist behavior). $detail2"
+    }
+    else {
+        Record-Result -Ok $true -Name "SDEN-NoDenyParity" -Detail "$xPassed2/$xTotal2 parity cases passed (no deny keys = pre-denylist behavior)"
+    }
+}
+
+# =============================================================================
 # Summary (ONE line - Run-AllTests parses the first Total: match)
 # =============================================================================
 Write-Host ""

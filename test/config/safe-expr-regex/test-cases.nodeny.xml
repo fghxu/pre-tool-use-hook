@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- G10 PARITY SUITE (2026-09-19 design section 10): run against config.nodeny.json,
+     which is IDENTICAL to config.json except the two static denylist keys are ABSENT.
+     The same commands that D1/D3/D5/D11 prove DENIED under config.json must be ALLOWED
+     here (exact trap entry + allow rows + families fire with no gate) - i.e. absent/empty
+     deny keys = byte-identical behavior to before the denylist existed. N5 is a control:
+     a writer that asks in BOTH configs, proving parity means "same decisions", not
+     "looser config". -->
+<commands>
+  <category-group name="SdenyParity">
+
+    <!-- Same command as D1 - exact trap entry + path row + get family all allow it when no deny key exists -->
+    <test-case expected="allow" reason="no deny keys: exact trap + path row + get family allow GetTempFileName (parity with pre-denylist)" category="SParity-NoDenyGetTempFileName">
+      <description>$z = @(); $f=[System.IO.Path]::GetTempFileName() - allowed when the deny key is absent</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $f=[System.IO.Path]::GetTempFileName()]]></copilot-command>
+    </test-case>
+
+    <!-- Same command as D3 - get family allows it when the tail-anchored deny regex is absent -->
+    <test-case expected="allow" reason="no deny keys: get family allows IsolatedStorageFile::GetUserStoreForDomain (parity)" category="SParity-NoDenyIsolatedStorage">
+      <description>$z = @(); $s=[System.IO.IsolatedStorage.IsolatedStorageFile]::GetUserStoreForDomain() - allowed when the deny regex is absent</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $s=[System.IO.IsolatedStorage.IsolatedStorageFile]::GetUserStoreForDomain()]]></copilot-command>
+    </test-case>
+
+    <!-- Same command as D5 - get family on the written key when the marshal deny regex is absent -->
+    <test-case expected="allow" reason="no deny keys: get family allows [Marshal]::GetActiveObject (parity)" category="SParity-NoDenyMarshal">
+      <description>$z = @(); $x=[Marshal]::GetActiveObject('Excel.Application') - allowed when the deny regex is absent</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $x=[Marshal]::GetActiveObject('Excel.Application')]]></copilot-command>
+    </test-case>
+
+    <!-- Same command as D11 - whole-type string row allows Intern when the bare deny entry is absent -->
+    <test-case expected="allow" reason="no deny keys: string Class-A row allows Intern (parity)" category="SParity-NoDenyIntern">
+      <description>$z = @(); $s=[string]::Intern("abc") - allowed when the intern deny entry is absent</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $s=[string]::Intern("abc")]]></copilot-command>
+    </test-case>
+
+    <!-- CONTROL: a writer that must ask in BOTH configs - parity means identical decisions, not a looser config -->
+    <test-case expected="ask" reason="control: OpenWrite asks with or without deny keys (parity is not looseness)" category="SParity-ControlWriter">
+      <description>$z = @(); [void][System.IO.File]::OpenWrite('c:\temp\x') - writer, fail-closed in both configs</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); [void][System.IO.File]::OpenWrite('c:\temp\x')]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

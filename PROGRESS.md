@@ -2,7 +2,7 @@
 Maintenance mode: the PreToolUse safety hook (local classifier + llm_second_opinion cross-check) is feature-complete. Current work = fixing production mis-classifications and extending config coverage for new tools.
 
 ## Current Step
-(none — static-method broad-patterns consolidation + denylist fully implemented; full regression pending final run. Per user: NO merge into master yet — feature_fix soaks for days of regular testing before merging.)
+(none — static-method broad-patterns consolidation + denylist fully implemented, audited line-by-line against the design doc, and green at 1360/1360. Per user: NO merge into master yet — feature_fix soaks for days of regular testing before merging.)
 
 ## Static-method broad patterns + denylist (2026-09-19, DONE)
 - Design: docs/superpowers/specs/2026-09-19-static-method-broad-patterns-denylist-design.md (v3 + review patch; Q1–Q8 approved as recommended). Driver: "I am tired of keep adding the new command into this list."
@@ -13,6 +13,7 @@ Maintenance mode: the PreToolUse safety hook (local classifier + llm_second_opin
 - **Live rollout** (3 files): root config.json pruned + rows + deny keys; LIVE config.local.json got the same PLUS R1 (`trusted_programs_regex`) and R3 backports — production had never received them (256 exact entries, no regex keys); test/config/live re-synced via Sync-Fixtures.ps1. Machine-specific extras preserved.
 - **Live XML audit**: zero flips — the only `::Get*` ask case (`Path::GetTempFileName`) stays ask (now via denylist).
 - New fixture cases: 11 in safe-expr-regex suite (D1–D11) + SDEN-BadDenyRegex + SDEN-Anchoring preflights; SER-Ask-StaticMiss retargeted Replace→Compile (intended flip: R3 row now allows Replace).
+- **Audit pass (2026-09-19, day 2)** — user asked to verify every design-doc feature is implemented. Line-by-line re-check: §4/§7/§8/§9 all present verbatim in code + all three configs; GAP FOUND = §10's GREEN acceptance cases G1/G2/G3/G5/G6/G8/G9 and the G10 no-deny-keys parity check were never added to the fixture suite. Implemented (red/green): new `StaticGreen` group (7 cases) in test-cases.xml + `config.nodeny.json`/`test-cases.nodeny.xml` (5 parity cases incl. a writer control that asks in BOTH configs) + `SDEN-NoDenyParity` runner block. No code change needed: G3's `[ref]$y` is already certifier-safe — PowerShell parses it as `ConvertExpressionAst` (handled), not a bare `ReferenceExpressionAst`. Full regression after audit pass: **1360/1360, zero flips** (was 1359).
 
 ## R1/R2/R3: regex allowlists + editable-path deletion (2026-09-18, DONE, all suites green 1357/1357)
 - Design: docs/superpowers/specs/2026-09-18-regex-allowlists-and-editable-delete-design.md. Three requirements, strict red/green TDD (4 red/green phases A–D).

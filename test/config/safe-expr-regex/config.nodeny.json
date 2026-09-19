@@ -1,0 +1,67 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for G10 parity (2026-09-19 design section 10): IDENTICAL to config.json EXCEPT the two static denylist keys are ABSENT. Proves absent/empty deny keys = byte-identical behavior to before the denylist: the same commands that are DENIED under config.json must be ALLOWED here (exact trap entry + allow rows + families all fire, no gate).",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "_comment_safe_expressions": "G10 parity fixture: same rows + exact trap entry as config.json, NO dotnet_static_method_denylist / _denylist_regex keys.",
+  "safe_expressions": {
+    "_comment_exact_trap": "Same deliberate trap as config.json - but WITHOUT the deny key it must now be ALLOWED (exact allow + path row + get family all fire).",
+    "dotnet_static_method_allowlist": [
+      "System.IO.Path::GetTempFileName"
+    ],
+    "dotnet_static_method_allowlist_regex": [
+      "^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch|replace|split|escape|unescape)$",
+      "^(system\\.)?(math|convert|bitconverter|string)::\\w+$",
+      "^(system\\.io\\.)?path::\\w+$",
+      "^system\\.(uri|datetime|datetimeoffset|timespan|version|guid|enum|net\\.ipaddress)::\\w+$",
+      "^system\\.(text\\.encoding|linq\\.enumerable)::\\w+$",
+      "^(system\\.)?(int32|int|int64|long|int16|short|uint32|uint|uint64|ulong|uint16|ushort|single|float|double|decimal|byte|sbyte|char|boolean|bool)::\\w+$",
+      "^(system\\.io\\.)?file::(read\\w*|openread|opentext|exists|get\\w*)$",
+      "^(system\\.io\\.)?directory::(get|enumerate|exists)\\w*$",
+      "^(system\\.)?environment::(get|expand)\\w*$",
+      "^(system\\.)?array::(binarysearch|indexof|lastindexof|find\\w*|exists|trueforall|convertall|empty|asreadonly)$",
+      "^(system\\.)?console::read\\w*$",
+      "^\\w[\\w.]*::(try)?parse\\w*$",
+      "^\\w[\\w.]*::get\\w*$",
+      "^\\w[\\w.]*::is\\w*$",
+      "^\\w[\\w.]*::to\\w*$",
+      "^\\w[\\w.]*::from\\w*$"
+    ],
+    "_comment_instance_regex": "Same as config.json (kept so the two fixtures differ ONLY in the deny keys).",
+    "dotnet_method_allowlist_regex": [
+      "^tochararray$"
+    ]
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*"],
+      "modifying_verbs": {
+        "high":   ["Remove-*"],
+        "medium": [],
+        "low":    []
+      },
+      "read_only": [
+        { "name": "Get-ChildItem", "patterns": ["Get-ChildItem *"], "description": "List directory contents" }
+      ],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" }
+      ],
+      "modifying": []
+    }
+  }
+}

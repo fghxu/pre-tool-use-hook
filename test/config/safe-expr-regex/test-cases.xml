@@ -131,4 +131,60 @@
     </test-case>
 
   </category-group>
+
+  <!-- SECTION 10 GREEN ACCEPTANCE CASES (added 2026-09-19 audit pass - they were in the
+       spec's test plan but missing from this suite). G4/G7/G9b are already covered by
+       D9/D10/D8 respectively, so only the remaining seven are added here. -->
+  <category-group name="StaticGreen">
+
+    <!-- G1: file Class-B row get prefix (also get family) - pure reader -->
+    <test-case expected="allow" reason="file Class-B row + get family allow GetAttributes" category="SGreen-FileGetAttributes">
+      <description>$z = @(); $null=[System.IO.File]::GetAttributes("c:\temp\x") - pure reader</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null=[System.IO.File]::GetAttributes("c:\temp\x")]]></copilot-command>
+    </test-case>
+
+    <!-- G2: primitive Class-A row + parse family on the alias spelling -->
+    <test-case expected="allow" reason="primitive row + parse family allow int::Parse" category="SGreen-IntParse">
+      <description>$z = @(); $x=[int]::Parse("42") - pure conversion</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $x=[int]::Parse("42")]]></copilot-command>
+    </test-case>
+
+    <!-- G3: the \w* tail proof - plain '.*::parse' would miss TryParse; [ref] out-arg must stay certifier-safe -->
+    <test-case expected="allow" reason="parse family (try)?parse\w* covers TryParse with [ref] out-arg" category="SGreen-TryParseRef">
+      <description>$z = @(); [void][int]::TryParse("42",[ref]$y) - tail proof + ref arg</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); [void][int]::TryParse("42",[ref]$y)]]></copilot-command>
+    </test-case>
+
+    <!-- G5: math Class-A whole-type (non-family member Sqrt - only the whole-type row covers it) -->
+    <test-case expected="allow" reason="math Class-A whole-type row allows Sqrt (no family covers it)" category="SGreen-MathSqrt">
+      <description>$z = @(); $s=[math]::Sqrt(2) - pure math static</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $s=[math]::Sqrt(2)]]></copilot-command>
+    </test-case>
+
+    <!-- G6: linq.enumerable Class-A (new coverage from the consolidation; Range is not a family member) -->
+    <test-case expected="allow" reason="linq.enumerable Class-A row allows Range" category="SGreen-EnumerableRange">
+      <description>$z = @(); $r=[System.Linq.Enumerable]::Range(1,10) - lazy pure iterator</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $r=[System.Linq.Enumerable]::Range(1,10)]]></copilot-command>
+    </test-case>
+
+    <!-- G8: Array must NOT be type-wildcarded - Sort mutates in place and matches no row/family -->
+    <test-case expected="ask" reason="Array not wildcarded; Sort matches no row or family => ask" category="SGreen-ArraySortAsk">
+      <description>$z = @(); [void][Array]::Sort($a) - in-place mutator, fail-closed</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); [void][Array]::Sort($a)]]></copilot-command>
+    </test-case>
+
+    <!-- G9: file Class-B read prefix (ReadAllText; ReadLines is D8/G9b) -->
+    <test-case expected="allow" reason="file Class-B row read\w* allows ReadAllText" category="SGreen-FileReadAllText">
+      <description>$z = @(); $t=[System.IO.File]::ReadAllText('c:\temp\x') - pure reader</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $t=[System.IO.File]::ReadAllText('c:\temp\x')]]></copilot-command>
+    </test-case>
+
+  </category-group>
 </commands>
