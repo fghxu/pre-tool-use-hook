@@ -141,5 +141,85 @@
       <copilot-command><![CDATA[pwsh -File scripts/readonly.ps1]]></copilot-command>
     </test-case>
 
+    <!-- ===================================================================
+         GAP-COVERAGE OFF TWINS (2026-09-21): identical commands to the new ON
+         cases. With the block ABSENT every untrusted -File path must still be the
+         single opaque token => today's ask (byte-identical behavior, spec D2/I1).
+         =================================================================== -->
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-FuncBodyNestedFile" reason-contains="unknown command: scripts\func-file.ps1">
+      <description>pwsh -File scripts\func-file.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\func-file.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-NestedTrusted" reason-contains="unknown command: scripts\calls-nested-trusted.ps1">
+      <description>pwsh -File scripts\calls-nested-trusted.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\calls-nested-trusted.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-VariablePath" reason-contains="unknown command: scripts\variable-path.ps1">
+      <description>pwsh -File scripts\variable-path.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\variable-path.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-CrossDomain" reason-contains="unknown command: scripts\cross-domain.ps1">
+      <description>pwsh -File scripts\cross-domain.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\cross-domain.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-CommandWrapsFile" reason-contains="unknown command: scripts\cmd-file-inside.ps1">
+      <description>pwsh -File scripts\cmd-file-inside.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\cmd-file-inside.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-SpacedNestedPath" reason-contains="unknown command: scripts\spaced-nested.ps1">
+      <description>pwsh -File scripts\spaced-nested.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\spaced-nested.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- '-File $var' TODAY: the AST arbiter certifies the bare line as a safe
+         PowerShell expression => allow. Measured ground truth under config.off.json
+         (2026-09-21). The ON twin is INTENTIONALLY stricter: drilldown resolves the
+         literal token '$var' to a path, Test-Path fails, and the not-found FAILURE
+         entry is a KNOWN blocker (MatchedPattern='script-drilldown') that keeps the
+         arbiter gate closed => ask (design I16 / RUL-4). Proving that contrast is the
+         point of this pair: enabling the feature can only make a -File invocation
+         STRICTER, never looser. -->
+    <test-case expected="allow" reason="OFF: '-File $var' is certified read-only by the AST arbiter today" category="SDO-Ask-NonLiteralFileArg" reason-contains="read-only">
+      <description>pwsh -File $var - OFF parity (today: allow via AST arbitration)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File $var]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-TwoScripts" reason-contains="unknown command: scripts\readonly.ps1">
+      <description>pwsh -File scripts\readonly.ps1; pwsh -File scripts\target2.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\readonly.ps1; pwsh -File scripts\target2.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File paths are unknown today" category="SDO-Ask-SiblingCap" reason-contains="unknown command: scripts\readonly.ps1">
+      <description>4 x pwsh -File (siblings) - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\readonly.ps1; pwsh -File scripts\target2.ps1; pwsh -File scripts\chain-a.ps1; pwsh -File scripts\chain-b.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today (no expansion)" category="SDO-Allow-FileThenCommandArg" reason-contains="unknown command: scripts\readonly.ps1">
+      <description>pwsh -File scripts\readonly.ps1 -Command "Remove-Item ..." - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\readonly.ps1 -Command "Remove-Item C:\temp\x"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today (UTF-8 script)" category="SDO-Allow-Utf8Script" reason-contains="unknown command: scripts\utf8-nonascii.ps1">
+      <description>pwsh -File scripts\utf8-nonascii.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\utf8-nonascii.ps1]]></copilot-command>
+    </test-case>
+
   </category-group>
 </commands>

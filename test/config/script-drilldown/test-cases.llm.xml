@@ -64,6 +64,14 @@
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[pwsh -NoProfile -File scripts\chain-a.ps1]]></copilot-command>
     </test-case>
-
+    <!-- Gap coverage (2026-09-21): llm_scope='exclude' must NOT weaken the LOCAL
+         decision. modifying.ps1 contains Copy-Item => local ask; the script-origin
+         statements are dropped from the count (only the wrapper remains: 1 < 2) =>
+         out of scope, LLM never called, and the ask stands. -->
+    <test-case expected="ask" reason="exclude scope: local modifying statement still asks, LLM out of scope" category="SDL-Exclude-LocalAskStands" level="complex_commands" min="2" config="config.llm.exclude.json" in-scope="false" verdict="not_called">
+      <description>pwsh -File scripts\modifying.ps1 - llm_scope=exclude, local ask (Copy-Item) must stand</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\modifying.ps1]]></copilot-command>
+    </test-case>
   </category-group>
 </commands>

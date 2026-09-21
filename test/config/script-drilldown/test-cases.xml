@@ -174,5 +174,104 @@
       <copilot-command><![CDATA[pwsh -File scripts/readonly.ps1]]></copilot-command>
     </test-case>
 
+    <!-- ===================================================================
+         GAP COVERAGE (added 2026-09-21 by the design-verification review).
+         Edges named in the design doc that the original matrix did not exercise.
+         =================================================================== -->
+
+    <!-- I9b / 6.5: a nested -File INSIDE A FUNCTION BODY. The engine's content walk
+         collapses it to the bare path (F11) and step 9b expands it ONCE. The
+         ScriptBlockAst recursion must not re-expand it (that would claim the HT key
+         twice and mint a spurious 'recursive script invocation detected' ask). -->
+    <test-case expected="allow" reason="nested -File inside a function body expands exactly once" category="SD-Allow-FuncBodyNestedFile">
+      <description>pwsh -File scripts\func-file.ps1 - nested -File inside a function body</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\func-file.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- 11.6: nested -File whose target is TRUSTED => 9b's $null branch keeps the
+         statement with Domain forced 'powershell' (F12) => tier trusted_program. -->
+    <test-case expected="allow" reason="nested -File to a trusted script allows via forced powershell domain" category="SD-Allow-NestedTrusted" subresult-tier="trusted_program">
+      <description>pwsh -File scripts\calls-nested-trusted.ps1 - nested -File scripts\trusted.ps1</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\calls-nested-trusted.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- I7: a DYNAMIC invocation (& $p) is NOT expanded => unknown => ask (fail-closed). -->
+    <test-case expected="ask" reason="dynamic '&amp; $p' invocation stays fail-closed" category="SD-Ask-VariablePath" reason-contains="contains unknown command">
+      <description>pwsh -File scripts\variable-path.ps1 - &amp; $p (variable path, fail-closed)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\variable-path.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- I12: a statement inside a script keeps ITS OWN domain (linux 'ls' = read_only
+         in the fixture config) => allow. -->
+    <test-case expected="allow" reason="cross-domain read-only statement keeps the script allow" category="SD-Allow-CrossDomain">
+      <description>pwsh -File scripts\cross-domain.ps1 - linux 'ls -la' (read_only) + Write-Host</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\cross-domain.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- 3.2 / 5: '-Command' wrapping a '-File'. The matcher guard refuses to treat the
+         inner '-File' as its own (garbage-path risk); the walker's -Command branch
+         routes it into SITE A and the target expands through the legitimate
+         recursion => allow. -->
+    <test-case expected="allow" reason="-Command wrapping -File routes into SITE A (matcher guard holds)" category="SD-Allow-CommandWrapsFile">
+      <description>pwsh -File scripts\cmd-file-inside.ps1 - pwsh -Command "pwsh -File scripts\nested-target.ps1"</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\cmd-file-inside.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- 6.5 documented edge: a SPACED quoted nested -File path collapses to an
+         unquoted value with spaces, which 9b cannot match => unknown => ask. -->
+    <test-case expected="ask" reason="spaced collapsed nested path is not expanded => fail-closed ask" category="SD-Ask-SpacedNestedPath" reason-contains="contains unknown command">
+      <description>pwsh -File scripts\spaced-nested.ps1 - pwsh -File "scripts\my script.ps1" (spaced)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\spaced-nested.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- I16: '-File $var' (non-literal) resolves to a path containing '$' => not found
+         => fail-closed ask naming the resolved path. -->
+    <test-case expected="ask" reason="non-literal -File argument fails closed" category="SD-Ask-NonLiteralFileArg" reason-contains="script file not found">
+      <description>pwsh -File $var - non-literal script argument</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File $var]]></copilot-command>
+    </test-case>
+
+    <!-- Two DIFFERENT scripts in one command: both expand, two HT slots, both
+         read-only => allow (cap 3 not reached). -->
+    <test-case expected="allow" reason="two distinct read-only scripts both expand" category="SD-Allow-TwoScripts">
+      <description>pwsh -File scripts\readonly.ps1; pwsh -File scripts\target2.ps1</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\readonly.ps1; pwsh -File scripts\target2.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- D11/D12: the cap counts FILE READS PER DECISION, not chain depth - four
+         sibling invocations exhaust the budget of 3 => fail-closed ask. -->
+    <test-case expected="ask" reason="sibling invocations share the per-decision file budget" category="SD-Ask-SiblingCap" reason-contains="max chained files exceeded (3)">
+      <description>4 x pwsh -File (siblings) - the 4th read exceeds max_chained_files=3</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\readonly.ps1; pwsh -File scripts\target2.ps1; pwsh -File scripts\chain-a.ps1; pwsh -File scripts\chain-b.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- I5: '-File a.ps1 -Command "Remove-Item ..."' - powershell.exe passes
+         everything after -File to the SCRIPT as $args, so -Command is NOT unwrapped
+         and only a.ps1's statements are classified => allow. OFF parity twin: the
+         bare path is unknown today => ask. -->
+    <test-case expected="allow" reason="-File wins over a later -Command (script $args), only the script is inspected" category="SD-Allow-FileThenCommandArg">
+      <description>pwsh -File scripts\readonly.ps1 -Command "Remove-Item C:\temp\x" (-Command is $args)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\readonly.ps1 -Command "Remove-Item C:\temp\x"]]></copilot-command>
+    </test-case>
+
+    <!-- I17: BOM-less UTF-8 script with non-ASCII comment characters. ReadAllText
+         (BOM sniffing, UTF-8 default) must parse it cleanly under powershell.exe 5.1;
+         a Get-Content-without-Encoding read would mojibake the AST and over-ask. -->
+    <test-case expected="allow" reason="UTF-8 (no BOM) script content is read with ReadAllText and parses cleanly" category="SD-Allow-Utf8Script">
+      <description>pwsh -File scripts\utf8-nonascii.ps1 - non-ASCII comment + 2 read-only statements</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\utf8-nonascii.ps1]]></copilot-command>
+    </test-case>
+
   </category-group>
 </commands>

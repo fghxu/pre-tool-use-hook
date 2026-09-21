@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for script_drilldown validation (2026-09-21). runners is an EXPLICITLY EMPTY array - Load-Config MUST throw fail-closed (design 4.2 rule 4 / RUL-6): an empty list would arm zero matchers and silently turn enabled:true into a no-op.",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "trusted_programs": [
+    "trusted.ps1"
+  ],
+
+  "script_drilldown": {
+    "enabled": true,
+    "runners": [],
+    "max_chained_files": 3,
+    "max_file_bytes": 4096,
+    "llm_scope": "count"
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*", "Write-Host"],
+      "modifying_verbs": {
+        "high":   ["Remove-*"],
+        "medium": ["Copy-*"],
+        "low":    []
+      },
+      "read_only": [
+        { "name": "pwsh", "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"], "description": "PowerShell wrapper" }
+      ],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

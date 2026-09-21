@@ -1,0 +1,50 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for script_drilldown DEFAULTS (2026-09-21). The block omits runners + llm_scope (and carries an ignored _comment_* property INSIDE the block, design 4.2 rule 2). Load-Config must accept it and compile Runners=@('powershell') + LlmScope='count' (design 4.2 rules 2/4/7 defaults).",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "trusted_programs": [
+    "trusted.ps1"
+  ],
+
+  "script_drilldown": {
+    "_comment_inside_the_block": "underscore-prefixed properties are IGNORED by validation (design 4.2 rule 2)",
+    "enabled": true,
+    "max_chained_files": 3,
+    "max_file_bytes": 4096
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*", "Write-Host"],
+      "modifying_verbs": {
+        "high":   ["Remove-*"],
+        "medium": ["Copy-*"],
+        "low":    []
+      },
+      "read_only": [
+        { "name": "pwsh", "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"], "description": "PowerShell wrapper" }
+      ],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

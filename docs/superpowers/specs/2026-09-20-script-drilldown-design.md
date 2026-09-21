@@ -1,7 +1,7 @@
 # Design: Script Drilldown — Architecture & Implementation Contract
 
 **Date:** 2026-09-20
-**Status:** IMPLEMENTED (v3) — GREEN. Revision history: v1 drafted after the
+**Status:** IMPLEMENTED + VERIFIED (v3 + verification record §0, 2026-09-21). Revision history: v1 drafted after the
 sibling v1 cross-review; v2 folded in user rulings RUL-1..RUL-6 (§17); v3 incorporates the
 sibling v2's empirically verified walker-collapse fact (F11) — with the RUL-1/RUL-2 consequence
 that the COLLAPSED nested `-File` path IS expanded via the bare-invocation rule (§6.5) — and
@@ -28,6 +28,79 @@ HEAD 2026-09-20.
 **Audience:** a junior coder who has NEVER touched this repo. Everything needed to implement is
 here or pointed at. You still read the project code — this doc tells you exactly what to read and
 exactly what to change.
+
+---
+
+## 0. Independent verification pass (2026-09-21) — line-by-line audit vs this doc
+
+Every §3–§9 module contract was re-read against the committed code, and every §13 case/preflight was
+re-run. Result: **`script-drilldown` 17/17 checks + `script-drilldown.llm` 34/34; full
+`src/Run-AllTests.ps1` = 1411/1411, zero flips.**
+
+### 0.1 Verified as specified (no change needed)
+
+| § | Item | Evidence |
+|---|---|---|
+| 4.1–4.3 | schema, `_comment_*` tolerance, per-rule validation (`runners` unknown/empty, caps ≥ 1, `llm_scope`), compile only when enabled, `Config`/`Cwd` reference members, explicit `$script:ScriptDrilldown = $null` on OFF | code + preflights BadRunner/BadScope/BadCap/**EmptyRunners**/**BadMaxBytes**/**Defaults** |
+| 5 | matcher registry + dispatcher, `-Command`-precedes-`-File` guard, runner-set gate | code; **SD-Allow-CommandWrapsFile** pins the guard |
+| 6.2 | steps 0→9 incl. trust-first, canonical resolution, HT loop/cap, size cap, `ReadAllText`, `@()` PS 5.1 guards | code; SD-Ask-NotFound/TooLarge/Loop/LoopViaFile/Cap/**SiblingCap**/**NonLiteralFileArg** |
+| 6.4/6.5 | FAILURE entry shape, `DrilldownMarker`, `SkipRewalk`, collapsed-path expansion on 9b | code; SD-Ask-NestedMissing, **SD-Allow-NestedTrusted**, **SD-Allow-FuncBodyNestedFile** |
+| 7 | HT keys canonical+lowercase, insert only at step 7, reset + `Cwd` refresh at STEP 4 | code; **SDD-StateReset** |
+| 8.1–8.4 | entry/SubResult metadata, `SkipRewalk` scoping, 4e reason template, 4f verbatim branch | code; **SDD-WrapperEntryShape**, **SDD-LineNumberReason** |
+| 9.1–9.4 | single verdict call, `llm_scope`, `DisplayText ?? Command`, blindspot/merge untouched | SDL-* cases; production `records.jsonl` `llm.sent` shows `<script:…>` prefixes |
+| 10 | log rendering path (Logger unchanged); reason line = Logger's `<command> (<reason>)` form, so the §6-2 text appears verbatim INSIDE it | live hook log 2026-09-21 00:32:48 |
+| 11.1–11.6 | entry order/shape, cap boundary, loops, trusted shortcut, SITE-B compound, nested collapse | **SDD-WrapperEntryShape**, **SDD-CompoundSiteB**, SD-Allow-Chain3, SD-Compound-Cd |
+| 12 | I1–I19 | per-row tests (below); I11 and I15 remain documented-and-untested accepted quirks |
+| 13.5/14 | suite registration, generic config ships disabled, live fixtures re-synced, docs updated | `src/Run-AllTests.ps1`, `config.json`, `test/config/live/*`, CURRENT-DESIGN §1/§2/§4, config-json-guide §10.7 |
+
+### 0.2 Deviations found that were NOT in the original "three deviations" list
+
+| # | Deviation | Why it is needed | Where |
+|---|---|---|---|
+| D-4 | `Get-AstCommands` skips the ROOT ScriptBlockAst in its §3 recursion | section 2's `FindAll(CommandAst, $true)` already visits every command in nested scriptblocks; the recursion re-runs the wrapper machinery with the same dedup keys, so with drilldown ON it re-enters the engine, hits the HT loop-check and would mint a spurious `recursive …` blocker | §8.2 |
+| D-5 | §6.2 step 8 gained an intermediate recovery stage: when the AST parses cleanly but yields zero `CommandAst`, the raw top-level statement texts are emitted (one entry each) *before* falling back to `Split-Commands` | `Split-Commands` mangles comment-only/expression-only content (it splits on `:` inside interpolations and swallows comments), which would turn an unknown statement into a misleading fragment. Consequence: the §6 "no classifiable statements" FAILURE is now reachable only for whitespace/empty files — which is why the fixture `assignments-only.ps1` is whitespace-only (design §13.1 said `$x = 1 + 2`; that content now yields the RUL-3 `contains unknown command: $x = 1 + 2` ask instead) | §6.2 |
+| D-6 | new helper `Test-DrilldownInvocationText` (engine step 9b's regex, exposed for the walker) | lets the walker recognize a collapsed `-File` child of a script statement (fix V-2 below) | §8.2 |
+
+### 0.3 Bugs found by the audit and fixed (red → green, TDD)
+
+| # | Symptom | Root cause | Fix | Pinned by |
+|---|---|---|---|---|
+| V-1 | a nested `pwsh -File z.ps1` inside a **function body** produced `recursive script invocation detected` (twice) for a non-recursive script | the §3 ScriptBlockAst recursion (D-4) and the re-walk were called WITHOUT the inherited `-DrilldownEnabled`, so they expanded `z` a second time inside the engine's own content walk and claimed the HT key before step 9b | inherit `-DrilldownEnabled` in both recursive calls | **SD-Allow-FuncBodyNestedFile** |
+| V-2 | `pwsh -Command "pwsh -File z.ps1"` inside a script over-asked with a bogus `recursive …` AND an `unknown command: scripts\z.ps1` | the walker emits two entries for that ONE invocation (the inner wrapper text from the `-Command` unwrapping, plus the collapsed bare path produced by re-walking it); the second hits the loop-check, and the depth-0 re-walk of the engine statement re-derives the bare path as a fresh, unexpandable entry | (a) re-walk skips a bare-`.ps1` child when the SOURCE entry carries `OriginScript` (the engine already owns that invocation); (b) `Expand-ScriptFile` step 9 remembers targets already expanded in the same statement list and skips duplicate representations | **SD-Allow-CommandWrapsFile** |
+| V-3 | `SubResult.LineNumber` held the STRING `"[int]<entry dump>.LineNumber"` instead of an int | PowerShell **argument mode** does not treat a leading `[int]` as a cast: `Add-Member -Value [int]$sc.LineNumber` was parsed as an expandable string | convert in a variable first (`$n = [int]$x; Add-Member … $n`) | **SDD-LineNumberReason** + **SDD-WrapperEntryShape** (type assertion) |
+
+V-4 (behaviour note, not a bug): with drilldown ON, `pwsh -File $var` (non-literal) now **asks**
+(`script file not found`), whereas without the block the AST arbiter allows that line. The pair
+**SD-Ask-NonLiteralFileArg / SDO-Ask-NonLiteralFileArg** exists to pin that asymmetry: enabling the
+feature can only make a `-File` invocation stricter, never looser (I16/RUL-4).
+
+### 0.4 Test coverage added by the audit (fixtures + cases + runner checks)
+
+- ON matrix 22 → **34** cases: FuncBodyNestedFile, NestedTrusted, VariablePath (I7), CrossDomain (I12),
+  CommandWrapsFile, SpacedNestedPath (§6.5 edge), NonLiteralFileArg (I16), TwoScripts, SiblingCap
+  (D11/D12 budget is per decision, not per chain), FileThenCommandArg (I5), Utf8Script (I17).
+- OFF matrix 21 → **33** twins for every new command (byte-identical-behavior proof; the
+  NonLiteralFileArg twin documents today's arbiter allow, see V-4).
+- Runner preflights 5 → **8** (+ SDD-EmptyRunners (RUL-6), SDD-BadMaxBytes (4.2 rule 6),
+  SDD-Defaults (rules 2/4/7 defaults + in-block `_comment_*`)).
+- Runner programmatic checks: + SDD-WrapperEntryShape (entry order/shape + int LineNumber),
+  SDD-NestedFileExpanded, **SDD-TrustOnlyNoRead** (the previously unused `config.trustonly.json`
+  now proves D9's "trusted ⇒ never read"), SDD-StateReset, SDD-LineNumberReason, SDD-CompoundSiteB.
+- LLM sub-suite + SDL-Exclude-LocalAskStands (exclusion must not weaken the local ask).
+- New fixtures: `config.emptyrunner.json`, `config.badbytes.json`, `config.defaults.json`,
+  `scripts/func-file.ps1`, `calls-nested-trusted.ps1`, `variable-path.ps1`, `cross-domain.ps1`,
+  `cmd-file-inside.ps1`, `spaced-nested.ps1`, `my script.ps1`, `utf8-nonascii.ps1`.
+
+### 0.5 Still open / accepted
+
+- I11 (quoted `pwsh.exe -File` normalization may duplicate the wrapper entry) and I15 (symlink loops
+  are not detected; the count cap bounds the work) remain documented-and-untested accepted quirks.
+- §13.1's `assignments-only.ps1` content differs from the doc (whitespace-only, see D-5); the doc's
+  `$x = 1 + 2` example would now be a RUL-3 unknown-command ask.
+- Production cost observation: with drilldown ON, an expanded script raises the LLM sub-command count
+  (observed 29 sub-commands / ~12 s on a 34-line helper script in the live soak), and `check_blindspot`
+  still consults the LLM for drilldown asks carrying `unclassified` tiers. Both are decision-neutral
+  but visible in latency.
 
 ---
 

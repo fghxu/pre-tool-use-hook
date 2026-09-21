@@ -128,6 +128,18 @@ function Reset-ScriptDrilldownState {
     }
 }
 
+# Test-DrilldownInvocationText: is this text the BARE '.ps1' invocation shape that
+# engine step 9b recurses on ('. .\y.ps1', '& .\y.ps1 -Flag', bare '.\y.ps1',
+# or the collapsed 'scripts\z.ps1' of a nested 'pwsh -File z.ps1')? Shares step
+# 9b's regex (literal paths only; '$' and quote chars excluded so variable paths
+# stay fail-closed). Used by the AST walker's re-walk to recognize the collapsed
+# -File representation of an invocation the engine already owns.
+function Test-DrilldownInvocationText {
+    param([string]$Text)
+    if (-not $Text) { return $false }
+    return [bool]($Text -match '^\s*([.&]\s*)?(?:"([^"]+\.ps1)"|''([^'']+\.ps1)''|([^\s$''"]+\.ps1))(\s|$)')
+}
+
 # =============================================================================
 # Get-CommandDomain
 #
@@ -838,6 +850,18 @@ function Expand-ScriptFile {
     #      plain STATEMENT entry with origin metadata.
     $basename = [System.IO.Path]::GetFileName($ScriptPath)
     $out = @()
+    # Local duplicate guard (2026-09-21 fix): the walker can hand us SEVERAL entries
+    # for ONE invocation - e.g. for the statement `pwsh -Command "pwsh -File z.ps1"`
+    # it emits both the wrapper text `pwsh -File z.ps1` (from the -Command unwrapping)
+    # AND the bare path `z.ps1` (the F11 collapse produced by re-walking that text).
+    # Without this guard the first entry expands z (claiming its HT key) and the second
+    # hits the loop-check, minting a spurious 'recursive script invocation detected'
+    # ask for a non-recursive script (SD-Allow-CommandWrapsFile). A target already
+    # expanded from THIS file's statement list is therefore skipped: its statements are
+    # already emitted, so nothing is lost (same rationale as 9b's replace-not-keep).
+    # Cross-file recursion (a -> b -> a) is unaffected: b's statement list has its own
+    # empty local set, so the HT check still catches it.
+    $expandedHere = @{}
     foreach ($s in $stmts) {
         $text = "$($s.CommandText)"
         if (-not $text) { continue }
@@ -856,8 +880,13 @@ function Expand-ScriptFile {
         #    every nested 'pwsh -File z' to the bare path, which 9b handles).
         $inv = Find-ScriptRunnerInvocation -SegmentText $text
         if ($inv) {
+            $lk = $inv.ScriptPath
+            $lkFull = ConvertTo-CanonicalWritePath -TargetPath $lk -Config $gate.Config
+            if ($lkFull) { $lk = $lkFull.ToLowerInvariant() }
+            if ($expandedHere.ContainsKey($lk)) { continue }
             $sub = Expand-ScriptFile -ScriptPath $inv.ScriptPath -WrapperText $text
             if (@($sub | Where-Object { $_.PSObject.Properties['OriginScript'] }).Count -gt 0) {
+                $expandedHere[$lk] = $true
                 # SUCCEEDED: emit a NESTED-WRAPPER entry (resolves read_only via the
                 # pwsh pattern, a harmless [N] line) + all sub entries.
                 $out += New-DrilldownNestedWrapperEntry -Text $text -WrapperText $WrapperText
@@ -887,6 +916,9 @@ function Expand-ScriptFile {
         if ($text -match '^\s*([.&]\s*)?(?:"([^"]+\.ps1)"|''([^'']+\.ps1)''|([^\s$''"]+\.ps1))(\s|$)') {
             $path = if ($Matches[2]) { $Matches[2] } elseif ($Matches[3]) { $Matches[3] } else { $Matches[4] }
             if ($path) {
+                $lk2 = ConvertTo-CanonicalWritePath -TargetPath $path -Config $gate.Config
+                if ($lk2) { $lk2 = $lk2.ToLowerInvariant() }
+                if ($lk2 -and $expandedHere.ContainsKey($lk2)) { continue }
                 $sub = Expand-ScriptFile -ScriptPath $path -WrapperText $text
                 if ($null -eq $sub) {
                     # TRUSTED (or feature off mid-tree): KEEP the statement as a plain
@@ -898,6 +930,7 @@ function Expand-ScriptFile {
                         -OriginScript $basename
                 }
                 elseif (@($sub | Where-Object { $_.PSObject.Properties['OriginScript'] }).Count -gt 0) {
+                    $expandedHere[$lk2] = $true
                     # SUCCEEDED: emit the sub entries ONLY (the invocation statement is
                     # REPLACED, not kept -- if kept it would resolve unknown and always
                     # ask; y's statements fully represent it).
@@ -2154,9 +2187,27 @@ function Get-AstCommands {
                 $skipRewalk = [bool]($wr.PSObject.Properties['SkipRewalk'])
                 if (-not $skipRewalk) {
                     if ($innerDom -eq 'powershell') {
-                        $innerAstCmds = Get-PowerShellCommands -Command $innerCmd
+                        # -DrilldownEnabled is INHERITED (2026-09-21 fix): the engine's
+                        # own content walk passes $false so re-walked texts collapse a
+                        # nested 'pwsh -File z' to its bare path instead of EXPANDING it
+                        # here. Expanding here would claim z's HT key inside the walker,
+                        # and the engine's step 9b would then hit the loop-check and mint
+                        # a spurious 'recursive script invocation detected' ask for a
+                        # non-recursive script (SD-Allow-CommandWrapsFile).
+                        $innerAstCmds = Get-PowerShellCommands -Command $innerCmd -DrilldownEnabled $DrilldownEnabled
                         foreach ($iac in $innerAstCmds) {
                             if ($iac.CommandText -ne $innerCmd) {
+                                # Collapsed-invocation guard (2026-09-21 fix): when the
+                                # SOURCE entry came from a script (OriginScript), a child
+                                # that is itself a BARE '.ps1' invocation is the F11
+                                # collapse of a '-File' whose '-Command' wrapper made the
+                                # drilldown dispatcher refuse (design 5 GUARD) - i.e. the
+                                # -Command branch of the SAME walk already extracted the
+                                # inner invocation text, and the ENGINE (step 9a/9b)
+                                # expanded or kept it. Re-adding the bare path here
+                                # produces a duplicate, unexpandable entry that resolves
+                                # unknown => spurious ask (SD-Allow-CommandWrapsFile).
+                                if ($wrOrigin -and (Test-DrilldownInvocationText -Text "$($iac.CommandText)")) { continue }
                                 # Origin attribution (8.2.3): when the SOURCE entry
                                 # carries OriginScript, pass it onto the re-walk
                                 # children so an inner command extracted from a script's
@@ -2211,7 +2262,16 @@ function Get-AstCommands {
         # 'recursive' FAILURE entry whose key differs from the successful walk's.
         if ($sb -eq $Ast) { continue }
         if ($sb.EndBlock) {
-            $innerResults = Get-AstCommands -Ast $sb.EndBlock -ParentCommand $ParentCommand
+            # -DrilldownEnabled is INHERITED (2026-09-21 fix): section 2's
+            # FindAll(CommandAst, $true) already visits every command inside nested
+            # scriptblocks, so this recursion only re-runs the wrapper machinery with
+            # identical dedup keys. With drilldown ENABLED on both passes a nested
+            # 'pwsh -File z' inside a function body would be EXPANDED twice: the second
+            # attempt hits the HT loop-check and mints a spurious 'recursive script
+            # invocation detected' ask for a non-recursive script
+            # (SD-Allow-FuncBodyNestedFile). Inheriting the caller's flag keeps a
+            # single expansion point (engine step 9b) for the engine's content walk.
+            $innerResults = Get-AstCommands -Ast $sb.EndBlock -ParentCommand $ParentCommand -DrilldownEnabled $DrilldownEnabled
             foreach ($ir in $innerResults) {
                 AddResult -ResultsList $results -SeenMap $seenKeys `
                     -CmdText $ir.CommandText -Domain $ir.Domain `

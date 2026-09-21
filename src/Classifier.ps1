@@ -786,7 +786,15 @@ function Invoke-Classify {
             # their normal reason (they never reach 4f).
             if ($sc.PSObject.Properties['OriginScript']) {
                 $r | Add-Member -Force NoteProperty 'OriginScript' "$($sc.OriginScript)"
-                if ($sc.PSObject.Properties['LineNumber']) { $r | Add-Member -Force NoteProperty 'LineNumber' [int]$sc.LineNumber }
+                # NOTE (2026-09-21 fix): build the int in a variable first. In
+                # ARGUMENT mode PowerShell does NOT treat a leading [int] as a cast -
+                # '[int]$sc.LineNumber' was parsed as an expandable string and stored
+                # the literal text '[int]<entry dump>.LineNumber' as the property
+                # value. An assignment (expression mode) performs a real conversion.
+                if ($sc.PSObject.Properties['LineNumber']) {
+                    $scLineNumber = [int]$sc.LineNumber
+                    $r | Add-Member -Force NoteProperty 'LineNumber' $scLineNumber
+                }
                 if ($sc.PSObject.Properties['DisplayText']) { $r | Add-Member -Force NoteProperty 'DisplayText' "$($sc.DisplayText)" }
                 if ($r.Decision -eq 'ask') {
                     $stmt = "$($sc.CommandText)"
