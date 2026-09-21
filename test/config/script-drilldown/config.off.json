@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for script_drilldown OFF parity (2026-09-20). IDENTICAL to config.json EXCEPT the script_drilldown block is absent - behavior must be byte-identical to today (spec D2 / invariant I1).",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "_comment_trusted_programs": "Basename form - matches the script anywhere.",
+  "trusted_programs": [
+    "trusted.ps1"
+  ],
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Format-*", "Out-GridView", "Write-Host", "Write-Output"],
+      "modifying_verbs": {
+        "high":   ["Remove-*", "Stop-*", "Disable-*", "Clear-*", "Reset-*"],
+        "medium": ["Set-*", "New-*", "Copy-*", "Move-*", "Rename-*", "Start-*", "Send-*", "Push-*"],
+        "low":    []
+      },
+      "read_only": [
+        { "name": "pwsh", "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"], "description": "PowerShell wrapper (inner commands classified separately)" }
+      ],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" },
+        { "name": "cat", "patterns": ["cat *"], "description": "Print file contents" },
+        { "name": "cd", "patterns": ["cd *", "chdir *"], "description": "Change directory (read-only for filesystem)" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

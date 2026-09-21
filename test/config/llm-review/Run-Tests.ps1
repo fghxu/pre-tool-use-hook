@@ -61,6 +61,10 @@
 #   verdict          asserted against Log.verdict (optional)
 #   effect           asserted against Log.effect (optional)
 #   reason-contains  substring asserted on the final Reason text (optional)
+#   config           alternate fixture config file for THIS case only (2026-09-20;
+#                    relative to the fixture dir or absolute; default: none)
+#   sent-contains    substring that must appear in at least one entry of the
+#                    numbered list sent to the LLM (Log.sent) (2026-09-20)
 #   mode             classify (default) | fullpipe (spawns src/Hook.ps1)
 #
 # Spec: docs/superpowers/specs/2026-08-01-llm-second-opinion-design.md
@@ -70,7 +74,14 @@
 param(
     # Default = the phase-II small file (fast typical pass). Point at
     # test-cases.xml (phase-I) or test-cases.p2.large.xml (opt-in matrix).
-    [string]$XmlPath = "$PSScriptRoot\test-cases.p2.small.xml"
+    [string]$XmlPath = "$PSScriptRoot\test-cases.p2.small.xml",
+    # 2026-09-20 (script-drilldown spec 13.4): optional alternate fixture config.
+    # Default = this fixture's own config.json (backward-compatible).
+    [string]$ConfigPath = "",
+    # Optional CWD anchor: when set, rewrites $config._cwd/_cwdNorm after
+    # Load-Config exactly like TestRunner.ps1 L31-37, so relative script paths
+    # in the commands resolve against this directory.
+    [string]$Cwd = ""
 )
 
 # Stop on any unexpected error - a broken runner must not masquerade as green.
@@ -83,7 +94,7 @@ $ErrorActionPreference = "Stop"
 $fixtureDir = $PSScriptRoot
 $srcDir     = Join-Path $fixtureDir "..\..\..\src"
 $hookPath   = Join-Path $srcDir "Hook.ps1"        # spawned by fullpipe cases
-$configPath = Join-Path $fixtureDir "config.json" # this fixture's own config
+$configPath = if ($ConfigPath) { $ConfigPath } else { Join-Path $fixtureDir "config.json" }
 
 # ---------------------------------------------------------------------------
 # Dot-source the REAL engine modules (same files the production hook uses).
@@ -117,6 +128,17 @@ if (Test-Path (Join-Path $srcDir "LlmReview.ps1")) {
 # block the scope engine reads (Enabled / Level / RemoteIndicators / ...).
 # ---------------------------------------------------------------------------
 $config = Load-Config -Path $configPath
+
+# Optional CWD anchor (script-drilldown spec 13.4): rewrite _cwd/_cwdNorm
+# exactly like TestRunner.ps1 L31-37 so relative script paths resolve against
+# the given directory. No-op when -Cwd is not passed.
+if ($Cwd) {
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $cwdResolved = ($Cwd -replace '[/\\]', $sep)
+    if (-not $cwdResolved.EndsWith($sep)) { $cwdResolved += $sep }
+    $config._cwd = $cwdResolved
+    $config._cwdNorm = $cwdResolved.ToLowerInvariant()
+}
 
 # Baseline global strictness from the fixture file; each case may override it
 # via its strictness= attribute and is reset to this afterwards.
@@ -489,12 +511,41 @@ foreach ($tc in $testCases) {
     # ==================================================================
 
     # ------------------------------------------------------------------
+    # Per-case CONFIG switch (script-drilldown spec 13.4): a case may name an
+    # alternate fixture config file via its config= attribute (relative to the
+    # BASE config's directory, or absolute). We load it, apply the same -Cwd
+    # anchor, and use ITS compiled llm block + object for this one case only;
+    # later cases without the attribute keep using the base config. Absent
+    # attribute => the base config (backward-compatible).
+    # ------------------------------------------------------------------
+    $caseConfig = $config
+    if ($tc.HasAttribute('config')) {
+        $altCfgPath = $tc.GetAttribute('config')
+        if (-not [System.IO.Path]::IsPathRooted($altCfgPath)) { $altCfgPath = Join-Path (Split-Path $configPath -Parent) $altCfgPath }
+        try {
+            $caseConfig = Load-Config -Path $altCfgPath
+            if ($Cwd) {
+                $sep2 = [System.IO.Path]::DirectorySeparatorChar
+                $cwdResolved2 = ($Cwd -replace '[/\\]', $sep2)
+                if (-not $cwdResolved2.EndsWith($sep2)) { $cwdResolved2 += $sep2 }
+                $caseConfig._cwd = $cwdResolved2
+                $caseConfig._cwdNorm = $cwdResolved2.ToLowerInvariant()
+            }
+        }
+        catch {
+            # A broken per-case config must fail THIS case, not abort the suite.
+            Record-Result -Ok $false -Name $name -Detail "config='$($tc.GetAttribute('config'))' failed to load: $($_.Exception.Message)"
+            continue
+        }
+    }
+
+    # ------------------------------------------------------------------
     # Per-case feature-config overrides. We mutate the COMPILED block
     # directly (same object Test-LlmReviewScope reads) - equivalent to
     # editing config.json for just this one case. Every case sets all three,
     # so there is no cross-case leakage even though the object is shared.
     # ------------------------------------------------------------------
-    $llmCfg = $config._compiled.llmSecondOpinion
+    $llmCfg = $caseConfig._compiled.llmSecondOpinion
     $llmCfg.Enabled               = if ($tc.HasAttribute('enabled')) { [bool]::Parse($tc.GetAttribute('enabled')) } else { $true }
     $llmCfg.Level                 = if ($tc.HasAttribute('level')) { $tc.GetAttribute('level') } else { 'complex_remote' }
     $llmCfg.ComplexMinSubcommands = if ($tc.HasAttribute('min')) { [int]$tc.GetAttribute('min') } else { 2 }
@@ -522,8 +573,8 @@ foreach ($tc in $testCases) {
     }
     $cbBlock.Enabled = $cbEnabled
     # strictness override (suppression cases need normal so gated allows).
-    if ($tc.HasAttribute('strictness')) { $config.global_modifying_strictness = $tc.GetAttribute('strictness') }
-    else { $config.global_modifying_strictness = $fileStrictness }
+    if ($tc.HasAttribute('strictness')) { $caseConfig.global_modifying_strictness = $tc.GetAttribute('strictness') }
+    else { $caseConfig.global_modifying_strictness = $fileStrictness }
 
     # Build the minimal fake IDE input: the shape HookAdapter expects after
     # tool_name_mapping ("Bash" -> tool_input.command in the fixture config).
@@ -541,11 +592,11 @@ foreach ($tc in $testCases) {
     # ------------------------------------------------------------------
     $result = $null; $llmLog = $null
     try {
-        $result = Invoke-Classify -RawInput $rawInput -IDE "ClaudeCode" -Config $config
+        $result = Invoke-Classify -RawInput $rawInput -IDE "ClaudeCode" -Config $caseConfig
         # Mirror the Hook.ps1 gate
         if ($llmCfg.Enabled) {
             if (-not $LlmReviewLoaded) { throw "LlmReview.ps1 not loaded (TDD red phase)" }
-            $outcome = Invoke-LlmReview -ClassifyResult $result -Config $config
+            $outcome = Invoke-LlmReview -ClassifyResult $result -Config $caseConfig
             $result = $outcome.Result
             $llmLog = $outcome.Log
         }
@@ -616,6 +667,19 @@ foreach ($tc in $testCases) {
         $gotCB = if ($llmLog -and $null -ne $llmLog.check_blindspot_triggered) { [bool]$llmLog.check_blindspot_triggered } else { $false }
         $ok = ($gotCB -eq $wantCB)
         if (-not $ok) { $detail += " | check_blindspot_triggered expected $wantCB got $gotCB" }
+    }
+    if ($ok -and $tc.HasAttribute('sent-contains')) {
+        # script-drilldown spec 13.4: assert the numbered list SENT to the LLM
+        # (Log.sent) carries a marker in at least one entry (e.g. the
+        # <script:basename> DisplayText prefix). No log => nothing was sent.
+        $wantSent = $tc.GetAttribute('sent-contains')
+        $sentItems = @()
+        if ($llmLog -and $null -ne $llmLog.sent) { $sentItems = @($llmLog.sent | ForEach-Object { "$_" }) }
+        $sentOk = ($sentItems | Where-Object { $_.Contains($wantSent) }).Count -gt 0
+        if (-not $sentOk) {
+            $ok = $false
+            $detail += " | sent list missing '$wantSent' (sent: $(($sentItems -join ' | ')))"
+        }
     }
     Record-Result -Ok $ok -Name $name -Detail $detail
     Write-CaseLog -Name $name -Ok $ok -Result $result -LlmLog $llmLog -Mode 'classify'

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SCRIPT-DRILLDOWN LLM SUB-SUITE (spec 13.4) - llm_scope matrix.
+     Run by test/config/llm-review/Run-Tests.ps1 with the 13.4 runner extensions:
+       pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 `
+         -XmlPath test/config/script-drilldown/test-cases.llm.xml `
+         -ConfigPath test/config/script-drilldown/config.llm.json `
+         -Cwd <fixtureDir>
+
+     Verdicts are injected via PRETOOLHOOK_LLMREVIEW_MOCK (idx:N form) - no network,
+     zero quota. Every case sets level="complex_commands" min="2" explicitly because
+     the runner's per-case defaults are complex_remote/2 and would override the
+     config file values.
+
+     llm_scope semantics (spec RUL-5):
+       count   - script-origin statements COUNT toward complex_min_subcommands AND
+                 appear in the numbered list sent to the LLM (DisplayText form).
+       exclude - script-origin statements are dropped from BOTH the count and the
+                 list; only the wrapper entry counts.
+
+     TDD: RED before implementation (no expansion => 1 sub-command => out of scope,
+     and local decision is ask for the untrusted -File path). -->
+<commands>
+  <category-group name="ScriptDrilldownLlm">
+
+    <!-- llm_scope=count: readonly.ps1 expands to 3 entries (wrapper + 2 statements) >= 2
+         => in scope. Mock idx: (empty) yields {"modifying":[]} => read-only verdict =>
+         agree-allow on top of the local allow. -->
+    <test-case expected="allow" reason="count scope: 3 subs in scope, LLM read-only agrees" category="SDL-Count-InScope" level="complex_commands" min="2" mock="idx:" in-scope="true" verdict="read-only" effect="agree">
+      <description>pwsh -File scripts\readonly.ps1 - llm_scope=count, mock idx: (empty)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- llm_scope=count: same command, mock flags sub 2 as modifying => veto => ask. -->
+    <test-case expected="ask" reason="count scope: LLM flags sub 2 => veto" category="SDL-Count-Veto" level="complex_commands" min="2" mock="idx:2" in-scope="true" verdict="modifying" effect="veto" flagged="2">
+      <description>pwsh -File scripts\readonly.ps1 - llm_scope=count, mock idx:2</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- llm_scope=exclude (config.llm.exclude.json): script-origin statements are dropped
+         from the count => only the wrapper entry counts (1 < 2) => out of scope, LLM not
+         called, local allow stands. The per-case config attribute switches the loaded
+         fixture config for this case only. -->
+    <test-case expected="allow" reason="exclude scope: script subs dropped, 1 sub below min => out of scope" category="SDL-Exclude-OutOfScope" level="complex_commands" min="2" config="config.llm.exclude.json" in-scope="false" verdict="not_called">
+      <description>pwsh -File scripts\readonly.ps1 - llm_scope=exclude (config.llm.exclude.json)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- DisplayText pin: the numbered list sent to the LLM carries the <script:basename>
+         prefix (DisplayText ?? Command). Asserted on the LLM-SENT payload. -->
+    <test-case expected="allow" reason="sent list carries the script display marker" category="SDL-SentDisplayText" level="complex_commands" min="2" mock="idx:" in-scope="true" sent-contains="&lt;script:readonly.ps1&gt;">
+      <description>pwsh -File scripts\readonly.ps1 - LLM-SENT contains &lt;script:readonly.ps1&gt;</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- ONE request covers wrapper + all chained files: chain-a expands to 4 entries
+         (wrapper + Write-Host a/b/c from the three files) in a single numbered list.
+         Mock flags index 3 (the chain-b statement) => veto => ask. -->
+    <test-case expected="ask" reason="chained files span one request; LLM flags sub 3 => veto" category="SDL-One-Request-Chained" level="complex_commands" min="2" mock="idx:3" in-scope="true" verdict="modifying" effect="veto" flagged="3">
+      <description>pwsh -File scripts\chain-a.ps1 - statements from a+b+c in ONE list, mock idx:3</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\chain-a.ps1]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

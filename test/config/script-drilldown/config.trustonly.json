@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for script_drilldown D9 trust short-circuit (2026-09-20). Drilldown ON, but trusted_programs_regex covers EVERYTHING under scripts\\ - the engine must return $null at step 1 (TRUST) and NEVER read the file. A modifying.ps1 that would ask when untrusted must ALLOW here with tier trusted_program.",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "_comment_trusted_programs_regex": "scripts\\\\.*\\.ps1$ covers every fixture script - proves D9: trust short-circuits before any filesystem touch.",
+  "trusted_programs_regex": [
+    "scripts\\\\.*\\.ps1$"
+  ],
+
+  "script_drilldown": {
+    "enabled": true,
+    "runners": ["powershell"],
+    "max_chained_files": 3,
+    "max_file_bytes": 4096,
+    "llm_scope": "count"
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Format-*", "Out-GridView", "Write-Host", "Write-Output"],
+      "modifying_verbs": {
+        "high":   ["Remove-*", "Stop-*", "Disable-*", "Clear-*", "Reset-*"],
+        "medium": ["Set-*", "New-*", "Copy-*", "Move-*", "Rename-*", "Start-*", "Send-*", "Push-*"],
+        "low":    []
+      },
+      "read_only": [
+        { "name": "pwsh", "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"], "description": "PowerShell wrapper (inner commands classified separately)" }
+      ],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" },
+        { "name": "cat", "patterns": ["cat *"], "description": "Print file contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

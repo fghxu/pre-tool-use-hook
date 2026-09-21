@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for script_drilldown validation (2026-09-20). runners lists an UNIMPLEMENTED runner ('python') - Load-Config MUST throw fail-closed (spec D7 / design 4.2 rule 4).",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "trusted_programs": [
+    "trusted.ps1"
+  ],
+
+  "script_drilldown": {
+    "enabled": true,
+    "runners": ["python"],
+    "max_chained_files": 3,
+    "max_file_bytes": 4096,
+    "llm_scope": "count"
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*", "Write-Host"],
+      "modifying_verbs": {
+        "high":   ["Remove-*"],
+        "medium": ["Copy-*"],
+        "low":    []
+      },
+      "read_only": [
+        { "name": "pwsh", "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"], "description": "PowerShell wrapper" }
+      ],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

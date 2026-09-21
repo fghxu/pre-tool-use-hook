@@ -420,6 +420,34 @@ check the newest `*.records.jsonl` in your log directory for the `llm` object.
 - Validated at load time: wrong types (`enabled: "yes"`) throw and fail-closed the hook.
 - Testing: env var `PRETOOLHOOK_ASKNOTIFY_MOCK=<dir>` makes the notifier write `<dir>\ask-notified.txt` instead of a real toast (used by `test/config/ask-notification/`).
 
+## 10.7 `script_drilldown` — expand + classify statements of `-File` scripts
+
+**What it does:** when a command invokes a script via `pwsh -File <script>.ps1`, the hook opens the file, splits it into statements using the same AST walker used for command lines, and classifies each statement as if it had been typed on the command line. The result is a numbered `[N]` list; every sub-command that came from a script is prefixed `<script:basename>` in both the log and the LLM prompt (e.g. `[2] <script:restore.ps1> Get-ChildItem $dir`). This closes the gap where an untrusted `pwsh -File some-script.ps1` was a single opaque token — now its contents are inspected, so a hidden `Remove-Item` inside the script still prompts.
+
+```json
+"script_drilldown": {
+  "enabled": false,
+  "runners": ["powershell"],
+  "max_chained_files": 3,
+  "max_file_bytes": 4096,
+  "llm_scope": "count"
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `enabled` | bool | `false` | Master switch. **Ships disabled.** `false` (or an absent block) = byte-identical to before this feature. |
+| `runners` | string[] | `["powershell"]` | Which runners' `-File` invocations are expanded. Implemented set is currently `{ "powershell" }`. An unknown name OR an empty array throws fail-closed (an empty list would silently arm zero matchers). |
+| `max_chained_files` | int ≥ 1 | `3` | Max number of script files read per decision (chain/loop guard). Exceeding it fails closed. |
+| `max_file_bytes` | int ≥ 1 | `4096` | Refuse to read a script larger than this; fail-closed ask. |
+| `llm_scope` | `count`\|`exclude` | `count` | `count`: script-origin statements count toward `complex_min_subcommands` and appear in the LLM list. `exclude`: they are dropped from both — the LLM never sees them (only the wrapper entry counts). |
+
+- **Trusted paths are never read.** A `-File` target matching `trusted_programs` / `trusted_programs_regex` is NOT opened; it behaves exactly as today (allow via the trust path). This keeps the repo's own `src\*.ps1` dev scripts out of scope by construction.
+- **Fail-closed everywhere:** missing file, size cap, chain cap, recursion/loop detection, and unparseable content each produce a single ask with a specific reason (`script file not found: …`, `script too large to inspect (…)`, `max chained files exceeded (…)`, `recursive script invocation detected: …`).
+- **Idempotent per decision:** the visited-file set is reset at the start of every classification (STEP 4), so a re-parse of the same line never double-counts.
+- Validation runs whenever the block is present (even if `enabled: false`); properties prefixed `_` (e.g. `_comment_*`) are ignored.
+- Testing: `test/config/script-drilldown/Run-Tests.ps1` (core + OFF-parity matrix, no network).
+
 ## 11. Editing checklist (any config change)
 
 1. Valid JSON (no trailing commas) and valid regex in every pattern.

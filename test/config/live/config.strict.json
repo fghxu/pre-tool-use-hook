@@ -1,4 +1,4 @@
-{
+﻿{
   "version": "1.0",
   
   "description": "PreToolUse Hook command classification database. Loaded once at startup into a hash map for O(1) lookup.",
@@ -49,6 +49,16 @@
     "popup": true,
     "sound": true,
     "sound_file": ""
+  },
+
+  "_comment_script_drilldown_1": "Script drilldown (2026-09-20): when a command invokes a script via 'pwsh -File <script>.ps1', the hook opens the file, splits it into statements via the AST walker, and classifies each as if typed on the command line. Numbered [N] sub-commands are prefixed <script:basename> in the log + LLM prompt.",
+  "_comment_script_drilldown_2": "SHIPS DISABLED. Absent key OR enabled=false => behavior is byte-identical to before this feature (spec D2/I1). Fields: enabled (bool, default false) | runners (array; implemented set = ['powershell']; empty array throws) | max_chained_files (int >= 1, default 3) | max_file_bytes (int >= 1, default 4096) | llm_scope ('count'|'exclude', default 'count').",
+  "script_drilldown": {
+    "enabled": false,
+    "runners": ["powershell"],
+    "max_chained_files": 3,
+    "max_file_bytes": 4096,
+    "llm_scope": "count"
   },
 
 
@@ -446,7 +456,7 @@
 
     "PowerShell": {
       "modifying_strictness": "normal",
-      "description": "PowerShell cmdlets — classified primarily by approved verb",
+      "description": "PowerShell cmdlets â€” classified primarily by approved verb",
       "_comment_tiers": "Explicit read_only/modifying pattern entries (if present) decide first; otherwise the cmdlet verb decides: read_only_verbs => allow, modifying_verbs => ask by risk tier (low/medium/high). strictness_gated covers explicit command patterns only, not verb tiers. Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Compare-*", "Group-*", "Format-*", "ForEach-*", "Out-GridView", "Out-Null", "Out-String", "Out-Host", "Out-Default", "Write-Host", "Write-Output", "Write-Information", "Write-Verbose", "Write-Debug", "Write-Warning", "Read-Host", "Show-*", "Trace-*", "Wait-*", "Connect-*", "Disconnect-*", "Receive-*", "Start-Sleep"],
       "modifying_verbs": {
@@ -878,7 +888,7 @@
 
     "AWS_CLI": {
       "modifying_strictness": "normal",
-      "description": "AWS CLI commands — classified by service and operation verb",
+      "description": "AWS CLI commands â€” classified by service and operation verb",
       "_comment_tiers": "The operation verb is matched against read_only_prefixes => allow, modifying_prefixes => ask by risk tier; unmatched operations ask. In normal strictness, --flags are stripped before classification so only service + operation decide (disabled in strict mode). Optional per-domain modifying_strictness honored only when the global one is 'normal'.",
       "read_only_prefixes": ["describe-", "list-", "get-", "head-", "wait ", "lookup-", "search"],
       "modifying_prefixes": {

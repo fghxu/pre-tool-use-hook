@@ -51,6 +51,84 @@ $script:SplitOperatorRegex = [regex]::new(
 )
 
 # =============================================================================
+# Script drilldown (2026-09-20): registry, dispatcher, per-call state
+#
+# When the agent runs `pwsh -File <script>.ps1`, the hook opens the file,
+# splits it into statements via the existing AST walker, and classifies each
+# as if typed on the command line. Gated by $script:ScriptDrilldown (published
+# by Load-Config; $null when the feature is OFF). See design doc
+# docs/superpowers/specs/2026-09-20-script-drilldown-design.md.
+# =============================================================================
+
+# Registry of per-language script-runner matchers. Each matcher:
+#   INPUT : the command/statement text, RAW (the matcher normalizes internally)
+#   OUTPUT: $null (no invocation) or @{ Runner = 'powershell'; ScriptPath = '<as written>' }
+# v1 ships ONE entry ('powershell'). Adding a language = a new registry entry +
+# extending the implemented-runner set in ConfigLoader.ps1 (never a rework).
+$script:ScriptRunnerMatchers = @(
+    @{
+        Runner = 'powershell'
+        Match  = {
+            param([string]$Text)
+            # Normalize EXACTLY like Find-NestedCommands' head: strip a leading
+            # call operator, rewrite a quoted full-path pwsh.exe/powershell.exe to
+            # 'pwsh' so the anchored pattern matches. Idempotent with SITE B's own
+            # pre-normalization; extends coverage to '& "C:\...\pwsh.exe" -File z'
+            # statements inside scripts and to SITE A wrapper texts.
+            $s = ($Text -replace '^\s*&\s+', '').Trim()
+            if ($s -match '^[''"]([A-Za-z]:\\(?:.*\\)?(?:pwsh|powershell)(?:\.exe)?)[''"]') {
+                $s = 'pwsh' + $s.Substring($Matches[0].Length)
+            }
+            # GUARD (mirrors hasFileBeforeCommand in Find-NestedCommands): when a
+            # -Command/-c token PRECEDES -File, that '-File' belongs to the inner
+            # command string, not to this runner -- refuse, or the (\S+) arm grabs a
+            # garbage path. The caller falls through to normal -Command unwrapping.
+            $f = [regex]::Match($s, '(?i)-File\b')
+            if ($f.Success) {
+                $c = [regex]::Match($s, '(?i)-(?:Command|c)\s+["'']')
+                if ($c.Success -and $c.Index -lt $f.Index) { return $null }
+            }
+            # PRODUCTION regex verbatim (spec fact #3). Keep its existing
+            # asymmetries -- do not "improve" them in this change.
+            if ($s -match '(?i)^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-File\s+(?:"([^"]+)"|''([^'']+)''|(\S+))') {
+                $p = if ($Matches[1]) { $Matches[1] } elseif ($Matches[2]) { $Matches[2] } else { $Matches[3] }
+                if ($p) { return @{ Runner = 'powershell'; ScriptPath = $p } }
+            }
+            return $null
+        }
+    }
+)
+
+# Per-tool-call visited set: canonicalized absolute path (lowercased) -> $true.
+# Inserted ONLY at engine step 7 (CLAIM), after loop/cap/size pass. Reset at the
+# top of STEP 4 in Invoke-Classify (one intercepted tool call = one fresh HT).
+$script:DrilldownVisited = @{}
+
+function Find-ScriptRunnerInvocation {
+    param([string]$SegmentText)
+    $gate = $script:ScriptDrilldown
+    if (-not $gate) { return $null }
+    foreach ($m in $script:ScriptRunnerMatchers) {
+        if ($gate.Runners -notcontains $m.Runner) { continue }
+        $hit = & $m.Match -Text $SegmentText
+        if ($hit) { return $hit }
+    }
+    return $null
+}
+
+function Reset-ScriptDrilldownState {
+    # Clear the per-tool-call visited set (cheap; called unconditionally at the
+    # top of STEP 4 in Invoke-Classify). Also refreshes the gate's Cwd snapshot:
+    # TestRunner -Cwd rewrites $config._cwd AFTER Load-Config returns, so the
+    # engine must see the CURRENT _cwd, not the one captured at load time.
+    $script:DrilldownVisited = @{}
+    $gate = $script:ScriptDrilldown
+    if ($gate -and $gate.Config) {
+        $gate.Cwd = "$($gate.Config._cwd)"
+    }
+}
+
+# =============================================================================
 # Get-CommandDomain
 #
 # Content-based domain detection. Determines the shell domain from the command
@@ -577,6 +655,280 @@ function Split-OperatorNotInQuotes {
 }
 
 # =============================================================================
+# Expand-ScriptFile  (script drilldown engine, 2026-09-20)
+#
+# THE expansion engine. Given a script path (as written in a -File invocation or
+# a dot-source/&/bare statement) and the invoking text, it opens the file, splits
+# it into statements via the existing AST walker, and returns parser-level entries
+# for each statement -- classified downstream as if typed on the command line.
+#
+# Called ONLY from the two -File sites (SITE A Get-AstWrapperInnerCommands, SITE B
+# Find-NestedCommands) for the outer invocation, and from itself (for nested
+# invocations found inside expanded scripts).
+#
+# Return contract:
+#   $null  -> DO NOT EXPAND. Feature OFF (gate $null) OR path TRUSTED (D9). The
+#             calling SITE then emits today's path entry itself, so OFF and
+#             trusted are indistinguishable to the sites (one code path, no drift).
+#   array  -> parser-level entries. Kinds:
+#     STATEMENT      OriginScript=<basename>, LineNumber=<int>, DisplayText=
+#                    '<script:b> <stmt>'. NO SkipRewalk (plain statements stay
+#                    re-walkable so nested wrappers inside scripts keep unwrapping).
+#     NESTED-WRAPPER SkipRewalk=$true (a 'pwsh -File z' statement kept as an entry;
+#                    re-walking it would re-enter the engine for z).
+#     FAILURE        AtomicReason=<reason>, DrilldownMarker=$true, SkipRewalk=$true.
+#                    SITE A additionally sets IsTerminal=$true.
+#
+# The ORDER of the checks below IS the spec (design doc 6.2): gate -> trust ->
+# resolve -> exists -> loop -> cap -> size -> claim+read -> empty -> emit.
+# =============================================================================
+
+# Build a STATEMENT entry: a plain script statement, re-walkable (NO SkipRewalk),
+# carrying origin metadata for the Classifier's reason formatting and the LLM
+# scope filter. LineNumber 0 = unavailable (regex-fallback path) => the '(line N)'
+# suffix is omitted downstream.
+function New-DrilldownStatementEntry {
+    param(
+        [string]$Text,
+        [string]$Domain,
+        [bool]$IsPipeline,
+        [string]$WrapperText,
+        [int]$LineNumber,
+        [string]$OriginScript
+    )
+    $e = [PSCustomObject]@{
+        CommandText   = $Text
+        Domain        = $Domain
+        IsPipeline    = $IsPipeline
+        ParentCommand = $WrapperText
+        OriginScript  = $OriginScript
+        DisplayText   = "<script:$OriginScript> $Text"
+    }
+    if ($LineNumber) { $e | Add-Member -NotePropertyName LineNumber -NotePropertyValue $LineNumber }
+    return $e
+}
+
+# Build a NESTED-WRAPPER entry: a 'pwsh -File z' statement kept as an [N] line.
+# SkipRewalk=$true prevents the walker from re-entering the engine for z (the
+# engine already expanded it). Resolves read_only via the pwsh wrapper pattern.
+function New-DrilldownNestedWrapperEntry {
+    param([string]$Text, [string]$WrapperText)
+    return [PSCustomObject]@{
+        CommandText   = $Text
+        Domain        = 'powershell'
+        IsPipeline    = $false
+        ParentCommand = $WrapperText
+        SkipRewalk    = $true
+    }
+}
+
+# Build a FAILURE entry: a pre-computed fail-closed reason (one of the six causes).
+# AtomicReason is honored verbatim by STEP 4e; DrilldownMarker makes it a KNOWN
+# blocker (MatchedPattern='script-drilldown' stamped in 4e) so the AST-arbiter gate
+# stays closed. SkipRewalk=$true prevents engine re-entry on the invocation text.
+function New-DrilldownFailureEntry {
+    param([string]$Text, [string]$WrapperText, [string]$Reason)
+    return [PSCustomObject]@{
+        CommandText     = $Text
+        Domain          = 'powershell'
+        IsPipeline      = $false
+        ParentCommand   = $WrapperText
+        AtomicReason    = $Reason
+        DrilldownMarker = $true
+        SkipRewalk      = $true
+    }
+}
+
+function Expand-ScriptFile {
+    param(
+        [string]$ScriptPath,     # path AS WRITTEN in the command/statement
+        [string]$WrapperText     # the invoking text (wrapper line or statement), for ParentCommand
+    )
+
+    # -- 0. GATE (defensive; sites check first) --
+    $gate = $script:ScriptDrilldown
+    if (-not $gate) { return $null }
+
+    # -- 1. TRUST (D9): trusted path is NEVER read; return $null so the site
+    #      emits today's path entry (trusted_program allow). Same return as OFF.
+    $hit = Test-TrustedProgram -Token $ScriptPath -Config $gate.Config
+    if ($hit) { return $null }
+
+    # -- 2. RESOLVE: anchor relative paths to $Config._cwd, unify separators,
+    #      strip \\?\, collapse '..'. Do NOT use bare GetFullPath (it anchors to
+    #      the PROCESS cwd and diverges under TestRunner -Cwd).
+    $full = ConvertTo-CanonicalWritePath -TargetPath $ScriptPath -Config $gate.Config
+
+    # -- 3. EXISTS: an unread file consumes no chain slot (NOT inserted into HT).
+    if (-not $full -or -not (Test-Path -LiteralPath $full -PathType Leaf)) {
+        return @(New-DrilldownFailureEntry -Text $ScriptPath -WrapperText $WrapperText `
+            -Reason "script file not found: $ScriptPath (resolved to $full)")
+    }
+
+    # -- 4. LOOP: same hit covers true recursion a->b->a AND double invocation a;a.
+    $key = (ConvertTo-CanonicalWritePath -TargetPath $full -Config $gate.Config).ToLowerInvariant()
+    if ($script:DrilldownVisited.ContainsKey($key)) {
+        return @(New-DrilldownFailureEntry -Text $ScriptPath -WrapperText $WrapperText `
+            -Reason "recursive script invocation detected: $ScriptPath")
+    }
+
+    # -- 5. CAP: at most MaxChainedFiles file reads per decision (D11/D12).
+    if ($script:DrilldownVisited.Count -ge $gate.MaxChainedFiles) {
+        return @(New-DrilldownFailureEntry -Text $ScriptPath -WrapperText $WrapperText `
+            -Reason "max chained files exceeded ($($gate.MaxChainedFiles)): $ScriptPath")
+    }
+
+    # -- 6. SIZE: refuse to read a file over the byte cap (fail-closed).
+    $len = (Get-Item -LiteralPath $full).Length
+    if ($len -gt $gate.MaxFileBytes) {
+        return @(New-DrilldownFailureEntry -Text $ScriptPath -WrapperText $WrapperText `
+            -Reason "script too large to inspect ($len > $($gate.MaxFileBytes)): $ScriptPath")
+    }
+
+    # -- 7. CLAIM + READ: insert into HT (after loop/cap/size pass), then read.
+    #      ReadAllText (NOT Get-Content): BOM-sniffing + UTF-8 default, so a
+    #      BOM-less UTF-8 script does not mojibake under powershell.exe 5.1.
+    $script:DrilldownVisited[$key] = $true
+    $content = [System.IO.File]::ReadAllText($full)
+    # DrilldownEnabled=$false is LOAD-BEARING (spec 6.5): the engine's OWN content
+    # walk must let the walker COLLAPSE any nested 'pwsh -File z' to the bare path
+    # z WITHOUT expanding it. Step 9b is the single, intended expansion point for
+    # those collapsed paths (RUL-1). If we left drilldown ON here, the walker's own
+    # SITE A would expand z and claim its HT key first, so 9b's re-expansion hits
+    # the loop-check and mints a spurious 'recursive' FAILURE (SD-Allow-NestedFile).
+    $stmts = @(Get-PowerShellCommands -Command $content -DrilldownEnabled $false)   # existing walker (F3/F4)
+
+    # -- 8. EMPTY / UNPARSABLE: zero commands -> recover the raw top-level
+    #      statement texts; still zero -> fail-closed ask. Two distinct shapes:
+    #      (a) AST PARSE SUCCEEDED but yielded no CommandAst — the content is
+    #          pure expressions (comments, assignments, .NET static calls like
+    #          [Foo]::Bar()). Split-Commands MANGLES this (it reads ':' inside
+    #          interpolation and swallows comments into one fragment), so emit
+    #          each raw statement text as a plain entry instead: 4e classifies
+    #          it (unknown => RUL-3 'script x contains unknown command: ...').
+    #      (b) AST PARSE FAILED — fall back to the regex splitter (legacy).
+    #      Fallback statements carry NO LineNumber, so their reasons omit the
+    #      '(line N)' suffix.
+    if ($stmts.Count -eq 0) {
+        $rawStmts = @()
+        $astType8 = 'System.Management.Automation.Language.Parser' -as [type]
+        if ($astType8) {
+            $t8 = $null; $e8 = $null
+            try { $ast8 = $astType8::ParseInput($content, [ref]$t8, [ref]$e8) } catch { $ast8 = $null }
+            if ($ast8 -and (-not $e8 -or $e8.Count -eq 0) -and $ast8.EndBlock) {
+                foreach ($st in $ast8.EndBlock.Statements) {
+                    $txt = "$($st.Extent.Text)".Trim()
+                    if ($txt) { $rawStmts += [PSCustomObject]@{ CommandText = $txt; Domain = 'powershell' } }
+                }
+            }
+        }
+        if ($rawStmts.Count -eq 0) {
+            $stmts = @(Split-Commands -Command $content -Domain 'powershell')
+        }
+        else {
+            $stmts = $rawStmts
+        }
+    }
+    if ($stmts.Count -eq 0) {
+        return @(New-DrilldownFailureEntry -Text $ScriptPath -WrapperText $WrapperText `
+            -Reason "script contains no classifiable statements (fail-closed): $ScriptPath")
+    }
+
+    # -- 9. EMIT: per statement, recurse on invocation-shaped text, else emit a
+    #      plain STATEMENT entry with origin metadata.
+    $basename = [System.IO.Path]::GetFileName($ScriptPath)
+    $out = @()
+    foreach ($s in $stmts) {
+        $text = "$($s.CommandText)"
+        if (-not $text) { continue }
+        # Line number from the AST walker (F4); 0 on the regex-fallback path,
+        # which carries no LineNumber property => '(line N)' omitted downstream.
+        # IsPipeline is pre-computed into a local: passing [bool]$s.IsPipeline
+        # INLINE as a parameter argument hits a PS parsing quirk (binds a string);
+        # a variable binds cleanly.
+        $lineNum = 0
+        if ($s.PSObject.Properties['LineNumber']) { $lineNum = [int]$s.LineNumber }
+        $isPipe = $false
+        if ($s.PSObject.Properties['IsPipeline']) { $isPipe = [bool]$s.IsPipeline }
+
+        # a) FALLBACK-PATH RUNNER: only step-8 Split-Commands fallback statements
+        #    can carry wrapper text (on the AST path the walker already collapsed
+        #    every nested 'pwsh -File z' to the bare path, which 9b handles).
+        $inv = Find-ScriptRunnerInvocation -SegmentText $text
+        if ($inv) {
+            $sub = Expand-ScriptFile -ScriptPath $inv.ScriptPath -WrapperText $text
+            if (@($sub | Where-Object { $_.PSObject.Properties['OriginScript'] }).Count -gt 0) {
+                # SUCCEEDED: emit a NESTED-WRAPPER entry (resolves read_only via the
+                # pwsh pattern, a harmless [N] line) + all sub entries.
+                $out += New-DrilldownNestedWrapperEntry -Text $text -WrapperText $WrapperText
+                foreach ($se in $sub) { $out += $se }
+            }
+            else {
+                # FAILED: emit a FAILURE entry = the statement text + sub's reason.
+                # @() wrap is LOAD-BEARING on PS 5.1: a single-entry engine return
+                # arrives as a bare PSCustomObject (not an array), and 5.1 has no
+                # .Count on non-collections, so '$sub.Count -gt 0' is false there
+                # (pwsh 7 added .Count to all objects, masking it). @() normalizes.
+                $reason = ''
+                if (@($sub).Count -gt 0 -and $sub[0].PSObject.Properties['AtomicReason']) {
+                    $reason = "$($sub[0].AtomicReason)"
+                }
+                $out += New-DrilldownFailureEntry -Text $text -WrapperText $WrapperText -Reason $reason
+            }
+            continue
+        }
+
+        # b) INVOCATION-SHAPED (D13 + RUL-1/RUL-2): a literal .ps1 path as the FIRST
+        #    token -- '. .\y.ps1', '& .\y.ps1 -Flag', bare '.\y.ps1 -Flag' (RUL-2),
+        #    AND the bare 'scripts\z.ps1' a nested 'pwsh -File scripts\z.ps1' collapses
+        #    to (F11/RUL-1). The unquoted arm excludes '$' and both quote chars so
+        #    variable paths stay fail-closed. This is THE recursion rule for AST-walked
+        #    statements. (PS single-quote string: each literal ' is written as ''.)
+        if ($text -match '^\s*([.&]\s*)?(?:"([^"]+\.ps1)"|''([^'']+\.ps1)''|([^\s$''"]+\.ps1))(\s|$)') {
+            $path = if ($Matches[2]) { $Matches[2] } elseif ($Matches[3]) { $Matches[3] } else { $Matches[4] }
+            if ($path) {
+                $sub = Expand-ScriptFile -ScriptPath $path -WrapperText $text
+                if ($null -eq $sub) {
+                    # TRUSTED (or feature off mid-tree): KEEP the statement as a plain
+                    # entry with Domain FORCED to 'powershell' (F12: the walker labels
+                    # '. x.ps1'/bare paths 'linux', which would miss the Resolver's
+                    # dot-strip + Test-TrustedProgram and wrongly ask). NO SkipRewalk.
+                    $out += New-DrilldownStatementEntry -Text $text -Domain 'powershell' `
+                        -IsPipeline $false -WrapperText $WrapperText -LineNumber $lineNum `
+                        -OriginScript $basename
+                }
+                elseif (@($sub | Where-Object { $_.PSObject.Properties['OriginScript'] }).Count -gt 0) {
+                    # SUCCEEDED: emit the sub entries ONLY (the invocation statement is
+                    # REPLACED, not kept -- if kept it would resolve unknown and always
+                    # ask; y's statements fully represent it).
+                    foreach ($se in $sub) { $out += $se }
+                }
+                else {
+                    # FAILED: emit a FAILURE entry = the statement text + sub's reason.
+                    # @() wrap is LOAD-BEARING on PS 5.1 (see case-a above): a
+                    # single-entry return has no .Count there, so the guard must
+                    # normalize through @() or the reason is silently dropped.
+                    $reason = ''
+                    if (@($sub).Count -gt 0 -and $sub[0].PSObject.Properties['AtomicReason']) {
+                        $reason = "$($sub[0].AtomicReason)"
+                    }
+                    $out += New-DrilldownFailureEntry -Text $text -WrapperText $WrapperText -Reason $reason
+                }
+                continue
+            }
+        }
+
+        # c) PLAIN: emit a STATEMENT entry (NO SkipRewalk -- the engine's own walk
+        #    already unwrapped any nested wrappers, so the re-walk is a harmless
+        #    same-text skip + attribution; wrapper-shaped texts never reach here).
+        $out += New-DrilldownStatementEntry -Text $text -Domain "$($s.Domain)" `
+            -IsPipeline $isPipe -WrapperText $WrapperText `
+            -LineNumber $lineNum -OriginScript $basename
+    }
+    return $out
+}
+
+# =============================================================================
 # Find-NestedCommands
 #
 # For commands that wrap other commands (pwsh -Command, ssh, docker exec,
@@ -708,9 +1060,42 @@ function Find-NestedCommands {
     if ($trimmed -match '(?i)^(?:\.?\\)?(?:pwsh|powershell)(?:\.exe)?\s+.*?-File\s+(?:"([^"]+)"|''([^'']+)''|(\S+))') {
         $filePath = if ($Matches[1]) { $Matches[1] } elseif ($Matches[2]) { $Matches[2] } else { $Matches[3] }
         if ($filePath) {
-            # Route as PowerShell domain — the path is a PowerShell script,
-            # and the Resolver's full-path stripping + Test-TrustedProgram
-            # will handle it.
+            # Script drilldown (2026-09-20): when the gate is armed, open the script
+            # and emit its statements as-if-typed. The dispatcher makes the gate/runner
+            # decision; we use the regex-extracted $filePath (SITE B's own path source).
+            # $null (feature OFF or path TRUSTED) => today's path entry, byte-identical.
+            # A successful expansion emits a wrapper entry + statements (all with
+            # ParentCommand=$trimmed); the segment itself is dropped by the existing
+            # parentTexts filter in COMBINE. A failure emits the engine's FAILURE entry
+            # (CommandText=script path, ParentCommand=$trimmed).
+            $inv = Find-ScriptRunnerInvocation -SegmentText $trimmed
+            if ($inv) {
+                $expanded = Expand-ScriptFile -ScriptPath $filePath -WrapperText $trimmed
+                if ($null -ne $expanded) {
+                    if (@($expanded | Where-Object { $_.PSObject.Properties['OriginScript'] }).Count -gt 0) {
+                        # SUCCEEDED: wrapper entry [1] + statements [2..n]. The wrapper
+                        # carries the full 'pwsh -File ...' text (resolves read_only via
+                        # the pwsh pattern, a harmless [N] line). No IsTerminal here --
+                        # that is SITE A's Get-AstCommands suppressOuter mechanism.
+                        $nested += [PSCustomObject]@{
+                            CommandText   = $trimmed
+                            Domain        = 'powershell'
+                            IsPipeline    = $false
+                            ParentCommand = $trimmed
+                        }
+                        foreach ($e in $expanded) { $nested += $e }
+                    }
+                    else {
+                        # FAILED: the engine's single FAILURE entry (ParentCommand is
+                        # already $trimmed from WrapperText).
+                        $nested += $expanded[0]
+                    }
+                    return $nested
+                }
+            }
+            # OFF / trusted: today's path entry. Route as PowerShell domain — the path
+            # is a PowerShell script, and the Resolver's full-path stripping +
+            # Test-TrustedProgram will handle it.
             $nested += [PSCustomObject]@{
                 CommandText   = $filePath
                 Domain        = 'powershell'
@@ -1549,7 +1934,8 @@ function Test-RedirectionTarget {
 
 function Get-PowerShellCommands {
     param(
-        [string]$Command
+        [string]$Command,
+        [bool]$DrilldownEnabled = $true
     )
 
     # -------------------------------------------------
@@ -1579,8 +1965,12 @@ function Get-PowerShellCommands {
         return @()
     }
 
-    # Delegate to the recursive AST walker
-    return Get-AstCommands -Ast $ast -ParentCommand $null
+    # Delegate to the recursive AST walker. $DrilldownEnabled gates the walker's
+    # OWN script-drilldown expansion (SITE A/B): the engine's content walk passes
+    # $false so a nested 'pwsh -File z' COLLAPSES to its bare path (F11) for the
+    # engine's step 9b to expand — otherwise SITE A would double-expand it and
+    # claim the HT key, making 9b's re-entry hit the loop-check spuriously.
+    return Get-AstCommands -Ast $ast -ParentCommand $null -DrilldownEnabled $DrilldownEnabled
 }
 
 # =============================================================================
@@ -1600,7 +1990,8 @@ function Get-PowerShellCommands {
 function Get-AstCommands {
     param(
         $Ast,
-        [string]$ParentCommand
+        [string]$ParentCommand,
+        [bool]$DrilldownEnabled = $true
     )
 
     if (-not $Ast) {
@@ -1620,19 +2011,39 @@ function Get-AstCommands {
             [string]$CmdText,
             [string]$Domain,
             [bool]$IsPipeline,
-            [string]$Parent
+            [string]$Parent,
+            [int]$LineNumber = 0,
+            [string]$OriginScript = '',
+            [string]$DisplayText = '',
+            [string]$AtomicReason = '',
+            [bool]$DrilldownMarker = $false
         )
 
         if (-not $CmdText) { return }
         $key = "$($CmdText.Trim())<<|>>$Parent"
         if (-not $SeenMap.ContainsKey($key)) {
             $SeenMap[$key] = $true
-            $null = $ResultsList.Add([PSCustomObject]@{
+            $entry = [PSCustomObject]@{
                 CommandText   = $CmdText.Trim()
                 Domain        = $Domain
                 IsPipeline    = $IsPipeline
                 ParentCommand = $Parent
-            })
+            }
+            # Additive origin metadata (script drilldown, 2026-09-20): stored only
+            # when present so every pre-existing entry stays byte-identical.
+            if ($LineNumber) { $entry | Add-Member -NotePropertyName LineNumber -NotePropertyValue $LineNumber }
+            if ($OriginScript) { $entry | Add-Member -NotePropertyName OriginScript -NotePropertyValue $OriginScript }
+            # DisplayText (2026-09-20, spec 8.5): a STATEMENT entry re-added through
+            # the wrapper loop must keep its '<script:basename> <stmt>' form so STEP 4e
+            # copies it onto the SubResult and the LLM prompt + $log.sent show the origin.
+            if ($DisplayText) { $entry | Add-Member -NotePropertyName DisplayText -NotePropertyValue $DisplayText }
+            # Fail-closed reason (6.4): a drilldown FAILURE entry re-added through
+            # the wrapper loop must keep its AtomicReason + DrilldownMarker, else
+            # STEP 4e sees a plain unknown path and the 'script file not found' /
+            # 'recursive script invocation' reasons are lost.
+            if ($AtomicReason) { $entry | Add-Member -NotePropertyName AtomicReason -NotePropertyValue $AtomicReason }
+            if ($DrilldownMarker) { $entry | Add-Member -NotePropertyName DrilldownMarker -NotePropertyValue $true }
+            $null = $ResultsList.Add($entry)
         }
     }
 
@@ -1701,37 +2112,71 @@ function Get-AstCommands {
             $wrapperResults = Get-AstWrapperInnerCommands `
                 -CommandAst $cmd `
                 -CommandText $commandText `
-                -CommandName $commandName
+                -CommandName $commandName `
+                -DrilldownEnabled $DrilldownEnabled
 
             foreach ($wr in $wrapperResults) {
                 if ($wr.IsTerminal) { $suppressOuter = $true }
                 $innerCmd = $wr.CommandText
                 $innerDom = $wr.Domain
+                # Additive origin metadata from the wrapper result (script drilldown,
+                # 2026-09-20): a STATEMENT entry carries OriginScript/LineNumber; a
+                # pseudo-wrapper / NESTED-WRAPPER / FAILURE entry carries SkipRewalk.
+                # Absent on every pre-existing (non-drilldown) wrapper result.
+                $wrLine = 0
+                if ($wr.PSObject.Properties['LineNumber']) { $wrLine = [int]$wr.LineNumber }
+                $wrOrigin = ''
+                if ($wr.PSObject.Properties['OriginScript']) { $wrOrigin = "$($wr.OriginScript)" }
+                $wrReason = ''
+                if ($wr.PSObject.Properties['AtomicReason']) { $wrReason = "$($wr.AtomicReason)" }
+                $wrMarker = [bool]($wr.PSObject.Properties['DrilldownMarker'])
+                $wrDisplay = ''
+                if ($wr.PSObject.Properties['DisplayText']) { $wrDisplay = "$($wr.DisplayText)" }
 
-                # Add the inner command itself
+                # Add the inner command itself (preserving origin metadata so STEP 4e
+                # can format script-origin reasons and the LLM scope filter sees it;
+                # preserving DisplayText so the LLM prompt + $log.sent show the origin;
+                # preserving AtomicReason/DrilldownMarker so a drilldown FAILURE entry
+                # keeps its fail-closed reason through the AST path).
                 AddResult -ResultsList $results -SeenMap $seenKeys `
                     -CmdText $innerCmd -Domain $innerDom `
-                    -IsPipeline $false -Parent $commandText
+                    -IsPipeline $false -Parent $commandText `
+                    -LineNumber $wrLine -OriginScript $wrOrigin -DisplayText $wrDisplay `
+                    -AtomicReason $wrReason -DrilldownMarker $wrMarker
 
-                # Recurse into the inner command if it is PowerShell
-                if ($innerDom -eq 'powershell') {
-                    $innerAstCmds = Get-PowerShellCommands -Command $innerCmd
-                    foreach ($iac in $innerAstCmds) {
-                        if ($iac.CommandText -ne $innerCmd) {
-                            AddResult -ResultsList $results -SeenMap $seenKeys `
-                                -CmdText $iac.CommandText -Domain $iac.Domain `
-                                -IsPipeline $iac.IsPipeline -Parent $innerCmd
+                # Recurse into the inner command. SkipRewalk (script drilldown)
+                # suppresses BOTH branches for engine entries: re-walking a
+                # wrapper-shaped text (pseudo-wrapper / NESTED-WRAPPER / FAILURE)
+                # would re-enter Expand-ScriptFile and mint spurious 'recursive'
+                # entries via the HT loop-check. Plain STATEMENT entries keep the
+                # re-walk (harmless same-text skip; lets nested wrappers inside a
+                # script still unwrap).
+                $skipRewalk = [bool]($wr.PSObject.Properties['SkipRewalk'])
+                if (-not $skipRewalk) {
+                    if ($innerDom -eq 'powershell') {
+                        $innerAstCmds = Get-PowerShellCommands -Command $innerCmd
+                        foreach ($iac in $innerAstCmds) {
+                            if ($iac.CommandText -ne $innerCmd) {
+                                # Origin attribution (8.2.3): when the SOURCE entry
+                                # carries OriginScript, pass it onto the re-walk
+                                # children so an inner command extracted from a script's
+                                # wrapper statement keeps its script origin.
+                                AddResult -ResultsList $results -SeenMap $seenKeys `
+                                    -CmdText $iac.CommandText -Domain $iac.Domain `
+                                    -IsPipeline $iac.IsPipeline -Parent $innerCmd `
+                                    -OriginScript $wrOrigin
+                            }
                         }
                     }
-                }
-                else {
-                    # Non-PowerShell domain: use Split-Commands for further decomposition
-                    $splitInner = Split-Commands -Command $innerCmd -Domain $innerDom
-                    foreach ($si in $splitInner) {
-                        if ($si.CommandText -ne $innerCmd) {
-                            AddResult -ResultsList $results -SeenMap $seenKeys `
-                                -CmdText $si.CommandText -Domain $si.Domain `
-                                -IsPipeline $si.IsPipeline -Parent $innerCmd
+                    else {
+                        # Non-PowerShell domain: use Split-Commands for further decomposition
+                        $splitInner = Split-Commands -Command $innerCmd -Domain $innerDom
+                        foreach ($si in $splitInner) {
+                            if ($si.CommandText -ne $innerCmd) {
+                                AddResult -ResultsList $results -SeenMap $seenKeys `
+                                    -CmdText $si.CommandText -Domain $si.Domain `
+                                    -IsPipeline $si.IsPipeline -Parent $innerCmd
+                            }
                         }
                     }
                 }
@@ -1743,7 +2188,8 @@ function Get-AstCommands {
         if (-not $suppressOuter) {
             AddResult -ResultsList $results -SeenMap $seenKeys `
                 -CmdText $commandText -Domain $domain `
-                -IsPipeline $isPipeline -Parent $ParentCommand
+                -IsPipeline $isPipeline -Parent $ParentCommand `
+                -LineNumber $cmd.Extent.StartLineNumber
         }
     }
 
@@ -1756,6 +2202,14 @@ function Get-AstCommands {
         $true
     )
     foreach ($sb in $scriptBlocks) {
+        # Skip the ROOT scriptblock: when Get-AstCommands is entered with a
+        # ScriptBlockAst (the normal ParseInput shape), FindAll returns that same
+        # root node, and recursing into its EndBlock re-walks EVERY command already
+        # processed by section 2 above. Pre-drilldown the duplicates were invisible
+        # (identical dedup keys); with script drilldown the second walk re-enters
+        # Expand-ScriptFile, hits the visited-HT loop-check, and mints a spurious
+        # 'recursive' FAILURE entry whose key differs from the successful walk's.
+        if ($sb -eq $Ast) { continue }
         if ($sb.EndBlock) {
             $innerResults = Get-AstCommands -Ast $sb.EndBlock -ParentCommand $ParentCommand
             foreach ($ir in $innerResults) {
@@ -1858,7 +2312,8 @@ function Get-AstWrapperInnerCommands {
     param(
         $CommandAst,
         [string]$CommandText,
-        [string]$CommandName
+        [string]$CommandName,
+        [bool]$DrilldownEnabled = $true
     )
 
     $results = New-Object System.Collections.ArrayList
@@ -1912,11 +2367,60 @@ function Get-AstWrapperInnerCommands {
                     $filePath = $nextArg.Extent.Text
                 }
                 if ($filePath) {
-                    # IsTerminal marks a -File extraction: the script path IS the
-                    # command (powershell.exe -File consumes everything after it as
-                    # $args). The caller uses this to suppress the outer 'pwsh -File
-                    # ...' wrapper entry so a standalone trusted-script run counts as
-                    # ONE sub-command (not two) and stays below the LLM scope threshold.
+                    # Script drilldown (2026-09-20): when the gate is armed, open the
+                    # script and emit its statements as-if-typed. The dispatcher makes
+                    # the gate/runner decision; we OVERRIDE ScriptPath with the parsed
+                    # element value (handles quoted-with-spaces paths the regex's (\S+)
+                    # arm cannot). $null (feature OFF or path TRUSTED) => today's path
+                    # entry, byte-identical. A successful expansion emits a pseudo-wrapper
+                    # (IsTerminal, SkipRewalk) FIRST + the statements; a failure emits a
+                    # single FAILURE entry (IsTerminal) so the outer is suppressed and the
+                    # ask is one line.
+                    # $DrilldownEnabled gates this: the engine's OWN content walk passes
+                    # $false so a nested 'pwsh -File z' COLLAPSES to its bare path here
+                    # (F11) instead of being expanded — the engine's step 9b is the single
+                    # expansion point for statements it reads. Expanding here too would
+                    # double-expand + claim the HT key, making 9b's re-entry hit the
+                    # loop-check spuriously ('recursive' on a non-recursive chain).
+                    if ($DrilldownEnabled) {
+                    $inv = Find-ScriptRunnerInvocation -SegmentText $CommandText
+                    if ($inv) {
+                        $expanded = Expand-ScriptFile -ScriptPath $filePath -WrapperText $CommandText
+                        if ($null -ne $expanded) {
+                            if (@($expanded | Where-Object { $_.PSObject.Properties['OriginScript'] }).Count -gt 0) {
+                                # SUCCEEDED: pseudo-wrapper [1] + statements [2..n]. The
+                                # pseudo-wrapper carries the full 'pwsh -File ...' text so
+                                # it renders as a harmless read_only [N] line; IsTerminal
+                                # suppresses the real outer entry (existing mechanism).
+                                $null = $results.Add([PSCustomObject]@{
+                                    CommandText = $CommandText
+                                    Domain      = 'powershell'
+                                    IsPipeline  = $false
+                                    IsTerminal  = $true
+                                    SkipRewalk  = $true
+                                })
+                                foreach ($e in $expanded) { $null = $results.Add($e) }
+                            }
+                            else {
+                                # FAILED: the engine returned a single FAILURE entry whose
+                                # CommandText is the script PATH (6.4). Add IsTerminal so
+                                # the outer 'pwsh -File ...' is suppressed (today's shape:
+                                # one path entry, now carrying the fail-closed reason).
+                                $failEntry = $expanded[0]
+                                $failEntry | Add-Member -NotePropertyName IsTerminal -NotePropertyValue $true -Force
+                                $null = $results.Add($failEntry)
+                            }
+                            return $results.ToArray()
+                        }
+                    }
+                    }   # end if ($DrilldownEnabled)
+                    # OFF / trusted: today's path entry. IsTerminal marks a -File
+                    # extraction: the script path IS the command (powershell.exe -File
+                    # consumes everything after it as $args). The caller uses this to
+                    # suppress the outer 'pwsh -File ...' wrapper entry so a standalone
+                    # trusted-script run counts as ONE sub-command (not two) and stays
+                    # below the LLM scope threshold. Reached when drilldown is disabled
+                    # (engine content walk), the gate is off, or the path is trusted.
                     $null = $results.Add([PSCustomObject]@{
                         CommandText = $filePath
                         Domain      = 'powershell'

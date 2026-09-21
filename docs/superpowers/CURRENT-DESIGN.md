@@ -36,6 +36,11 @@ Incoming tool call (JSON on stdin)
   │     ├─ 4b decompose into sub-commands (AST for PowerShell, regex otherwise;
   │     │    wrappers unwrapped recursively: ssh, pwsh -Command, Invoke-Command,
   │     │    docker exec, bash -c, sudo, ...)
+  │     │    └─ script drilldown (script_drilldown gate armed): a 'pwsh -File
+  │     │       <script>.ps1' wrapper OPENS the file, splits it into statements via
+  │     │       the same walker, and classifies each as if typed on the command line
+  │     │       (recursion + loop/cap/size guards; fail-closed ask on any failure).
+  │     │       Numbered [N] sub-commands are prefixed <script:basename> in log+LLM.
   │     ├─ 4c redirect analysis (Test-RedirectionTarget → Resolve-PathPolicy;
   │     │    a redirect target is a pseudo sub-result, MatchedPattern=redirection-target)
   │     ├─ 4d per-sub-command resolution (Resolver, §5) → sub-results WITH Tier
@@ -68,11 +73,11 @@ edits with `Load-Config` immediately).
 |---|---|
 | `Hook.ps1` | Entry: stdin JSON → detect IDE → load config → Invoke-Classify → Invoke-LlmReview (STEP 8b, when enabled) → log → stdout. Conditional hard cap: `timeout_ms + 2000` when LLM enabled, else 3000ms (500ms soft warning). Config path override: `PRETOOLHOOK_CONFIG_PATH` env (production default = repo config.json). |
 | `HookAdapter.ps1` | IDE detection, command/path extraction (dot-path walker `Get-InputFieldValues` + `Resolve-FieldPathLeaves` with `[*]` array enumeration, leaves streamed), output shaping per IDE, `ask`→`deny` mapping for Codex. |
-| `ConfigLoader.ps1` | Load + validate + compile config: pattern arrays → regex (auto-anchor `^`; glob `*`→`.*` only after a non-special char), `system_paths`/`editable_paths` → one anchored alternation each, CWD capture (`_cwd`, `_cwdNorm`), per-domain `_parameterCommandLookup`, `trusted_programs`, `safe_expressions` allowlists, `llm_second_opinion` compiled block (optional; absent ⇒ `$null`). Legacy-key guards throw fail-closed (e.g. old `modifying_strictness` top-level key). |
-| `Parser.ps1` | Domain detection; decomposition (AST + regex); wrapper/nested extraction (`Find-NestedCommands` with value-taking-flag table); subshell splitting; `Test-RedirectionTarget`; `Resolve-PathPolicy`; `Test-EditableOrCwd`; canonicalization (`ConvertTo-CanonicalWritePath`: relative→CWD anchor, `..` collapse, `\\?\` strip, separator unify, `~` home). |
+| `ConfigLoader.ps1` | Load + validate + compile config: pattern arrays → regex (auto-anchor `^`; glob `*`→`.*` only after a non-special char), `system_paths`/`editable_paths` → one anchored alternation each, CWD capture (`_cwd`, `_cwdNorm`), per-domain `_parameterCommandLookup`, `trusted_programs`, `safe_expressions` allowlists, `llm_second_opinion` compiled block (optional; absent ⇒ `$null`), `script_drilldown` compiled gate (absent/disabled ⇒ `$null`; publishes shared `$script:ScriptDrilldown`). Legacy-key guards throw fail-closed (e.g. old `modifying_strictness` top-level key). |
+| `Parser.ps1` | Domain detection; decomposition (AST + regex); wrapper/nested extraction (`Find-NestedCommands` with value-taking-flag table); subshell splitting; `Test-RedirectionTarget`; `Resolve-PathPolicy`; `Test-EditableOrCwd`; canonicalization (`ConvertTo-CanonicalWritePath`: relative→CWD anchor, `..` collapse, `\\?\` strip, separator unify, `~` home). Script drilldown engine: runner registry + dispatcher (`Find-ScriptRunnerInvocation`), `Expand-ScriptFile` (gate→trust→resolve→exists→loop→cap→size→claim+read→empty→emit; HT-backed idempotence via `$script:DrilldownVisited` + `Reset-ScriptDrilldownState`), AST walker `-File` sites (SITE A `Get-AstWrapperInnerCommands`, SITE B `Find-NestedCommands`) with a `-DrilldownEnabled` flag so the engine's own content walk collapses nested `-File` to bare paths for step 9b. |
 | `Resolver.ps1` | `Resolve-Command` per sub-command (step order in §5.1); `New-ResolutionResult` (Decision/Reason/MatchedPattern/Risk/Tier); `Get-EffectiveStrictness`; `Test-TrustedProgram` + `Test-StatementContainsModifying`; parameter_commands evaluator + the two parameter parsers (AST for PowerShell, shell tokenizer otherwise). |
-| `Classifier.ps1` | Pipeline orchestration; `Test-TrustedUntrusted`; AST-as-arbiter (`Invoke-PowerShellArbitration`, `Resolve-AsArbiter`, `Merge-WorstTier`); path branch (STEP 1.5); aggregation + reasons (pipeline chains). |
-| `LlmReview.ps1` | `Test-LlmReviewScope`, `Get-LlmReviewVerdict` (+`ConvertTo-LlmVerdict` layered parser), `Invoke-LlmReview` (scope→verdict→merge→log), `Test-GatedInvocationSafe` (stage-2 guard) + `Split-GuardTokens`. |
+| `Classifier.ps1` | Pipeline orchestration; `Test-TrustedUntrusted`; AST-as-arbiter (`Invoke-PowerShellArbitration`, `Resolve-AsArbiter`, `Merge-WorstTier`); path branch (STEP 1.5); aggregation + reasons (pipeline chains). Script drilldown: `Reset-ScriptDrilldownState` at STEP 4 entry; 4e stamps OriginScript/LineNumber/DisplayText onto SubResults + rewrites blocking-statement reasons to the `<script:b> contains …` template + `DrilldownMarker ⇒ MatchedPattern='script-drilldown'`; 4f prints pre-formatted script reasons verbatim. |
+| `LlmReview.ps1` | `Test-LlmReviewScope`, `Get-LlmReviewVerdict` (+`ConvertTo-LlmVerdict` layered parser), `Invoke-LlmReview` (scope→verdict→merge→log), `Test-GatedInvocationSafe` (stage-2 guard) + `Split-GuardTokens`. Script drilldown: `llm_scope='exclude'` drops script-origin entries from the count+sent list; `$subTexts` renders `DisplayText ?? Command` so the LLM prompt/log carry the `<script:basename>` prefix. |
 | `Logger.ps1` | Daily `yyyy-MM-dd.<ide>.log` (text) + `yyyy-MM-dd.<ide>.records.jsonl` (full raw input + structured fields incl. `llm`); `Format-LlmLogBlock` shared reconciliation formatter; per-IDE suffix (claude/copilot/codex). Log dir: `log_file_path` or `~/.pretoolhook/`. |
 | `TestRunner.ps1` | XML-driven runner (`-XmlPath`, `-Filter`, `-Strictness`, `-Cwd`, `-ConfigPath`). |
 | `Run-AllTests.ps1` | One-shot differential over every live suite (auto-discovers; KnownFails baselines; REGRESSION/OK/IMPROVED; `-Filter`, `-ShowOutput`). ASCII-only output (powershell.exe 5.1 mangles UTF-8 em-dashes into smart quotes). |
@@ -162,7 +167,15 @@ the mapping. A forced ask from the LLM feature maps the same way.
     }
   },
 
-  "llm_second_opinion": { /* §8.9 — optional block; absent = feature off, zero overhead */ }
+  "llm_second_opinion": { /* §8.9 — optional block; absent = feature off, zero overhead */ },
+
+  "script_drilldown": { /* script drilldown — ships DISABLED; absent OR enabled=false ⇒ byte-identical to before this feature (§1/4b) */
+    "enabled": false,          // bool, default false (master switch)
+    "runners": ["powershell"],  // array; implemented set = ['powershell']; empty array throws
+    "max_chained_files": 3,     // int >= 1, default 3 — max file reads per decision (D11/D12)
+    "max_file_bytes": 4096,     // int >= 1, default 4096 — refuse to read a larger file (fail-closed)
+    "llm_scope": "count"        // 'count' | 'exclude', default 'count'; 'exclude' hides script statements from the LLM
+  }
 }
 ```
 

@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SCRIPT-DRILLDOWN OFF-PARITY MATRIX (spec D2 / invariant I1).
+     IDENTICAL commands to test-cases.xml, but run against config.off.json
+     (the script_drilldown block is ABSENT). Every case must yield TODAY's
+     decision: the untrusted -File path classifies as `unknown command` => ask;
+     only trusted.ps1 allows (via trusted_programs basename matching, which
+     predates this feature).
+
+     Ground truth captured 2026-09-20 via debug/_probe_off.ps1 (Invoke-Classify
+     under config.off.json with -Cwd = fixture dir). This file must PASS both in
+     the RED phase (feature absent) and after implementation (feature present but
+     disabled => byte-identical behavior). -->
+<commands>
+  <category-group name="ScriptDrilldownOff">
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-ReadOnly" reason-contains="unknown command: scripts\readonly.ps1">
+      <description>pwsh -NoProfile -File scripts\readonly.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-Modifying" reason-contains="unknown command: scripts\modifying.ps1">
+      <description>pwsh -NoProfile -File scripts\modifying.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\modifying.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- The ONE case that already allows today: trusted_programs basename match.
+         Must stay allow with drilldown ON (D9 short-circuit) and OFF (today). -->
+    <test-case expected="allow" reason="OFF: trusted script allows via trusted_programs (predates feature)" category="SDO-Allow-Trusted" subresult-tier="trusted_program">
+      <description>pwsh -NoProfile -File scripts\trusted.ps1 - OFF parity (today: allow)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\trusted.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-NotFound" reason-contains="unknown command: scripts\no-such.ps1">
+      <description>pwsh -File scripts\no-such.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\no-such.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-TooLarge" reason-contains="unknown command: scripts\big.ps1">
+      <description>pwsh -File scripts\big.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\big.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-NoStatements" reason-contains="unknown command: scripts\assignments-only.ps1">
+      <description>pwsh -File scripts\assignments-only.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\assignments-only.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-Loop" reason-contains="unknown command: scripts\loop-a.ps1">
+      <description>pwsh -File scripts\loop-a.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\loop-a.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-LoopViaFile" reason-contains="unknown command: scripts\file-loop-a.ps1">
+      <description>pwsh -File scripts\file-loop-a.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\file-loop-a.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-Cap" reason-contains="unknown command: scripts\cap-a.ps1">
+      <description>pwsh -File scripts\cap-a.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\cap-a.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-Chain3" reason-contains="unknown command: scripts\chain-a.ps1">
+      <description>pwsh -File scripts\chain-a.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\chain-a.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-NestedFile" reason-contains="unknown command: scripts\calls-nested.ps1">
+      <description>pwsh -File scripts\calls-nested.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\calls-nested.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-TrustedDotSource" reason-contains="unknown command: scripts\dotsrc-trusted.ps1">
+      <description>pwsh -File scripts\dotsrc-trusted.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\dotsrc-trusted.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-NestedMissing" reason-contains="unknown command: scripts\calls-missing.ps1">
+      <description>pwsh -File scripts\calls-missing.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\calls-missing.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-FuncBody" reason-contains="unknown command: scripts\func-body.ps1">
+      <description>pwsh -File scripts\func-body.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\func-body.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-CommandInsideScript" reason-contains="unknown command: scripts\cmd-inside.ps1">
+      <description>pwsh -File scripts\cmd-inside.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\cmd-inside.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-DotWithArgs" reason-contains="unknown command: scripts\dot-with-args.ps1">
+      <description>pwsh -File scripts\dot-with-args.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\dot-with-args.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-BareCall" reason-contains="unknown command: scripts\bare-call.ps1">
+      <description>pwsh -File scripts\bare-call.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\bare-call.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-DoubleInvoke" reason-contains="unknown command: scripts\readonly.ps1">
+      <description>pwsh -File scripts\readonly.ps1; pwsh -File scripts\readonly.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\readonly.ps1; pwsh -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: compound with untrusted -File path asks today (worst case wins)" category="SDO-Compound-Cd" reason-contains="unknown command: scripts\readonly.ps1">
+      <description>cd c:\work; pwsh -NoProfile -File scripts\readonly.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[cd c:\work; pwsh -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-UntrustedUnknownStmt" reason-contains="unknown command: scripts\unknown-stmt.ps1">
+      <description>pwsh -File scripts\unknown-stmt.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\unknown-stmt.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today (forward slash)" category="SDO-Relative-ForwardSlash" reason-contains="unknown command: scripts/readonly.ps1">
+      <description>pwsh -File scripts/readonly.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts/readonly.ps1]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

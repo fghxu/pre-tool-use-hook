@@ -105,7 +105,14 @@ $extraSuites = @(
     @{ Name = 'trusted-programs-regex'; File = (Join-Path $repoRoot 'test\config\trusted-programs-regex\Run-Tests.ps1'); Args = @() },
     @{ Name = 'safe-expr-regex';        File = (Join-Path $repoRoot 'test\config\safe-expr-regex\Run-Tests.ps1'); Args = @() },
     @{ Name = 'editable-delete';        File = (Join-Path $repoRoot 'test\config\editable-delete\Run-Tests.ps1'); Args = @() },
-    @{ Name = 'editable-delete.llm';    File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\editable-delete\test-cases.llm.xml')) }
+    @{ Name = 'editable-delete.llm';    File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\editable-delete\test-cases.llm.xml')) },
+    # script_drilldown (2026-09-20): untrusted `pwsh -File <script>.ps1` is opened,
+    # split into statements, and classified as if typed on the command line.
+    # Self-contained runner (preflights + TestRunner under powershell.exe with
+    # Cwd=fixture dir); script-drilldown.llm is the llm_scope sub-suite run by the
+    # llm-review fixture runner (mock verdicts, no network).
+    @{ Name = 'script-drilldown';       File = (Join-Path $repoRoot 'test\config\script-drilldown\Run-Tests.ps1'); Args = @() },
+    @{ Name = 'script-drilldown.llm';   File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\script-drilldown\test-cases.llm.xml'), '-ConfigPath', (Join-Path $repoRoot 'test\config\script-drilldown\config.llm.json'), '-Cwd', (Join-Path $repoRoot 'test\config\script-drilldown')) }
 )
 if ($Filter) {
     $extraSuites = @($extraSuites | Where-Object { $_.Name -like "*$Filter*" })

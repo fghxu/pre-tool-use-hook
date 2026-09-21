@@ -192,6 +192,15 @@ function Test-LlmReviewScope {
     if ($ClassifyResult.SubResults) {
         $subs = @($ClassifyResult.SubResults | Where-Object { $_.MatchedPattern -ne 'redirection-target' })
     }
+    # script_drilldown llm_scope (2026-09-20, spec 8.5): 'exclude' drops every
+    # script-origin entry from BOTH the count and the sent list, so the LLM never
+    # sees expanded-script statements. 'count' (default) keeps them. No-op without
+    # the OriginScript property (feature OFF / non-drilldown commands).
+    $llmScope = 'count'
+    if ($llm.PSObject.Properties['LlmScope']) { $llmScope = "$($llm.LlmScope)" }
+    if ($llmScope -eq 'exclude') {
+        $subs = @($subs | Where-Object { -not ($_.PSObject.Properties['OriginScript']) })
+    }
     if ($subs.Count -eq 0) { $scope.Reason = 'no sub-commands (fast-path gate or path branch)'; return $scope }
     $scope.SubCommandCount = $subs.Count
     $scope.SubCommands = $subs
@@ -727,7 +736,12 @@ function Invoke-LlmReview {
     }
 
     # Numbered list for the prompt AND the index lookup (spec P2: same list).
-    $subTexts = @($scope.SubCommands | ForEach-Object { "$($_.Command)" })
+    # script_drilldown DisplayText (2026-09-20, spec 8.5): render the
+    # '<script:basename> <stmt>' form when present so the LLM prompt + $log.sent
+    # carry the origin prefix; fall back to Command for non-drilldown entries.
+    $subTexts = @($scope.SubCommands | ForEach-Object {
+        if ($_.PSObject.Properties['DisplayText']) { "$($_.DisplayText)" } else { "$($_.Command)" }
+    })
     $log.sent  = $subTexts
     $log.tiers = @($scope.SubCommands | ForEach-Object { "$($_.Tier)" })
     $log.local_decision = $ClassifyResult.Decision

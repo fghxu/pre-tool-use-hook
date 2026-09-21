@@ -542,6 +542,14 @@ function Invoke-Classify {
     # STEP 4: Classification engine
     # =========================================================================
 
+    # Script drilldown state reset (2026-09-20): clear the visited-file HT and
+    # refresh the gate's Cwd from $Config._cwd (TestRunner -Cwd rewrites it AFTER
+    # Load-Config). Called unconditionally at the top of STEP 4 — cheap, and it is
+    # what makes TestRunner cases independent (one process, many cases). Engine
+    # idempotence (§7) means any re-entry within this classify hits the loop-check
+    # and returns a FAILURE into a discarded list; the reset only runs ONCE here.
+    Reset-ScriptDrilldownState
+
     # -- 4a: Domain detection (content-based) --
     $domain = Get-CommandDomain -Command $command
 
@@ -757,9 +765,37 @@ function Invoke-Classify {
                 Risk           = 'unknown'
                 Tier           = 'unclassified'
             }
+            # Script drilldown FAILURE entry (2026-09-20, §8.3): stamp a KNOWN
+            # blocker pattern so the AST-arbiter gate stays closed for drilldown
+            # asks — the arbiter only re-parses the original command line and cannot
+            # see file contents, so letting it run would waste a parse and re-enter
+            # the engine (F6) before inevitably returning 'NO'. Decision is ask
+            # either way; this only keeps the reason truthful and the gate honest.
+            if ($sc.PSObject.Properties['DrilldownMarker']) {
+                $r.MatchedPattern = 'script-drilldown'
+            }
         }
         else {
             $r = Resolve-Command -Command $sc.CommandText -Domain $sc.Domain -Config $Config -IsRemote $isRemote
+
+            # Script drilldown origin stamping (2026-09-20, §8.3): a STATEMENT entry
+            # carries OriginScript/LineNumber/DisplayText from the engine. Copy them
+            # onto the SubResult so 4f can format script-origin reasons and the LLM
+            # scope filter sees the origin. For a BLOCKING statement (modifying OR
+            # unknown) rewrite Reason to the §6-2 template; allow statements keep
+            # their normal reason (they never reach 4f).
+            if ($sc.PSObject.Properties['OriginScript']) {
+                $r | Add-Member -Force NoteProperty 'OriginScript' "$($sc.OriginScript)"
+                if ($sc.PSObject.Properties['LineNumber']) { $r | Add-Member -Force NoteProperty 'LineNumber' [int]$sc.LineNumber }
+                if ($sc.PSObject.Properties['DisplayText']) { $r | Add-Member -Force NoteProperty 'DisplayText' "$($sc.DisplayText)" }
+                if ($r.Decision -eq 'ask') {
+                    $stmt = "$($sc.CommandText)"
+                    if ($stmt.Length -gt 80) { $stmt = $stmt.Substring(0, 80) + '...' }
+                    $kind = if ($r.MatchedPattern) { 'modifying command' } else { 'unknown command' }
+                    $line = if ($sc.PSObject.Properties['LineNumber']) { " (line $($sc.LineNumber))" } else { '' }
+                    $r.Reason = "script $($sc.OriginScript) contains ${kind}: ${stmt}${line}"
+                }
+            }
         }
 
         # R2 tier stamp (§4.3, merge-relevant): if this segment is an allow with a
@@ -884,7 +920,19 @@ function Invoke-Classify {
         # Build reason string listing ALL blocking commands
         $blockingReasons = [System.Collections.Generic.List[string]]::new()
         foreach ($bc in $blockingCommands) {
-            if ($bc.MatchedPattern -and $bc.Risk) {
+            # Script drilldown (2026-09-20, §8.4): two blocker shapes must print
+            # their pre-formatted Reason VERBATIM instead of the 'pattern (risk)'
+            # form — both carry a non-null MatchedPattern, so without this FIRST
+            # branch they would fall into the arm below and lose the reason text:
+            #   - a STATEMENT entry with OriginScript: 4e rewrote Reason to the §6-2
+            #     template ('script x.ps1 contains modifying command: Copy-Item (line 6)')
+            #   - a FAILURE entry (MatchedPattern='script-drilldown'): Reason is the
+            #     fail-closed AtomicReason ('script file not found: ...', 'recursive
+            #     script invocation detected', ...).
+            if (($bc.MatchedPattern -eq 'script-drilldown') -or ($bc.PSObject.Properties['OriginScript'] -and $bc.Reason)) {
+                $blockingReasons.Add("$($bc.Reason)")
+            }
+            elseif ($bc.MatchedPattern -and $bc.Risk) {
                 $blockingReasons.Add("$($bc.MatchedPattern) ($($bc.Risk))")
             }
             elseif ($bc.MatchedPattern) {

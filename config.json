@@ -50,6 +50,16 @@
     "sound_file": ""
   },
 
+  "_comment_script_drilldown_1": "Script drilldown (2026-09-20): when a command invokes a script via 'pwsh -File <script>.ps1', the hook opens the file, splits it into statements via the AST walker, and classifies each as if typed on the command line. Numbered [N] sub-commands are prefixed <script:basename> in the log + LLM prompt.",
+  "_comment_script_drilldown_2": "SHIPS DISABLED. Absent key OR enabled=false => behavior is byte-identical to before this feature (spec D2/I1). Fields: enabled (bool, default false) | runners (array; implemented set = ['powershell']; empty array throws) | max_chained_files (int >= 1, default 3) | max_file_bytes (int >= 1, default 4096) | llm_scope ('count'|'exclude', default 'count').",
+  "script_drilldown": {
+    "enabled": false,
+    "runners": ["powershell"],
+    "max_chained_files": 3,
+    "max_file_bytes": 4096,
+    "llm_scope": "count"
+  },
+
 
   "_comment_trusted_programs": "Programs trusted to run. Matched AFTER decomposition, against the program token of each decomposed sub-command (the & call-target / first token). A match grants 'allow' for that sub-command ONLY IF no modifying command also appears in its arguments or sibling statements (Option B: args are scanned; unknown args ignored). Entry forms: full path, partial path (path-suffix match; '/' and '\\' are equivalent), or bare name (basename match). Case-insensitive. Covers the & path / bare-path invocation forms; pwsh -File is NOT unwrapped (those invocations are already allowed by the pwsh read_only pattern). The entries below are the project's OWN dev/test scripts (tracked in the repo, used by the test suites); add any machine-specific programs in your private config.local.json (see _comment_local_override).",
   "trusted_programs": [

@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SCRIPT-DRILLDOWN SUITE (core matrix) - isolated fixture (test/config/script-drilldown/config.json).
+     Proves the script_drilldown feature: when the agent runs `pwsh -File <script>.ps1`,
+     the hook opens the file, splits it into statements via the existing AST walker, and
+     classifies each as if typed on the command line. Numbered [N] sub-commands are prefixed
+     <script:basename> in the log + LLM prompt. Gated by the script_drilldown config block;
+     absent/disabled => byte-identical to today (spec D2 / invariant I1).
+
+     Run via test/config/script-drilldown/Run-Tests.ps1, which invokes TestRunner with
+     -Cwd <fixtureDir> so relative script paths anchor to the fixture dir (F9).
+     NEVER the repo-root live config.json (CLAUDE.md rule).
+
+     TDD: this is the RED matrix. Before any src/ change every ON-case fails (no expansion
+     => untrusted -File path classifies as `unknown command` => ask), except SD-Allow-Trusted
+     which already allows today via trusted_programs basename matching. -->
+<commands>
+  <category-group name="ScriptDrilldown">
+
+    <!-- Core allow: a read-only script expands to read-only statements => allow.
+         RED today: `unknown command: scripts\readonly.ps1` => ask. -->
+    <test-case expected="allow" reason="read-only script expands to read-only statements" category="SD-Allow-ReadOnly">
+      <description>pwsh -NoProfile -File scripts\readonly.ps1 - Get-ChildItem + Write-Host, all read-only</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Modifying statement inside a script forces ask (RUL-3 wording). Copy-Item is at line 6. -->
+    <test-case expected="ask" reason="modifying Copy-Item inside script => ask with RUL-3 reason" category="SD-Ask-Modifying" reason-contains="script modifying.ps1 contains modifying command: Copy-Item">
+      <description>pwsh -NoProfile -File scripts\modifying.ps1 - read-only lines then Copy-Item (line 6)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\modifying.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- The wrapper line itself renders as a read_only [N] entry (mirrors live config L485). -->
+    <test-case expected="allow" reason="pwsh wrapper line classifies read_only" category="SD-WrapperEntry" subresult-tier="read_only">
+      <description>same command as SD-Allow-ReadOnly - the pwsh wrapper statement carries tier read_only</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- D9 short-circuit: trusted script is NEVER read; allowed via trusted_programs basename.
+         This case PASSES today (OFF parity) and must keep passing with drilldown ON. -->
+    <test-case expected="allow" reason="trusted script short-circuits before any file read" category="SD-Allow-Trusted" subresult-tier="trusted_program">
+      <description>pwsh -NoProfile -File scripts\trusted.ps1 - trusted via trusted_programs basename</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\trusted.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- File does not exist => fail-closed ask with the resolved-path reason. -->
+    <test-case expected="ask" reason="missing script file => fail-closed ask" category="SD-Ask-NotFound" reason-contains="script file not found: scripts\no-such.ps1">
+      <description>pwsh -File scripts\no-such.ps1 - no such file on disk</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\no-such.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Size cap: big.ps1 is 6806 bytes > 4096 => fail-closed ask. -->
+    <test-case expected="ask" reason="script exceeds max_file_bytes => fail-closed ask" category="SD-Ask-TooLarge" reason-contains="script too large to inspect (">
+      <description>pwsh -File scripts\big.ps1 - 6806 bytes, over the 4096 cap</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\big.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Whitespace-only script => zero classifiable statements => fail-closed ask. -->
+    <test-case expected="ask" reason="no classifiable statements => fail-closed ask" category="SD-Ask-NoStatements" reason-contains="script contains no classifiable statements (fail-closed)">
+      <description>pwsh -File scripts\assignments-only.ps1 - whitespace only, zero statements</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\assignments-only.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Dot-source loop (a -> b -> a) => recursive invocation ask. -->
+    <test-case expected="ask" reason="dot-source loop detected" category="SD-Ask-Loop" reason-contains="recursive script invocation detected">
+      <description>pwsh -File scripts\loop-a.ps1 - dot-sources loop-b which dot-sources loop-a</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\loop-a.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Loop via nested -File (walker collapses each to bare path => 9b recursion). -->
+    <test-case expected="ask" reason="nested -File loop detected" category="SD-Ask-LoopViaFile" reason-contains="recursive script invocation detected">
+      <description>pwsh -File scripts\file-loop-a.ps1 - nested -File a -> b -> a</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\file-loop-a.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Four-deep chain (a->b->c->d) hits the cap of 3 at d. -->
+    <test-case expected="ask" reason="chain exceeds max_chained_files => ask" category="SD-Ask-Cap" reason-contains="max chained files exceeded (3)">
+      <description>pwsh -File scripts\cap-a.ps1 - a->b->c->d, cap 3 hit at d</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\cap-a.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Three-deep chain (a->b->c) stays under the cap of 3 => allow. -->
+    <test-case expected="allow" reason="three-deep chain under cap, all read-only" category="SD-Allow-Chain3">
+      <description>pwsh -File scripts\chain-a.ps1 - a->b->c, all Write-Host</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\chain-a.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Nested -File target expands (RUL-1 / F11 collapsed bare path). Read-only => allow. -->
+    <test-case expected="allow" reason="nested -File target expanded, read-only" category="SD-Allow-NestedFile">
+      <description>pwsh -File scripts\calls-nested.ps1 - nested -File scripts\nested-target.ps1 (Get-Content)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\calls-nested.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- F12 pin: dot-sourced TRUSTED helper keeps the statement with Domain forced 'powershell'
+         so Test-TrustedProgram allows it (unforced, the walker's linux label would wrongly ask). -->
+    <test-case expected="allow" reason="trusted dot-source helper allowed via forced powershell domain" category="SD-Allow-TrustedDotSource" subresult-tier="trusted_program">
+      <description>pwsh -File scripts\dotsrc-trusted.ps1 - . scripts\trusted.ps1 (F12 forced-domain fix)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\dotsrc-trusted.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Nested -File to a MISSING script => fail-closed ask. -->
+    <test-case expected="ask" reason="nested -File target missing => fail-closed ask" category="SD-Ask-NestedMissing" reason-contains="script file not found">
+      <description>pwsh -File scripts\calls-missing.ps1 - nested -File scripts\no-such.ps1</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\calls-missing.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- R11: a modifying command hidden inside a function body is classified as-if-run. -->
+    <test-case expected="ask" reason="modifying Remove-Item in function body => ask" category="SD-Ask-FuncBody" reason-contains="script func-body.ps1 contains modifying command: Remove-Item">
+      <description>pwsh -File scripts\func-body.ps1 - function Clean { Remove-Item ... }; Clean</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\func-body.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- I9b / SkipRewalk scope: a modifying command behind a nested -Command wrapper INSIDE a
+         script must still be unwrapped and ask (plain statements stay re-walkable). -->
+    <test-case expected="ask" reason="modifying Remove-Item behind nested -Command inside script => ask" category="SD-Ask-CommandInsideScript" reason-contains="Remove-Item">
+      <description>pwsh -File scripts\cmd-inside.ps1 - pwsh -Command "Remove-Item C:\temp\x"</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\cmd-inside.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- D13 with args: & operator invoking a read-only target => allow. -->
+    <test-case expected="allow" reason="ampersand invocation with args expands, read-only" category="SD-Allow-DotWithArgs">
+      <description>pwsh -File scripts\dot-with-args.ps1 - ampersand scripts\target2.ps1 -Flag</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\dot-with-args.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- RUL-2: a bare literal .ps1 call (no ./& operator) is expanded too. -->
+    <test-case expected="allow" reason="bare literal .ps1 call expands, read-only" category="SD-Allow-BareCall">
+      <description>pwsh -File scripts\bare-call.ps1 - scripts\target2.ps1 -Flag (no operator)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\bare-call.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Double invocation of the same script in one command => recursive invocation ask. -->
+    <test-case expected="ask" reason="same script invoked twice => recursive ask" category="SD-Ask-DoubleInvoke" reason-contains="recursive script invocation detected">
+      <description>pwsh -File scripts\readonly.ps1; pwsh -File scripts\readonly.ps1</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\readonly.ps1; pwsh -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Compound (linux domain, SITE B): cd + a read-only script => allow. -->
+    <test-case expected="allow" reason="compound cd + read-only script => allow" category="SD-Compound-Cd">
+      <description>cd c:\work; pwsh -NoProfile -File scripts\readonly.ps1</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[cd c:\work; pwsh -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- RUL-3: an unknown statement (a .NET static call) renders 'contains unknown command'. -->
+    <test-case expected="ask" reason="unknown statement in script => ask with unknown-command reason" category="SD-Ask-UntrustedUnknownStmt" reason-contains="contains unknown command">
+      <description>pwsh -File scripts\unknown-stmt.ps1 - [Foo]::Bar() (not on any allowlist)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts\unknown-stmt.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- Forward-slash relative path resolves the same as backslash => allow. -->
+    <test-case expected="allow" reason="forward-slash relative script path resolves" category="SD-Relative-ForwardSlash">
+      <description>pwsh -File scripts/readonly.ps1 - forward slashes</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File scripts/readonly.ps1]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

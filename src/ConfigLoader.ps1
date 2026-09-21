@@ -799,6 +799,15 @@ function Load-Config {
             }
         }
         $cbCompiled = [PSCustomObject]@{ Enabled = $cbEnabled; Tiers = $cbTiers }
+        # LlmScope (script_drilldown, 2026-09-20): 'count' | 'exclude'. Read by
+        # Test-LlmReviewScope to decide whether script-origin sub-commands count
+        # toward complex_min_subcommands and appear in the numbered LLM list.
+        # Default 'count'; the drilldown block (validated below) may set 'exclude'.
+        $llmScope = 'count'
+        if ((Get-Member -InputObject $config -Name 'script_drilldown' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            (Get-Member -InputObject $config.script_drilldown -Name 'llm_scope' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+            $llmScope = "$($config.script_drilldown.llm_scope)"
+        }
         $llmCompiled = [PSCustomObject]@{
             Enabled               = $llmEnabled
             Level                 = $llmLevel
@@ -814,8 +823,13 @@ function Load-Config {
             StrictGateOverrideLlm   = $llmGateOverride
             RemoteIndicators      = $indicatorRegexes
             CheckBlindspot        = $cbCompiled
+            LlmScope              = $llmScope
         }
     }
+    # NOTE: when the llm_second_opinion block is absent, $llmCompiled stays $null
+    # (feature off; every consumer null-checks it). LlmScope is only consulted by
+    # Test-LlmReviewScope, which reads it with a property-existence fallback to
+    # 'count' - so the absent-block path needs no LlmScope member at all.
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'llmSecondOpinion' -Value $llmCompiled -Force
 
     # Compile ask_notification (optional): toast popup + sound on ask decisions.
@@ -838,6 +852,98 @@ function Load-Config {
         SoundFile = $anSoundFile
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'askNotification' -Value $anCompiled -Force
+
+    # Compile script_drilldown (2026-09-20): when the agent runs `pwsh -File
+    # <script>.ps1`, the hook opens the file, splits it into statements via the
+    # existing AST walker, and classifies each as if typed on the command line.
+    # OPTIONAL: absent OR enabled=false => behavior identical to before this
+    # feature (spec D2 / invariant I1). When PRESENT it is validated even with
+    # enabled=false so bad values surface at load time (fail-closed throw, same
+    # philosophy as trusted_programs_regex bad regex). _comment_* props ignored.
+    $drill = $null
+    if (Get-Member -InputObject $config -Name 'script_drilldown' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $sdRaw = $config.script_drilldown
+        if ($sdRaw -isnot [PSCustomObject] -and $sdRaw -isnot [hashtable]) {
+            throw "Configuration validation failed: script_drilldown must be an object"
+        }
+        # enabled: bool, default false.
+        $sdEnabled = $false
+        if (Get-Member -InputObject $sdRaw -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            if ($sdRaw.enabled -isnot [bool]) { throw "Configuration validation failed: script_drilldown.enabled must be a boolean" }
+            $sdEnabled = [bool]$sdRaw.enabled
+        }
+        # runners: array of strings; every entry in the implemented set. The set
+        # MUST stay in sync with $script:ScriptRunnerMatchers (Parser.ps1) - v1
+        # ships exactly one runner ('powershell'). Omitted => all implemented.
+        # An explicitly EMPTY array throws: it would arm zero matchers and
+        # silently turn enabled:true into a no-op (RUL-6).
+        $sdRunners = @('powershell')
+        if (Get-Member -InputObject $sdRaw -Name 'runners' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            if ($sdRaw.runners -isnot [array]) { throw "Configuration validation failed: script_drilldown.runners must be an array" }
+            $sdRunners = @()
+            foreach ($r in $sdRaw.runners) {
+                $rn = "$($r)".Trim().ToLowerInvariant()
+                if ($rn -ne 'powershell') {
+                    throw "Configuration validation failed: script_drilldown.runners: unknown runner '$($r)' (implemented: powershell)"
+                }
+                if ($sdRunners -notcontains $rn) { $sdRunners += $rn }
+            }
+            if ($sdRunners.Count -eq 0) {
+                throw "Configuration validation failed: script_drilldown.runners must list at least one implemented runner"
+            }
+        }
+        # max_chained_files: integer >= 1, default 3. NOTE: ConvertFrom-Json
+        # yields [int] under powershell.exe 5.1 but [long] under pwsh 7 for the
+        # same JSON number - accept both (a double like 3.0 is NOT an integer
+        # and must fail closed).
+        $sdMaxChained = 3
+        if (Get-Member -InputObject $sdRaw -Name 'max_chained_files' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $sdMcVal = $sdRaw.max_chained_files
+            if (($sdMcVal -isnot [int] -and $sdMcVal -isnot [long]) -or ([int]$sdMcVal -lt 1)) {
+                throw "Configuration validation failed: script_drilldown.max_chained_files must be an integer >= 1"
+            }
+            $sdMaxChained = [int]$sdMcVal
+        }
+        # max_file_bytes: integer >= 1, default 4096 (same int/long duality).
+        $sdMaxBytes = 4096
+        if (Get-Member -InputObject $sdRaw -Name 'max_file_bytes' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $sdMbVal = $sdRaw.max_file_bytes
+            if (($sdMbVal -isnot [int] -and $sdMbVal -isnot [long]) -or ([int]$sdMbVal -lt 1)) {
+                throw "Configuration validation failed: script_drilldown.max_file_bytes must be an integer >= 1"
+            }
+            $sdMaxBytes = [int]$sdMbVal
+        }
+        # llm_scope: 'count' | 'exclude', default 'count'.
+        $sdLlmScope = 'count'
+        if (Get-Member -InputObject $sdRaw -Name 'llm_scope' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $sdLlmScope = "$($sdRaw.llm_scope)".Trim().ToLowerInvariant()
+            if ($sdLlmScope -ne 'count' -and $sdLlmScope -ne 'exclude') {
+                throw "Configuration validation failed: script_drilldown.llm_scope must be 'count' or 'exclude'"
+            }
+        }
+        # Compile ONLY when present AND enabled; otherwise $null (feature off).
+        if ($sdEnabled) {
+            $drill = [PSCustomObject]@{
+                Enabled         = $true
+                Runners         = $sdRunners
+                MaxChainedFiles = $sdMaxChained
+                MaxFileBytes    = $sdMaxBytes
+                LlmScope        = $sdLlmScope
+            }
+            # Reference members (spec 6.3): Parser-side functions take no $Config
+            # parameter, so the engine reads the live config through these. Cwd is
+            # a REFRESHED copy of $config._cwd at each classify (Reset-ScriptDrilldownState)
+            # because TestRunner -Cwd rewrites _cwd AFTER Load-Config returns.
+            $drill | Add-Member -MemberType NoteProperty -Name 'Config' -Value $config -Force
+            $drill | Add-Member -MemberType NoteProperty -Name 'Cwd' -Value "$($config._cwd)" -Force
+        }
+    }
+    $config._compiled | Add-Member -MemberType NoteProperty -Name 'scriptDrilldown' -Value $drill -Force
+    # Publish the gate as shared session state (all modules dot-source into one
+    # scope, F8). Load-Config is the ONLY writer. OFF is an EXPLICIT assignment:
+    # fixture runners load several configs in ONE process (preflights!), and a
+    # stale gate from a previous Load-Config would leak the feature into an OFF run.
+    if ($drill) { $script:ScriptDrilldown = $drill } else { $script:ScriptDrilldown = $null }
 
     # Compile patterns for each domain's read_only and modifying entries
     $commandKeys = $config.commands.PSObject.Properties.Name
