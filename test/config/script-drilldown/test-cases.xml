@@ -273,5 +273,106 @@
       <copilot-command><![CDATA[pwsh -NoProfile -File scripts\utf8-nonascii.ps1]]></copilot-command>
     </test-case>
 
+    <!-- ===================================================================
+         AUTHOR-PASS GAP COVERAGE (2026-09-21, design author review).
+         =================================================================== -->
+
+    <!-- 3.2 'bonus' at DEPTH 0: the agent types the -Command/-File double wrapper
+         directly (not inside a script). The matcher guard refuses to treat the inner
+         -File as this runner's; the walker's -Command branch hands the inner text to
+         SITE A, which expands the target through the legitimate recursion. -->
+    <test-case expected="allow" reason="depth-0 -Command wrapping -File routes into SITE A and expands" category="SD-Allow-Depth0CommandWrapsFile">
+      <description>pwsh -Command "pwsh -NoProfile -File scripts\nested-target.ps1" (typed directly)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -Command "pwsh -NoProfile -File scripts\nested-target.ps1"]]></copilot-command>
+    </test-case>
+
+    <!-- KNOWN PRE-EXISTING GAP G-1 (author pass 2026-09-21), pinned to make it
+         visible: SITE A's element parse accepts the short flag -f, but the
+         PRODUCTION regex (matcher AND Find-NestedCommands) is long-form only, so
+         drilldown does not arm AND the arbiter never sees the path (no nested
+         extraction) => the bare 'pwsh' read_only pattern certifies the whole line.
+         'pwsh -f x.ps1' runs x.ps1 exactly like -File. Fixing this means extending
+         the production regex, which also tightens OFF behavior - needs a ruling. -->
+    <test-case expected="allow" reason="G-1: short -f bypasses -File inspection entirely (pinned, needs ruling)" category="SD-Allow-ShortFileFlagGap">
+      <description>pwsh -f scripts\readonly.ps1 - short flag, matcher is long-form only</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -f scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- G-1 security leg: even a MODIFYING script is allowed via -f today. -->
+    <test-case expected="allow" reason="G-1: 'pwsh -f MODSCRIPT is allowed today (pinned, needs ruling)" category="SD-Allow-ShortFileFlagModifyingGap">
+      <description>pwsh -f scripts\modifying.ps1 - the gap lets a modifying script through</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -f scripts\modifying.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- 5 matcher alternation: powershell.exe (full product name) arms drilldown. -->
+    <test-case expected="allow" reason="powershell.exe -File arms the drilldown matcher" category="SD-Allow-PowerShellExe">
+      <description>powershell.exe -NoProfile -File scripts\readonly.ps1 - full runner name</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- 3.2 / 6.5 contrast: a QUOTED path with SPACES typed at depth 0 is parsed by
+         SITE A's element parse (quoted value), so it DOES expand - only the collapsed
+         in-script form (SD-Ask-SpacedNestedPath) fails closed. -->
+    <test-case expected="allow" reason="quoted spaced path at depth 0 expands via SITE A element parse" category="SD-Allow-QuotedSpacedPath">
+      <description>pwsh -File "scripts\my script.ps1" - quoted path with a space</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File "scripts\my script.ps1"]]></copilot-command>
+    </test-case>
+
+    <!-- I10/9 semantics after the V-2 fix: the same target invoked twice in one file
+         with DIFFERENT wrapper texts (no AddResult dedup). The first invocation
+         expands; the second representation is skipped because the target's statements
+         are already emitted (agent-level double invocation still asks, pinned by
+         SD-Ask-DoubleInvoke). -->
+    <test-case expected="allow" reason="in-file duplicate invocation: second representation skipped, statements already emitted" category="SD-Allow-InFileDupInvoke">
+      <description>pwsh -File scripts\dup-invoke.ps1 - nested-target.ps1 invoked twice, differently written</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\dup-invoke.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- 6.2 step 4, the a->a shape: DIRECT self-recursion via dot-source. -->
+    <test-case expected="ask" reason="direct self-recursion detected" category="SD-Ask-SelfLoop" reason-contains="recursive script invocation detected">
+      <description>pwsh -File scripts\self-loop.ps1 - dot-sources itself</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\self-loop.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- I17: extension matching is case-insensitive ('.PS1'). -->
+    <test-case expected="allow" reason="uppercase .PS1 extension matches case-insensitively" category="SD-Allow-UpperExt">
+      <description>pwsh -File scripts\UPPER.PS1 - uppercase extension</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\UPPER.PS1]]></copilot-command>
+    </test-case>
+
+    <!-- Residual-risk probe (author pass): a nested -File inside a FUNCTION BODY that
+         itself lives inside a -Command string typed at depth 0. Section 2's FindAll
+         expands it once; the ScriptBlockAst recursion must not re-expand it. -->
+    <test-case expected="allow" reason="function-body -File inside a depth-0 -Command expands exactly once" category="SD-Allow-Depth0FuncBodyInCommand">
+      <description>pwsh -Command "function X { pwsh -NoProfile -File scripts\nested-target.ps1 }" (typed directly)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -Command "function X { pwsh -NoProfile -File scripts\nested-target.ps1 }"]]></copilot-command>
+    </test-case>
+
+    <!-- Proof-of-inspection legs (author pass): the two depth-0 -Command shapes above
+         with a MODIFYING target. 'allow' on a read-only target proves nothing (the
+         wrapper line is read_only by pattern) - these must ASK because drilldown
+         opens the file and surfaces Copy-Item. The func-body variant is RED until
+         the -Command inner-domain reroute fix (design section 0.6 / fix V-5). -->
+    <test-case expected="ask" reason="depth-0 -Command wrapping -File of a modifying script must ask" category="SD-Ask-Depth0CommandWrapsModifying" reason-contains="Copy-Item">
+      <description>pwsh -Command "pwsh -NoProfile -File scripts\modifying.ps1" (typed directly)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -Command "pwsh -NoProfile -File scripts\modifying.ps1"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="function-body -File of a modifying script inside -Command must ask (V-5)" category="SD-Ask-Depth0FuncBodyModifying" reason-contains="Copy-Item">
+      <description>pwsh -Command "function X { pwsh -NoProfile -File scripts\modifying.ps1 }" (typed directly)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -Command "function X { pwsh -NoProfile -File scripts\modifying.ps1 }"]]></copilot-command>
+    </test-case>
+
   </category-group>
 </commands>

@@ -102,6 +102,63 @@ feature can only make a `-File` invocation stricter, never looser (I16/RUL-4).
   still consults the LLM for drilldown asks carrying `unclassified` tiers. Both are decision-neutral
   but visible in latency.
 
+### 0.6 Author verification pass (2026-09-21, after the LLM-B review fixes)
+
+The design author re-proof-read LLM-A's implementation and adjudicated LLM-B's findings.
+
+**Verdict on LLM-B's fixes — all three CONFIRMED correct and adopted:**
+- V-1 (flag inheritance) — correct diagnosis, minimal and sound fix; verified red→green.
+- V-2 (collapsed-invocation guard + `$expandedHere`) — correct diagnosis; one SEMANTIC WIDENING
+  identified and accepted: `$expandedHere` skips ANY repeat target within one file's statement list,
+  so a genuine in-file double invocation written with DIFFERENT wrapper texts no longer asks
+  (the §6.2 step-4 letter lumps double invocation with recursion). Mitigations: identical-text
+  duplicates were already dropped upstream by the `AddResult` dedup key (I10), so nothing changed for
+  them, and the AGENT-level double invocation still asks (SD-Ask-DoubleInvoke). Now pinned by
+  **SD-Allow-InFileDupInvoke** and documented here as deviation **D-7**.
+- V-3 (argument-mode `[int]` string) — independently reproduced; fix correct.
+
+**Two further bugs found by the author pass and fixed (red → green):**
+- **V-5** — `pwsh -Command "function X { pwsh -File y.ps1 }"` typed at depth 0 never surfaced the
+  nested `-File`: the `-Command` branch labels a non-cmdlet-headed inner `linux`, so the re-walk took
+  the `Split-Commands` route, which keeps the brace block whole — under drilldown-ON too (**gap G-2**).
+  Fix: when drilldown is armed AND the inner contains a `-File <…>.ps1` AND parses as PowerShell,
+  reroute the inner to the AST walk so SITE A reaches the `-File` site. Gated on `$DrilldownEnabled`
+  so OFF stays byte-identical (under OFF the shape remains today's allow — pinned by the
+  `SDO-Allow-Depth0FuncBody*` twins as pre-existing gap G-2). Pinned by **SD-Ask-Depth0FuncBodyModifying**.
+- **V-6** — the re-walk loop forwarded only the SOURCE entry's `OriginScript` onto children, so the
+  statements of a script expanded INSIDE a re-walk (e.g. `pwsh -Command "pwsh -File modifying.ps1"`)
+  lost `OriginScript`/`DisplayText`/`LineNumber`/`AtomicReason` and a blocking statement rendered as
+  the bare `Copy- (medium)` pattern instead of the §6-2 `script x.ps1 contains modifying command: …`
+  reason. Fix: forward the child's OWN metadata when present, else inherit the source's (§8.2.3).
+  Pinned by **SD-Ask-Depth0CommandWrapsModifying** (reason-contains `Copy-Item`).
+
+**Pre-existing gaps discovered and PINNED (not fixed — need a ruling, they predate this feature):**
+- **G-1** — the short flag `-f` is a valid abbreviation of `-File` at runtime, but the production
+  regex (`Find-NestedCommands` AND the drilldown matcher) is long-form only. Result: `pwsh -f x.ps1`
+  is ALLOWED under BOTH configs today (no nested extraction → no path entry → the arbiter certifies
+  the bare `pwsh` pattern) — even for a MODIFYING script. Pinned by `SD-Allow-ShortFileFlagGap` /
+  `SD-Allow-ShortFileFlagModifyingGap` (+ OFF twins). Fixing it means extending the production regex,
+  which also tightens OFF behavior (D2/I1) — user ruling required.
+- **G-2 (OFF leg)** — under drilldown OFF, `pwsh -Command "<body not headed by a cmdlet>"` keeps the
+  body whole and hides everything inside it (including a nested `-File`): byte-identical OFF parity
+  REQUIRES keeping this; drilldown-ON now closes the `-File` variant via V-5. Same class, broader
+  shape (`pwsh -Command "if (1) { Remove-Item x }"` etc.) is a general classifier question outside
+  this feature's scope.
+
+**Design clarification (no code change): in-script relative paths anchor to the WORKSPACE ROOT**
+(`$Config._cwd`), not `$PSScriptRoot`. This mirrors PowerShell's own runtime semantics — dot-source
+and call-operator arguments resolve against the process location, and `pwsh -File` does NOT chdir to
+the script's folder (which is exactly why `$PSScriptRoot` exists). The §13.1 fixture sketches
+(`. .\loop-b.ps1`) were therefore imprecise; LLM-A's adaptation (`. scripts\loop-b.ps1`) is correct,
+and a genuinely cwd-relative self-reference now yields the truthful `script file not found` ask
+(`self-loop.ps1` uses the workspace-relative form so the loop check is what fires).
+
+**Minor record corrections:** A's "SDD-OFF-Parity (22/22)" claim was off by one (the OFF matrix
+shipped 21 cases; now 44 with the author-pass twins), and the §0.1 row citing "22/22" inherits that.
+
+**Author-pass state:** `script-drilldown` **18/18** checks (44 ON cases + 44 OFF cases + 8 preflights
++ 7 programmatic), `script-drilldown.llm` **34/34**, full `Run-AllTests.ps1` **1412/1412, zero flips.**
+
 ---
 
 ## 1. What we are building (one paragraph)

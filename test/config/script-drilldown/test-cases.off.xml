@@ -221,5 +221,74 @@
       <copilot-command><![CDATA[pwsh -NoProfile -File scripts\utf8-nonascii.ps1]]></copilot-command>
     </test-case>
 
+    <!-- AUTHOR-PASS OFF TWINS (2026-09-21): same commands as the new ON cases.
+         With the block absent every untrusted -File path stays the opaque token. -->
+
+    <test-case expected="ask" reason="OFF: inner -File path is unknown today" category="SDO-Allow-Depth0CommandWrapsFile" reason-contains="unknown command: scripts\nested-target.ps1">
+      <description>pwsh -Command "pwsh -NoProfile -File scripts\nested-target.ps1" - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -Command "pwsh -NoProfile -File scripts\nested-target.ps1"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: inner -File path of a modifying script is unknown today" category="SDO-Ask-Depth0CommandWrapsModifying" reason-contains="unknown command: scripts\modifying.ps1">
+      <description>pwsh -Command "pwsh -NoProfile -File scripts\modifying.ps1" - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -Command "pwsh -NoProfile -File scripts\modifying.ps1"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="OFF G-1: short -f bypasses -File inspection today too (ON == OFF)" category="SDO-Allow-ShortFileFlagGap">
+      <description>pwsh -f scripts\readonly.ps1 - OFF parity (today: allow via the pwsh pattern)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -f scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="OFF G-1: 'pwsh -f MODSCRIPT is allowed today too" category="SDO-Allow-ShortFileFlagModifyingGap">
+      <description>pwsh -f scripts\modifying.ps1 - OFF parity (today: allow)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -f scripts\modifying.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-PowerShellExe" reason-contains="unknown command: scripts\readonly.ps1">
+      <description>powershell.exe -NoProfile -File scripts\readonly.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[powershell.exe -NoProfile -File scripts\readonly.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: quoted spaced path is unknown today" category="SDO-Allow-QuotedSpacedPath" reason-contains="unknown command: scripts\my script.ps1">
+      <description>pwsh -File "scripts\my script.ps1" - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File "scripts\my script.ps1"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Allow-InFileDupInvoke" reason-contains="unknown command: scripts\dup-invoke.ps1">
+      <description>pwsh -File scripts\dup-invoke.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\dup-invoke.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today" category="SDO-Ask-SelfLoop" reason-contains="unknown command: scripts\self-loop.ps1">
+      <description>pwsh -File scripts\self-loop.ps1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\self-loop.ps1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="OFF: untrusted -File path is unknown today (case-insensitive fs)" category="SDO-Allow-UpperExt" reason-contains="unknown command: scripts\UPPER.PS1">
+      <description>pwsh -File scripts\UPPER.PS1 - OFF parity (today: ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File scripts\UPPER.PS1]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="OFF pre-existing gap G-2: the inner -File never surfaces (inner domain linux => Split-Commands keeps the brace block whole). Byte-identical OFF parity REQUIRES keeping this; drilldown-ON closes it (SD-Ask-Depth0FuncBodyModifying)." category="SDO-Allow-Depth0FuncBodyInCommand">
+      <description>pwsh -Command "function X { pwsh -NoProfile -File scripts\nested-target.ps1 }" - OFF parity (today: allow, gap G-2)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -Command "function X { pwsh -NoProfile -File scripts\nested-target.ps1 }"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" reason="OFF pre-existing gap G-2: a modifying script behind -Command + function body is allowed today" category="SDO-Allow-Depth0FuncBodyModifying">
+      <description>pwsh -Command "function X { pwsh -NoProfile -File scripts\modifying.ps1 }" - OFF parity (today: allow, gap G-2)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -Command "function X { pwsh -NoProfile -File scripts\modifying.ps1 }"]]></copilot-command>
+    </test-case>
+
   </category-group>
 </commands>

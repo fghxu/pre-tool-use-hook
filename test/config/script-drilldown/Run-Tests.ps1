@@ -549,6 +549,36 @@ else {
     catch {
         Record-Result -Ok $false -Name "SDD-CompoundSiteB" -Detail "threw: $($_.Exception.Message)"
     }
+
+    # -------------------------------------------------------------------------
+    # SDD-FailureSingleSubResult - design RUL-4 / 3.2 / 6.4: an expansion FAILURE
+    # (here: not-found) is a SINGLE SubResult whose Command is the script PATH
+    # (today's shape; the outer wrapper is suppressed via IsTerminal), whose Reason
+    # IS the section-6 cause string, and which is a KNOWN blocker
+    # (MatchedPattern='script-drilldown') so the AST-arbiter gate stays closed.
+    # -------------------------------------------------------------------------
+    try {
+        $rFail = Invoke-FixtureClassify -CfgPath (Join-Path $fixtureDir "config.json") `
+            -Command "pwsh -File scripts\no-such.ps1" -Cwd $fixtureDir
+        $fSubs = @($rFail.SubResults)
+        $fProblems = @()
+        if ($rFail.Decision -ne 'ask') { $fProblems += "decision=$($rFail.Decision)" }
+        if ($fSubs.Count -ne 1) { $fProblems += "expected exactly 1 SubResult (RUL-4), got $($fSubs.Count)" }
+        else {
+            if ("$($fSubs[0].Command)" -ne 'scripts\no-such.ps1') { $fProblems += "SubResult.Command='$($fSubs[0].Command)', expected the script path" }
+            if ("$($fSubs[0].MatchedPattern)" -ne 'script-drilldown') { $fProblems += "MatchedPattern='$($fSubs[0].MatchedPattern)', expected 'script-drilldown'" }
+            if ("$($fSubs[0].Reason)" -notmatch '^script file not found: scripts\\no-such\.ps1') { $fProblems += "Reason is not the cause string: $($fSubs[0].Reason)" }
+        }
+        if ($fProblems.Count -eq 0) {
+            Record-Result -Ok $true -Name "SDD-FailureSingleSubResult" -Detail "single path-only SubResult, script-drilldown blocker, cause-string reason"
+        }
+        else {
+            Record-Result -Ok $false -Name "SDD-FailureSingleSubResult" -Detail ($fProblems -join "; ")
+        }
+    }
+    catch {
+        Record-Result -Ok $false -Name "SDD-FailureSingleSubResult" -Detail "threw: $($_.Exception.Message)"
+    }
 }
 
 # =============================================================================

@@ -2211,11 +2211,30 @@ function Get-AstCommands {
                                 # Origin attribution (8.2.3): when the SOURCE entry
                                 # carries OriginScript, pass it onto the re-walk
                                 # children so an inner command extracted from a script's
-                                # wrapper statement keeps its script origin.
+                                # wrapper statement keeps its script origin. A child
+                                # that carries its OWN drilldown metadata (a nested
+                                # expansion performed INSIDE this re-walk, e.g. the
+                                # statements of a 'pwsh -Command "pwsh -File x.ps1"'
+                                # target) keeps THAT - without this forwarding the
+                                # statements lose OriginScript/DisplayText/LineNumber
+                                # and a blocking statement renders as the bare
+                                # 'Copy- (medium)' pattern instead of the section-6
+                                # 'script x.ps1 contains modifying command: ...' reason
+                                # (author-pass fix V-6, 2026-09-21).
+                                $cOrigin = $wrOrigin
+                                if ($iac.PSObject.Properties['OriginScript']) { $cOrigin = "$($iac.OriginScript)" }
+                                $cLine = 0
+                                if ($iac.PSObject.Properties['LineNumber']) { $cLine = [int]$iac.LineNumber }
+                                $cDisplay = ''
+                                if ($iac.PSObject.Properties['DisplayText']) { $cDisplay = "$($iac.DisplayText)" }
+                                $cReason = ''
+                                if ($iac.PSObject.Properties['AtomicReason']) { $cReason = "$($iac.AtomicReason)" }
+                                $cMarker = [bool]($iac.PSObject.Properties['DrilldownMarker'])
                                 AddResult -ResultsList $results -SeenMap $seenKeys `
                                     -CmdText $iac.CommandText -Domain $iac.Domain `
                                     -IsPipeline $iac.IsPipeline -Parent $innerCmd `
-                                    -OriginScript $wrOrigin
+                                    -LineNumber $cLine -OriginScript $cOrigin -DisplayText $cDisplay `
+                                    -AtomicReason $cReason -DrilldownMarker $cMarker
                             }
                         }
                     }
@@ -2502,6 +2521,24 @@ function Get-AstWrapperInnerCommands {
                 }
                 if ($innerCommand) {
                     $innerDomain = Get-CommandDomain -Command $innerCommand
+                    # Script drilldown (author-pass fix V-5, 2026-09-21): a -Command
+                    # inner is PowerShell code BY CONSTRUCTION, but Get-CommandDomain
+                    # labels bodies that do not START with a cmdlet/binary (e.g.
+                    # 'function X { pwsh -NoProfile -File y.ps1 }') 'linux', so the
+                    # re-walk takes the Split-Commands route, keeps the brace block
+                    # whole, and a '-File <script>' written inside it is never
+                    # surfaced -- under drilldown-ON too (gap G-2). When drilldown is
+                    # armed AND the inner actually contains a '-File <...>.ps1'
+                    # invocation AND parses as PowerShell, reroute it through the AST
+                    # walk so SITE A reaches the -File site and expands it. Gated on
+                    # $DrilldownEnabled so OFF behavior stays byte-identical (D2/I1);
+                    # compound bash-style -Command strings (no -File/.ps1, or not
+                    # PowerShell-parseable) keep today's route.
+                    if ($DrilldownEnabled -and $innerDomain -ne 'powershell' -and
+                        $innerCommand -match '(?i)-File\s+[^''"\s][^''"\r\n]*\.ps1\b' -and
+                        (Test-PowerShellParses -Command $innerCommand)) {
+                        $innerDomain = 'powershell'
+                    }
                     $null = $results.Add([PSCustomObject]@{
                         CommandText = $innerCommand
                         Domain      = $innerDomain
