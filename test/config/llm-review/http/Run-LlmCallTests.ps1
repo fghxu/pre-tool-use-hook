@@ -69,6 +69,18 @@
 #   command           via <copilot-command> child (default 'Get-Date');
 #                     the token {{X9000}} expands to 9000 'x' characters
 #                     (drives the payload-truncation case)
+#
+#   llm-third-opinion pair cases (2026-09-30, design 7.5) - fullpipe only:
+#   pair                "true" arms the pair: the cloned config gets an
+#                     llm_third_opinion block (model 'mock2-model', same mock
+#                     base_uri) so Hook.ps1 fires BOTH endpoints concurrently
+#                     at this one server. Divergent responses are scripted per
+#                     MODEL via server1/server2 (the two model names MUST
+#                     differ - requirement of BodyByModel dispatch):
+#   server1           canned response for the LLM1 model ('glm-5.2')
+#   server2           canned response for the LLM2 model ('mock2-model')
+#   expect-models     semicolon-separated model names that must ALL appear in
+#                     the server's per-request log (pair dispatch proof)
 # =============================================================================
 
 param(
@@ -93,6 +105,7 @@ $hookPath   = Join-Path $srcDir "Hook.ps1"
 # assertion would then fail - but we refuse to run under a lie at all).
 # ---------------------------------------------------------------------------
 Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK -ErrorAction SilentlyContinue
+Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK2 -ErrorAction SilentlyContinue
 Remove-Item Env:\PRETOOLHOOK_CONFIG_PATH -ErrorAction SilentlyContinue
 
 # Dot-source the feature under test (Get-LlmReviewVerdict) and the mock server.
@@ -112,6 +125,7 @@ if ($XmlPath) {
 else {
     $xmlFiles += Join-Path $httpDir "test-llm-call-core.xml"
     $xmlFiles += Join-Path $httpDir "test-llm-call-matrix.xml"
+    $xmlFiles += Join-Path $httpDir "test-llm-pair.xml"
 }
 
 $testCases = @()
@@ -241,6 +255,10 @@ try {
         $apiKey          = if ($tc.HasAttribute('api-key'))          { $tc.GetAttribute('api-key') }          else { '' }
         $checkSpec       = if ($tc.HasAttribute('check'))            { $tc.GetAttribute('check') }            else { '' }
         $attrVerdicts    = if ($tc.HasAttribute('attributed'))       { [bool]::Parse($tc.GetAttribute('attributed')) } else { $true }
+        $pair            = if ($tc.HasAttribute('pair'))             { [bool]::Parse($tc.GetAttribute('pair')) } else { $false }
+        $server1         = if ($tc.HasAttribute('server1'))          { $tc.GetAttribute('server1') } else { '' }
+        $server2         = if ($tc.HasAttribute('server2'))          { $tc.GetAttribute('server2') } else { '' }
+        $expectModels    = if ($tc.HasAttribute('expect-models'))    { $tc.GetAttribute('expect-models') } else { '' }
         $subCmds         = @()
         if ($tc.HasAttribute('subcommands')) { $subCmds = @($tc.GetAttribute('subcommands') -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 
@@ -265,6 +283,15 @@ try {
             $server.State.LastPath     = ''
             $server.State.LastBody     = ''
             $server.State.LastAuth     = $null
+            # Pair cases (2026-09-30): per-model response scripting + fresh
+            # request log. The two canned responses are keyed by the model
+            # names the pair will send ('glm-5.2' / 'mock2-model').
+            $server.State.Requests.Clear()
+            $server.State.BodyByModel.Clear()
+            if ($pair) {
+                $server.State.BodyByModel['glm-5.2']     = (Get-CannedResponse -Token $server1).Body
+                $server.State.BodyByModel['mock2-model'] = (Get-CannedResponse -Token $server2).Body
+            }
         }
 
         # ----- Build the compiled-block object the unit under test consumes -----
@@ -294,6 +321,18 @@ try {
             $cfgObj = Get-Content (Join-Path $fixtureDir 'config.json') -Raw | ConvertFrom-Json
             $cfgObj.llm_second_opinion.base_uri = $baseUri
             $cfgObj.llm_second_opinion.level    = 'all'
+            # Pair cases (2026-09-30, design 7.5): arm llm_third_opinion on the
+            # SAME mock endpoint with a DIFFERENT model name - the two requests
+            # are told apart by BodyByModel. timeout_ms mirrors LLM1's so the
+            # D11 clamp is a no-op here.
+            if ($pair) {
+                $cfgObj | Add-Member -MemberType NoteProperty -Name 'llm_third_opinion' -Force -Value (@{
+                    enabled    = $true
+                    base_uri   = $baseUri
+                    model      = 'mock2-model'
+                    timeout_ms = $timeoutMs
+                })
+            }
             $tmpCfg = 'c:\temp\llm-call-test-config.json'
             ($cfgObj | ConvertTo-Json -Depth 20) | Set-Content $tmpCfg -Encoding UTF8
 
@@ -323,6 +362,17 @@ try {
                 if ($ok -and $serverToken -ne 'dead') {
                     $ok = ($server.State.RequestCount -eq $expectHit)
                     if (-not $ok) { $detail += " | server hits expected $expectHit got $($server.State.RequestCount)" }
+                }
+                # Pair dispatch proof (2026-09-30): every named model must have
+                # arrived at the ONE endpoint (LLM1 + LLM2, order-insensitive).
+                if ($ok -and $expectModels) {
+                    $gotModels = @($server.State.Requests | ForEach-Object { $_.Model })
+                    foreach ($wm in ($expectModels -split ';')) {
+                        if ($gotModels -notcontains $wm.Trim()) {
+                            $ok = $false
+                            $detail += " | model '$($wm.Trim())' never arrived (models: $($gotModels -join ','))"
+                        }
+                    }
                 }
                 Record-Result -Ok $ok -Name $name -Detail $detail
             }
@@ -368,6 +418,7 @@ finally {
     # Always stop the mock server, even if a case blew up.
     Stop-MockLlmServer -Server $server
     Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK -ErrorAction SilentlyContinue
+    Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK2 -ErrorAction SilentlyContinue
     Remove-Item Env:\PRETOOLHOOK_CONFIG_PATH -ErrorAction SilentlyContinue
 }
 

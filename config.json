@@ -41,6 +41,26 @@
     }
   },
 
+  "_comment_llm_third_opinion": "Third-opinion LLM (the 'pair', 2026-09-30). When enabled AND llm_second_opinion is enabled+in-scope, the IDENTICAL prompt is sent to a SECOND endpoint in parallel (PowerShell runspaces); the two parsed verdicts are compared. DISAGREEMENT forces ask with *** LLM-DISAGREE *** wording (unconditional, D5/D7). Agreement, or LLM2 unreachable/unparseable, leaves LLM1 driving today's merge exactly as before. LLM1 unreachable keeps today's fail-closed ask and appends an LLM2 FYI note. check_blindspot consults get an FYI note only - never a decision change (D9). llm_second_opinion disabled + this enabled => the LLM is skipped entirely and a skip-note is logged (D3/D13).\n\nFIELD REFERENCE:\n- LIVE fields: enabled, base_uri, model, api_key, timeout_ms. Effective timeout = min(this timeout_ms, llm_second_opinion.timeout_ms) (D11).\n- ALL other keys are ACCEPTED-BUT-IGNORED: llm_second_opinion's values decide scope (level, complex_min_subcommands, remote_indicators, check_blindspot) and prompt/sampling (attributed_verdicts, temperature, llm_response_max_tokens, json_mode) for BOTH models, so the identical prompt guarantees a fair A/B comparison. Ignored keys are still VALIDATED (a typo throws at load).\n- enabled: true|false. Fires only when llm_second_opinion is also enabled AND the command is in scope (D1).\n- base_uri / model / api_key: the second endpoint. model SHOULD differ from llm_second_opinion.model (log/mining clarity).\n- timeout_ms: integer (>=1). Clamped to min(this, llm_second_opinion.timeout_ms) so a pair consult never exceeds LLM1's budget (wall-clock ~ max(t1,t2)).\n- compare enum in records.jsonl: agree | disagree | llm1-down | llm2-down | out-of-scope | skipped-trusted-editable | skipped-primary-disabled. The llm2 sub-object is ABSENT when the pair is not armed (feature-off records stay byte-identical).\n- Test mock: PRETOOLHOOK_LLMREVIEW_MOCK2 injects LLM2's verdict; unset falls back to PRETOOLHOOK_LLMREVIEW_MOCK (both agree = the regression baseline, D12).\nSee docs/superpowers/specs/2026-09-30-llm-third-opinion-design.md.",
+  "llm_third_opinion": {
+    "enabled": false,
+    "level": "complex_remote",
+    "base_uri": "http://127.0.0.1:3031",
+    "_models_for_pick": "GLM-5.2 , deepseek-v4-flash, deepseek-v4-pro, claude-opus-4.7, gpt-5.6-sol",
+    "model": "gpt-5.6-sol",
+    "api_key": "",
+    "timeout_ms": 30000,
+    "temperature": 0.0,
+    "llm_response_max_tokens": 256,
+    "complex_min_subcommands": 2,
+    "attributed_verdicts": true,
+    "json_mode": true,
+    "check_blindspot": {
+      "enabled": true,
+      "tiers": ["unclassified", "unregistered_verb", "unregistered_static", "unregistered", "unknown_domain"]
+    }
+  },
+
 
   "_comment_ask_notification": "Windows toast popup + sound whenever the hook decides 'ask' (approval needed). Fire-and-forget: never blocks the hook, never changes the decision. Fields: enabled (default true, master switch) | popup (default true, show toast) | sound (default true, play sound) | sound_file (default '', path to .wav file; empty = system beep).",
   "ask_notification": {

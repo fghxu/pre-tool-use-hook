@@ -22,6 +22,11 @@
 #   $srv.State.Body   = '<json>'        # program the NEXT response body
 #   $srv.State.Status = 200             # program the NEXT response status
 #   $srv.State.DelayMs = 0              # program an artificial response delay
+#   # llm_third_opinion pair (2026-09-30): per-MODEL response scripting -
+#   # the pair sends TWO concurrent requests (different body.model) to ONE
+#   # endpoint; BodyByModel answers each model differently:
+#   $srv.State.BodyByModel['m1'] = '<json>'          # wins over State.Body
+#   $srv.State.Requests           # List of @{Method;Path;Body;Auth;Model}
 #   ... make the HTTP call under test ...
 #   $srv.State.RequestCount             # how many requests arrived
 #   $srv.State.LastBody / LastMethod / LastPath / LastContentType / LastAuth
@@ -51,14 +56,19 @@ function New-MockLlmServer {
 
     # --- Shared state (synchronized hashtable = thread-safe). ---
     # Response programming:  Body / Status / DelayMs (read per request)
+    # Per-model override:    BodyByModel[model] -> response body (pair tests;
+    #                        falls back to Body when the model is not listed)
     # Request capture:       RequestCount / LastMethod / LastPath /
     #                        LastContentType / LastAuth / LastBody
+    #                        + Requests (full per-request log, pair tests)
     # Lifecycle:             Stop (set to $true to end the loop)
     $state = [hashtable]::Synchronized(@{
         Stop             = $false
         Body             = '{"choices":[{"message":{"content":"true"}}]}'
         Status           = 200
         DelayMs          = 0
+        BodyByModel      = [hashtable]::Synchronized(@{})
+        Requests         = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
         RequestCount     = 0
         LastMethod       = ''
         LastPath         = ''
@@ -101,11 +111,27 @@ function New-MockLlmServer {
                 $State.LastAuth         = $req.Headers['Authorization']
                 $State.LastBody         = $bodyText
 
+                # Pair tests (2026-09-30): parse body.model (best-effort) and
+                # keep a full per-request log so the runner can assert WHICH
+                # models arrived (LLM1 + LLM2 hitting one endpoint).
+                $reqModel = ''
+                try { $reqModel = "$((ConvertFrom-Json $bodyText).model)" } catch { }
+                [void]$State.Requests.Add(@{
+                    Method = $req.HttpMethod
+                    Path   = $req.Url.AbsolutePath
+                    Body   = $bodyText
+                    Auth   = $req.Headers['Authorization']
+                    Model  = $reqModel
+                })
+
                 # Optional artificial delay (drives the client-timeout test).
                 if ($State.DelayMs -gt 0) { Start-Sleep -Milliseconds $State.DelayMs }
 
-                # Send the programmed response.
-                $bytes = [System.Text.Encoding]::UTF8.GetBytes($State.Body)
+                # Send the programmed response: per-model override wins over
+                # the single programmed Body (pair scripting).
+                $respBody = $State.Body
+                if ($State.BodyByModel.ContainsKey($reqModel)) { $respBody = $State.BodyByModel[$reqModel] }
+                $bytes = [System.Text.Encoding]::UTF8.GetBytes($respBody)
                 $ctx.Response.StatusCode = [int]$State.Status
                 $ctx.Response.ContentType = 'application/json'
                 $ctx.Response.ContentLength64 = $bytes.Length

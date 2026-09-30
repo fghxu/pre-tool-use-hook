@@ -171,6 +171,14 @@ function Format-LlmLogBlock {
     )
     if ($null -eq $LlmLog) { return '' }
 
+    # D3 skip-note (design 5.1): llm_third_opinion enabled but
+    # llm_second_opinion disabled/absent - the pair cannot fire. Dedicated
+    # line naming LLM2 explicitly (user requirement), rendered before the
+    # generic out-of-scope one-liner. Only fires for this one effect value.
+    if ("$($LlmLog.effect)" -eq 'skipped-primary-disabled') {
+        return "  LLM2          : llm_third_opinion enabled but llm_second_opinion disabled - LLM2 skipped`n"
+    }
+
     # Out-of-scope: keep the phase-I one-liner (with the sub-command count, so
     # threshold tuning for complex_min_subcommands is auditable from the log),
     # AND carry the level + the scope reason so the log alone explains WHY the
@@ -186,9 +194,20 @@ function Format-LlmLogBlock {
 
     $mockMark = if ($LlmLog.mocked) { ' (mock)' } else { '' }
 
+    # Pair (llm_third_opinion) helpers: the llm2 sub-object exists whenever the
+    # pair was armed; 'called' = a real pair consult happened (the states that
+    # get the SENT extension + the LLM2-RECV line).
+    $hasLlm2 = ($null -ne (Get-Member -InputObject $LlmLog -Name llm2 -MemberType Properties -ErrorAction SilentlyContinue))
+    $llm2Compare = if ($hasLlm2) { "$($LlmLog.llm2.compare)" } else { '' }
+    $pairCalled = ($hasLlm2 -and $llm2Compare -in @('agree', 'disagree', 'llm1-down', 'llm2-down'))
+
     # --- LLM-SENT: sub-command count + model + timeout + the numbered list (<=120 chars each)
     $sentLine = "  LLM-SENT      : [ $($LlmLog.sub_command_count) subcommand ] | model=$($LlmLog.model)"
     if ($LlmLog.timeout_ms) { $sentLine += " timeout=$($LlmLog.timeout_ms)ms" }
+    # design 5.2: when the pair was called, name LLM2 + its clamped timeout.
+    if ($pairCalled) {
+        $sentLine += " model2=$($LlmLog.llm2.model) timeout2=$($LlmLog.llm2.effective_timeout_ms)ms"
+    }
     if ($LlmLog.sent -and $LlmLog.sent.Count -gt 0) {
         $parts = @()
         for ($i = 0; $i -lt $LlmLog.sent.Count; $i++) {
@@ -220,6 +239,34 @@ function Format-LlmLogBlock {
     if ($LlmLog.indices) { $recvLine += " indices=[$($LlmLog.indices -join ',')]" }
     $recvLine += "`n"
 
+    # --- LLM2-RECV (design 5.3): exact mirror of the LLM-RECV rules, directly
+    # under it, when the pair was actually called. Label padded to the same
+    # 14-char field so the ':' column aligns with LLM-RECV/LLM-LOCAL/
+    # LLM-RECONCILE (LLM2-RECV is 9 chars + 5 spaces).
+    $llm2RecvLine = ''
+    if ($pairCalled) {
+        $l2 = $LlmLog.llm2
+        $l2MockMark = if ($l2.mocked) { ' (mock)' } else { '' }
+        $l2Line = "  LLM2-RECV     : "
+        if ("$($l2.verdict)" -eq 'down') {
+            $l2err = "$($l2.error)"
+            if ($l2err.Length -gt 200) { $l2err = $l2err.Substring(0, 200) }
+            $l2Line += "ERROR '$l2err'"
+        }
+        else {
+            $l2RawDisplay = $l2.raw_full
+            if (-not $l2RawDisplay) { $l2RawDisplay = $l2.raw_excerpt }
+            $l2RawDisplay = ("$l2RawDisplay" -replace '\s+', ' ').Trim()
+            $l2DisplayLimit = if ($LlmLog.raw_display_limit) { $LlmLog.raw_display_limit } else { 500 }
+            if ($l2RawDisplay.Length -gt $l2DisplayLimit) { $l2RawDisplay = $l2RawDisplay.Substring(0, $l2DisplayLimit) + '…' }
+            $l2Line += "'$l2RawDisplay'"
+        }
+        $l2Line += " ($($l2.latency_ms)ms, recovered=$($l2.recovered)$l2MockMark) -> verdict=$($l2.verdict)"
+        if ($l2.indices) { $l2Line += " indices=[$($l2.indices -join ',')]" }
+        $l2Line += "`n"
+        $llm2RecvLine = $l2Line
+    }
+
     # --- LLM-LOCAL: the pre-merge local decision + per-index tier
     $localReason = "$($LlmLog.local_reason)"
     if ($localReason.Length -gt 120) { $localReason = $localReason.Substring(0, 120) }
@@ -237,6 +284,26 @@ function Format-LlmLogBlock {
 
     # --- LLM-RECONCILE: how the final decision was reached
     $reconLine = "  LLM-RECONCILE : "
+    # design 5.4: pair prefixes / disagree rendering.
+    $reconPrefix = ''
+    if ($pairCalled -and $llm2Compare -in @('agree', 'llm1-down', 'llm2-down')) {
+        if ($llm2Compare -eq 'agree') { $reconPrefix = 'llm2-agree | ' }
+        elseif ($llm2Compare -eq 'llm1-down') { $reconPrefix = 'llm1-down | ' }
+        else { $reconPrefix = 'llm2-down (proceeded on LLM1) | ' }
+    }
+    if ("$($LlmLog.effect)" -eq 'llm2-disagree') {
+        # The pair disagreed: the ask came from the comparison, not from LLM1's
+        # merge. Name both verdicts (spec: "log mentions LLM and LLM2 return
+        # same result" - the disagree counterpart).
+        $s1 = "$($LlmLog.verdict)"
+        if ("$($LlmLog.verdict)" -eq 'modifying' -and $LlmLog.indices) { $s1 += " indices=[$($LlmLog.indices -join ',')]" }
+        $s2 = "$($LlmLog.llm2.verdict)"
+        if ("$($LlmLog.llm2.verdict)" -eq 'modifying' -and $LlmLog.llm2.indices) { $s2 += " indices=[$($LlmLog.llm2.indices -join ',')]" }
+        $reconLine += "disagree LLM=$s1 vs LLM2=$s2 -> FINAL: $($Result.Decision)"
+        $reconLine += "`n"
+        return ($sentLine + $recvLine + $llm2RecvLine + $localLine + $reconLine)
+    }
+    $reconLine += $reconPrefix
     switch ($LlmLog.effect) {
         'veto' {
             $reconLine += "flagged=[$($LlmLog.flagged -join ',')]"
@@ -265,9 +332,13 @@ function Format-LlmLogBlock {
         'forced-ask' { $reconLine += "fail-closed ($($LlmLog.verdict)) -> FINAL: $($Result.Decision)" }
         default { $reconLine += "$($LlmLog.effect) -> FINAL: $($Result.Decision)" }
     }
+    # design 5.4: R2 pre-skip with an armed pair self-documents the skip.
+    if ($hasLlm2 -and $llm2Compare -eq 'skipped-trusted-editable') {
+        $reconLine += " (pair skipped - comparison not applicable)"
+    }
     $reconLine += "`n"
 
-    return ($sentLine + $recvLine + $localLine + $reconLine)
+    return ($sentLine + $recvLine + $llm2RecvLine + $localLine + $reconLine)
 }
 
 function Write-LogEntry {

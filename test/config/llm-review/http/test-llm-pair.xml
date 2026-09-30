@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LLM-PAIR SUITE (llm_third_opinion, design 7.5) - the ONLY offline proof
+     of the REAL parallel runspace dispatch. The mock env vars bypass the
+     runspaces, so the pair's two concurrent HTTP calls are only observable
+     against the local mock server: the cloned config arms llm_third_opinion
+     with model 'mock2-model' on the SAME endpoint, and the server answers
+     each MODEL differently (BodyByModel). Every case is mode=fullpipe (the
+     real Hook.ps1 child spawns both runspaces).
+     Run:
+       pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1 -XmlPath test/config/llm-review/http/test-llm-pair.xml -->
+<commands>
+  <category-group name="LlmPair">
+
+    <test-case name="LTP-Pair-BothArrive" mode="fullpipe" pair="true"
+               server1="true" server2="false"
+               expect-hit="2" expect-decision="ask"
+               reason-contains="*** LLM-DISAGREE ***"
+               expect-models="glm-5.2;mock2-model">
+      <description>pair: LLM1 (glm-5.2) says modifying, LLM2 (mock2-model) says read-only -> BOTH requests arrive at one endpoint (RequestCount=2, both models logged) -> disagreement forces ask</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="LTP-Pair-Agree" mode="fullpipe" pair="true"
+               server1="false" server2="false"
+               expect-hit="2" expect-decision="allow"
+               expect-models="glm-5.2;mock2-model">
+      <description>pair: both endpoints say read-only -> agree -> LLM1 drives, decision stays allow (RequestCount=2)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="LTP-Pair-Llm2Garbage" mode="fullpipe" pair="true"
+               server1="false" server2="garbage"
+               expect-hit="2" expect-decision="allow"
+               expect-models="glm-5.2;mock2-model">
+      <description>pair: LLM1 read-only, LLM2 rambles unusable -> LLM2 has no authority to change an allow; LLM1 drives (compare=llm2-down, pinned in the LT3 classify suite) -> allow (RequestCount=2)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

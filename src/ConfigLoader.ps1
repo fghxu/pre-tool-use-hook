@@ -13,6 +13,100 @@
     ingore_tool_name) which are normalized to the correct spellings in the output.
 #>
 
+function Test-LlmBlockSchema {
+    <#
+    .SYNOPSIS
+        Shared schema validator for the "llm_second_opinion" and
+        "llm_third_opinion" config blocks (2026-09-30 pair design 3.2). The
+        checks were moved VERBATIM from the inline llm_second_opinion pass;
+        only the message prefix is parameterized so LLM1's throw messages stay
+        byte-identical (tests match on 'llm_second_opinion.').
+        Every key is validated even when the block is disabled - and for
+        llm_third_opinion even when the key is IGNORED at runtime (a typo must
+        throw at load, not at first use).
+    #>
+    param(
+        [Parameter(Mandatory = $true)]$Block,
+        [Parameter(Mandatory = $true)][string]$Prefix
+    )
+    $llm = $Block
+    if ($llm -isnot [PSCustomObject] -and $llm -isnot [hashtable]) {
+        throw "Configuration validation failed: '$Prefix' must be an object"
+    }
+    if ((Get-Member -InputObject $llm -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $llm.enabled -isnot [bool]) {
+        throw "Configuration validation failed: '$Prefix.enabled' must be a boolean"
+    }
+    if ((Get-Member -InputObject $llm -Name 'attributed_verdicts' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $llm.attributed_verdicts -isnot [bool]) {
+        throw "Configuration validation failed: '$Prefix.attributed_verdicts' must be a boolean"
+    }
+    if ((Get-Member -InputObject $llm -Name 'json_mode' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $llm.json_mode -isnot [bool]) {
+        throw "Configuration validation failed: '$Prefix.json_mode' must be a boolean"
+    }
+    if ((Get-Member -InputObject $llm -Name 'level' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $llm.level -notin @('all', 'complex_commands', 'complex_remote')) {
+        throw "Configuration validation failed: '$Prefix.level' must be 'all', 'complex_commands', or 'complex_remote', got '$($llm.level)'"
+    }
+    $intFields = @('complex_min_subcommands', 'timeout_ms', 'llm_response_max_tokens')
+    foreach ($f in $intFields) {
+        if (Get-Member -InputObject $llm -Name $f -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            $v = 0
+            if (-not [int]::TryParse("$($llm.$f)", [ref]$v) -or $v -lt 1) {
+                throw "Configuration validation failed: '$Prefix.$f' must be an integer >= 1, got '$($llm.$f)'"
+            }
+        }
+    }
+    if (Get-Member -InputObject $llm -Name 'temperature' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $tv = 0.0
+        if (-not [double]::TryParse("$($llm.temperature)", [ref]$tv) -or $tv -lt 0.0 -or $tv -gt 2.0) {
+            throw "Configuration validation failed: '$Prefix.temperature' must be a number between 0.0 and 2.0, got '$($llm.temperature)'"
+        }
+    }
+    if ((Get-Member -InputObject $llm -Name 'api_key' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $null -ne $llm.api_key -and $llm.api_key -isnot [string]) {
+        throw "Configuration validation failed: '$Prefix.api_key' must be a string"
+    }
+    if (Get-Member -InputObject $llm -Name 'remote_indicators' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        if ($llm.remote_indicators -isnot [array]) {
+            throw "Configuration validation failed: '$Prefix.remote_indicators' must be an array of regex strings"
+        }
+        foreach ($p in $llm.remote_indicators) {
+            try { $null = [regex]::new($p.ToString()) }
+            catch { throw "Invalid regex in $Prefix.remote_indicators: $p" }
+        }
+    }
+    # Validate optional "check_blindspot" sub-block (LLM second-opinion for
+    # local-unknown tiers). OPTIONAL: absent = check_blindspot off. When present
+    # it is validated even when the parent feature is disabled, so bad
+    # values surface at load time. CHECK_BLINDSPOT NEVER CHANGES THE DECISION -
+    # it only enriches the reason text the human sees at approval time.
+    if (Get-Member -InputObject $llm -Name 'check_blindspot' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $cb = $llm.check_blindspot
+        if ($cb -isnot [PSCustomObject] -and $cb -isnot [hashtable]) {
+            throw "Configuration validation failed: '$Prefix.check_blindspot' must be an object"
+        }
+        if ((Get-Member -InputObject $cb -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $cb.enabled -isnot [bool]) {
+            throw "Configuration validation failed: '$Prefix.check_blindspot.enabled' must be a boolean"
+        }
+        if ((Get-Member -InputObject $cb -Name 'tiers' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $cb.tiers -isnot [array]) {
+            throw "Configuration validation failed: '$Prefix.check_blindspot.tiers' must be an array of tier strings"
+        }
+    }
+    # base_uri and model are required only when the feature is enabled
+    if ($llm.enabled -eq $true) {
+        if (-not (Get-Member -InputObject $llm -Name 'base_uri' -MemberType NoteProperty) -or [string]::IsNullOrWhiteSpace($llm.base_uri)) {
+            throw "Configuration validation failed: '$Prefix.base_uri' is required when enabled is true"
+        }
+        if (-not (Get-Member -InputObject $llm -Name 'model' -MemberType NoteProperty) -or [string]::IsNullOrWhiteSpace($llm.model)) {
+            throw "Configuration validation failed: '$Prefix.model' is required when enabled is true"
+        }
+    }
+}
+
 function Test-ConfigSchema {
     <#
     .SYNOPSIS
@@ -102,82 +196,20 @@ function Test-ConfigSchema {
     # enabled=false so bad values surface at load time, not at first use.
     $hasLlm = Get-Member -InputObject $Config -Name 'llm_second_opinion' -MemberType NoteProperty -ErrorAction SilentlyContinue
     if ($hasLlm) {
-        $llm = $Config.llm_second_opinion
-        if ($llm -isnot [PSCustomObject] -and $llm -isnot [hashtable]) {
-            throw "Configuration validation failed: 'llm_second_opinion' must be an object"
-        }
-        if ((Get-Member -InputObject $llm -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
-            $llm.enabled -isnot [bool]) {
-            throw "Configuration validation failed: 'llm_second_opinion.enabled' must be a boolean"
-        }
-        if ((Get-Member -InputObject $llm -Name 'attributed_verdicts' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
-            $llm.attributed_verdicts -isnot [bool]) {
-            throw "Configuration validation failed: 'llm_second_opinion.attributed_verdicts' must be a boolean"
-        }
-        if ((Get-Member -InputObject $llm -Name 'json_mode' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
-            $llm.json_mode -isnot [bool]) {
-            throw "Configuration validation failed: 'llm_second_opinion.json_mode' must be a boolean"
-        }
-        if ((Get-Member -InputObject $llm -Name 'level' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
-            $llm.level -notin @('all', 'complex_commands', 'complex_remote')) {
-            throw "Configuration validation failed: 'llm_second_opinion.level' must be 'all', 'complex_commands', or 'complex_remote', got '$($llm.level)'"
-        }
-        $intFields = @('complex_min_subcommands', 'timeout_ms', 'llm_response_max_tokens')
-        foreach ($f in $intFields) {
-            if (Get-Member -InputObject $llm -Name $f -MemberType NoteProperty -ErrorAction SilentlyContinue) {
-                $v = 0
-                if (-not [int]::TryParse("$($llm.$f)", [ref]$v) -or $v -lt 1) {
-                    throw "Configuration validation failed: 'llm_second_opinion.$f' must be an integer >= 1, got '$($llm.$f)'"
-                }
-            }
-        }
-        if (Get-Member -InputObject $llm -Name 'temperature' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
-            $tv = 0.0
-            if (-not [double]::TryParse("$($llm.temperature)", [ref]$tv) -or $tv -lt 0.0 -or $tv -gt 2.0) {
-                throw "Configuration validation failed: 'llm_second_opinion.temperature' must be a number between 0.0 and 2.0, got '$($llm.temperature)'"
-            }
-        }
-        if ((Get-Member -InputObject $llm -Name 'api_key' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
-            $null -ne $llm.api_key -and $llm.api_key -isnot [string]) {
-            throw "Configuration validation failed: 'llm_second_opinion.api_key' must be a string"
-        }
-        if (Get-Member -InputObject $llm -Name 'remote_indicators' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
-            if ($llm.remote_indicators -isnot [array]) {
-                throw "Configuration validation failed: 'llm_second_opinion.remote_indicators' must be an array of regex strings"
-            }
-            foreach ($p in $llm.remote_indicators) {
-                try { $null = [regex]::new($p.ToString()) }
-                catch { throw "Invalid regex in llm_second_opinion.remote_indicators: $p" }
-            }
-        }
-        # Validate optional "check_blindspot" sub-block (LLM second-opinion for
-        # local-unknown tiers). OPTIONAL: absent = check_blindspot off. When present
-        # it is validated even when the parent feature is disabled, so bad
-        # values surface at load time. CHECK_BLINDSPOT NEVER CHANGES THE DECISION -
-        # it only enriches the reason text the human sees at approval time.
-        if (Get-Member -InputObject $llm -Name 'check_blindspot' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
-            $cb = $llm.check_blindspot
-            if ($cb -isnot [PSCustomObject] -and $cb -isnot [hashtable]) {
-                throw "Configuration validation failed: 'llm_second_opinion.check_blindspot' must be an object"
-            }
-            if ((Get-Member -InputObject $cb -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
-                $cb.enabled -isnot [bool]) {
-                throw "Configuration validation failed: 'llm_second_opinion.check_blindspot.enabled' must be a boolean"
-            }
-            if ((Get-Member -InputObject $cb -Name 'tiers' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
-                $cb.tiers -isnot [array]) {
-                throw "Configuration validation failed: 'llm_second_opinion.check_blindspot.tiers' must be an array of tier strings"
-            }
-        }
-        # base_uri and model are required only when the feature is enabled
-        if ($llm.enabled -eq $true) {
-            if (-not (Get-Member -InputObject $llm -Name 'base_uri' -MemberType NoteProperty) -or [string]::IsNullOrWhiteSpace($llm.base_uri)) {
-                throw "Configuration validation failed: 'llm_second_opinion.base_uri' is required when enabled is true"
-            }
-            if (-not (Get-Member -InputObject $llm -Name 'model' -MemberType NoteProperty) -or [string]::IsNullOrWhiteSpace($llm.model)) {
-                throw "Configuration validation failed: 'llm_second_opinion.model' is required when enabled is true"
-            }
-        }
+        # 2026-09-30 pair design 3.2: checks moved VERBATIM into the shared
+        # Test-LlmBlockSchema helper (message prefix parameterized so LLM1's
+        # messages stay byte-identical - existing tests match on the prefix).
+        Test-LlmBlockSchema -Block $Config.llm_second_opinion -Prefix 'llm_second_opinion'
+    }
+
+    # Validate optional "llm_third_opinion" block (2026-09-30 pair design):
+    # the parallel second-LLM A/B comparison partner. Same schema as LLM1
+    # (identical validation, 'llm_third_opinion.' message prefix). NO
+    # cross-block rule: this block present/enabled while llm_second_opinion is
+    # absent/disabled is VALID - that combination is the logged-skip case (D3).
+    $hasLlm2 = Get-Member -InputObject $Config -Name 'llm_third_opinion' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasLlm2) {
+        Test-LlmBlockSchema -Block $Config.llm_third_opinion -Prefix 'llm_third_opinion'
     }
 
     # Normalize intercept_tool_name (handle typo "intecept_tool_name")
@@ -831,6 +863,43 @@ function Load-Config {
     # Test-LlmReviewScope, which reads it with a property-existence fallback to
     # 'count' - so the absent-block path needs no LlmScope member at all.
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'llmSecondOpinion' -Value $llmCompiled -Force
+
+    # Compile llm_third_opinion (2026-09-30 pair design 3.3): the parallel
+    # second-LLM A/B partner. Only TRANSPORT identity is compiled here
+    # (BaseUri/Model/ApiKey/TimeoutMs) - scope and prompt/sampling always come
+    # from llmSecondOpinion for BOTH endpoints (D2 identical-prompt contract).
+    # $null when the block is absent; consumers null-check.
+    # EffectiveTimeoutMs is the D11 clamp: min(raw, llm1.timeout_ms) so the pair
+    # always finishes inside LLM1's wait budget (Hook's hard cap is unchanged).
+    # Raw when the LLM1 block is absent (the logged-skip case, D3 - no clamp
+    # partner exists).
+    $llm2Compiled = $null
+    if (Get-Member -InputObject $config -Name 'llm_third_opinion' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $l2Raw = $config.llm_third_opinion
+        # Pre-compute each field (PS 5.1-safe; same idiom as llmSecondOpinion).
+        $l2Enabled = $false
+        if (Get-Member -InputObject $l2Raw -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $l2Enabled = [bool]$l2Raw.enabled }
+        $l2BaseUri = ''
+        if (Get-Member -InputObject $l2Raw -Name 'base_uri' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $l2BaseUri = "$($l2Raw.base_uri)" }
+        $l2Model = ''
+        if (Get-Member -InputObject $l2Raw -Name 'model' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $l2Model = "$($l2Raw.model)" }
+        $l2ApiKey = ''
+        if (Get-Member -InputObject $l2Raw -Name 'api_key' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $l2ApiKey = "$($l2Raw.api_key)" }
+        $l2TimeoutMs = 12000
+        if (Get-Member -InputObject $l2Raw -Name 'timeout_ms' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $l2TimeoutMs = [int]$l2Raw.timeout_ms }
+        $l2EffectiveTimeoutMs = $l2TimeoutMs
+        if ($llmCompiled) { $l2EffectiveTimeoutMs = [math]::Min($l2TimeoutMs, $llmCompiled.TimeoutMs) }
+        $llm2Compiled = [PSCustomObject]@{
+            Enabled            = $l2Enabled
+            BaseUri            = $l2BaseUri
+            Model              = $l2Model
+            ApiKey             = $l2ApiKey
+            TimeoutMs          = $l2TimeoutMs          # raw config value
+            EffectiveTimeoutMs = $l2EffectiveTimeoutMs # min(raw, llm1.timeout_ms)
+        }
+    }
+    $config._compiled | Add-Member -MemberType NoteProperty -Name 'llmThirdOpinion' -Value $llm2Compiled -Force
+
 
     # Compile ask_notification (optional): toast popup + sound on ask decisions.
     # Defaults: enabled=true, popup=true, sound=true, sound_file='' (system beep).

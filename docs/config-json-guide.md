@@ -394,6 +394,73 @@ attributed JSON contract). Never run these against the ~1000-case main suites.
 gateway, run one in-scope command (e.g. `aws s3 ls && aws s3 cp a b`), then
 check the newest `*.records.jsonl` in your log directory for the `llm` object.
 
+### 10.5.1 `llm_third_opinion` — third-opinion LLM (the "pair", 2026-09-30)
+
+Optional sibling block. **Absent or `enabled: false` = byte-identical behavior**
+(no `llm2` member appears in any record). When enabled — and only when
+`llm_second_opinion` is *also* enabled and the command is in scope — the
+**identical prompt** is sent to a **second endpoint in parallel** (PowerShell
+runspaces, so wall-clock ≈ `max(t1, t2)`, never the sum). The two parsed
+verdicts are compared:
+
+| LLM1 | LLM2 | Final | `llm2.compare` |
+|------|------|-------|----------------|
+| any | **disagreeing** | **ask** — unconditional, `*** LLM-DISAGREE ***` (also vetoes a local `ask`→allow suppression; D5/D7) | `disagree` |
+| modifying | read-only | ask (LLM1's veto drives) | `agree`* |
+| read-only | modifying | allow stands — LLM2 has **no authority** to veto alone | `agree`* |
+| any | unreachable / unparseable | LLM1 drives exactly as before | `llm2-down` |
+| unreachable / unparseable | any | today's fail-closed ask, with an LLM2 FYI note appended | `llm1-down` |
+| (out of scope) | — | unchanged | `out-of-scope` |
+| (all sub-commands trusted/editable — R2 skip) | — | unchanged | `skipped-trusted-editable` |
+| `llm_second_opinion` disabled | enabled | LLM skipped entirely; a skip-note line is logged | `skipped-primary-disabled` |
+
+\* agreement is **index-SET equality** (order-insensitive, deduped); one-sided
+indices (one side attributed, the other not) = **disagree** (fail-closed).
+
+```jsonc
+"llm_third_opinion": {
+  "enabled": false,
+  "base_uri": "http://127.0.0.1:3031",
+  "model": "gpt-5.6-sol",
+  "api_key": "",
+  "timeout_ms": 30000
+  // level / temperature / llm_response_max_tokens / attributed_verdicts /
+  // json_mode / complex_min_subcommands / remote_indicators / check_blindspot
+  // are ACCEPTED-BUT-IGNORED (see below) — still validated, so typos throw.
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `enabled` | Bool. Fires only when `llm_second_opinion.enabled` is also true (D1). `llm_second_opinion` off + this on = skip-note (D3/D13), never a silent no-op. |
+| `base_uri` / `model` / `api_key` | The second endpoint. `model` should differ from LLM1's (log/mining clarity). Required when enabled. |
+| `timeout_ms` | Default 12000. **Effective timeout = `min(this, llm_second_opinion.timeout_ms)`** (D11) — a pair consult can never exceed LLM1's budget; the hook hard cap is unchanged. |
+| everything else | **Accepted but ignored**: LLM1's values decide scope (`level`, `complex_min_subcommands`, `remote_indicators`, `check_blindspot`) and prompt/sampling (`attributed_verdicts`, `temperature`, `llm_response_max_tokens`, `json_mode`) for **both** models — the identical prompt is what makes the A/B comparison fair. Ignored keys are still schema-validated (a typo throws at load). |
+
+- **`check_blindspot` consults never change the decision** (D9): a blindspot ask
+  just gains ` | LLM2 agrees` / ` | LLM2 DISAGREES: …` in the reason.
+- **`.log` rendering:** the SENT line gains `model2=… timeout2=…ms`; a new
+  `LLM2-RECV` line mirrors `LLM-RECV`; the RECONCILE line is prefixed
+  `llm2-agree | ` / `llm1-down | ` / `llm2-down (proceeded on LLM1) | `, and on
+  disagreement renders `disagree LLM=… vs LLM2=… -> FINAL: ask`.
+- **records.jsonl:** the `llm` object gains an `llm2` sub-object
+  (`model`, `effective_timeout_ms`, `verdict`, `indices`, `latency_ms`,
+  `recovered`, `mocked`, `error`, `raw_excerpt`, `compare`). `compare` enum:
+  `agree | disagree | llm1-down | llm2-down | out-of-scope |
+  skipped-trusted-editable | skipped-primary-disabled`. Absent `llm2` member =
+  the pair was not armed (feature off) — old records stay byte-identical.
+- **Testing:** `PRETOOLHOOK_LLMREVIEW_MOCK2` injects LLM2's verdict with the
+  same grammar as `PRETOOLHOOK_LLMREVIEW_MOCK`; **unset MOCK2 falls back to
+  MOCK** (both sides identical → agree → today's behavior, D12). Fixture:
+  `test/config/llm-third-opinion/` (28 cases + 8 config preflights), plus the
+  real-HTTP pair cases in `test/config/llm-review/http/test-llm-pair.xml`.
+  Design: `docs/superpowers/specs/2026-09-30-llm-third-opinion-design.md`.
+
+**Recipe — enable it:** set `llm_second_opinion.enabled: true` first, then set
+this block's `enabled: true` + `base_uri`/`model`, run an in-scope command, and
+check the newest record's `llm.llm2.compare` — mine `disagree` rates before
+relying on the forced asks.
+
 ## 10.6 `ask_notification` — toast + sound on ask decisions
 
 **What it does:** pops a Windows toast notification and plays a sound whenever the hook decides `ask` (approval needed). Useful when the IDE is in the background or on another monitor — you hear/see the alert instead of wondering why the agent went quiet.

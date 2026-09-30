@@ -1,0 +1,453 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LLM-THIRD-OPINION PAIR SUITE (RED phase, 2026-09-30)
+     Spec:  docs/superpowers/specs/2026-09-30-llm-third-opinion-spec.md  (D1-D17, authority)
+     Design: docs/superpowers/specs/2026-09-30-llm-third-opinion-design.md (section 7.3)
+
+     Run (trusted path, no hook prompt):
+       pwsh -NoProfile -File src\Run-AllTests.ps1 -Filter llm-third-opinion
+     which invokes:
+       test/config/llm-review/Run-Tests.ps1
+         -XmlPath   test/config/llm-third-opinion/test-cases.llm.xml
+         -ConfigPath test/config/llm-third-opinion/config.pair.json
+         -Cwd       test/config/llm-third-opinion
+
+     MOCKS: LLM1 = PRETOOLHOOK_LLMREVIEW_MOCK (mock=), LLM2 = PRETOOLHOOK_LLMREVIEW_MOCK2
+     (mock2=; UNSET mock2 falls back to mock = "both agree" = the regression baseline).
+     Grammar: modifying | read-only | garbage | down | idx:N,M (attributed JSON form).
+     NO NETWORK except the discard port (127.0.0.1:9) in LT3-22 (deliberate down).
+
+     SCOPE WARNING: the runner's per-case level/min DEFAULT to complex_remote/2 and
+     OVERRIDE the config file - every in-scope case below therefore sets
+     level="complex_commands" min="2" explicitly. Blindspot cases use a SINGLE
+     sub-command (1 < 2 => out of normal scope => check_blindspot rescue).
+
+     TDD EXPECTATIONS (RED, pre-implementation):
+       - PASS now (parity pins, by design): LT3-13, and the decision+reason halves of
+         several cases whose llm2 assertions fail.
+       - FAIL now (the new behavior): every case asserting llm2-* fields, the
+         llm2-disagree effect/reason, the skip-note, and preflights PF-1..PF-8
+         (validation/compile absent today: llm_third_opinion is an ignored unknown key).
+
+     PIN MAP (case -> spec decision):
+       LT3-01/02      D6/D7  agree -> LLM1 drives today's merge unchanged
+       LT3-03         D5     disagree -> unconditional forced ask (*** LLM-DISAGREE ***)
+       LT3-04         D4/D16 index-set inequality + contested detail in the reason
+       LT3-05         D4     order-insensitive index-set equality is NOT a disagreement
+       LT3-06/07      D7     LLM2 failed -> proceed on LLM1 (no new failure mode)
+       LT3-08/09      D8     LLM1 failed -> fail-closed ask + non-authoritative LLM2 FYI
+       LT3-10         D7     both failed -> today's LLM-DOWN ask, NO FYI append
+       LT3-11/12      D9     blindspot pair: agree/disagree noted, decision NEVER changes
+       LT3-13         I1     disabled block = byte-identical (llm2 ABSENT from records)
+       LT3-14         D14    R2 skip: pair skipped too, self-documented compare value
+       LT3-15/16      D4     V1 bare-token comparison (and: ignored llm2 keys stay ignored)
+       LT3-17/18      D3/D13 LLM1 disabled/absent + LLM2 enabled -> skip-note (records-visible)
+       LT3-19         D5     trusted-only disagreement STILL asks (before suppression)
+       LT3-20         D4     one-sided indices (bare-token recovery vs clean JSON) = disagree
+       LT3-21         e2e    fullpipe: real Hook.ps1, reason + LLM2-RECV log line
+       LT3-22         D12    MOCK2-without-MOCK: per-side mock gate + FYI over real HTTP
+     Added by the 2026-10-01 sibling fixture audit (gaps in the 22-case set):
+       LT3-23         D5     reverse-direction disagree (LLM1 read-only / LLM2 modifying)
+       LT3-24         D13    out-of-scope + pair armed -> compare='out-of-scope' stamp
+       LT3-25         D9     blindspot + LLM2 down -> NO LLM2 note, ask stands
+       LT3-26         D8     LLM1 down + LLM2 garbage -> llm1-down fold, no FYI
+       LT3-27         D16    diff={0}-only sentinel -> NO contested part (negative-index pin)
+       LT3-28         e2e    fullpipe AGREE leg -> LLM2-RECV also on the agree path
+     (Out-of-range hallucinated indices are NOT testable through the mock grammar:
+      Test-ModifyingArray rejects idx > sub-command count as 'unusable' before any
+      comparison code runs - the design's firstIdx range guard is defense-in-depth.)
+-->
+<commands>
+  <category-group name="LlmThirdOpinionPair">
+
+    <!-- ================================================================= -->
+    <!-- AGREEMENT: LLM1's verdict drives today's merge, untouched (D6/D7) -->
+    <!-- ================================================================= -->
+
+    <!-- Both LLMs read-only (mock2 unset -> falls back to mock): agree on top of a
+         local allow. This is also the MOCK2-fallback regression pin (D12). -->
+    <test-case expected="allow" category="LT3-01-Agree-ReadOnly-Allow"
+               level="complex_commands" min="2" mock="idx:"
+               in-scope="true" verdict="read-only" effect="agree"
+               llm2-present="true" llm2-verdict="read-only" llm2-compare="agree">
+      <description>Get-Date; Get-Process - pair agrees read-only -> allow, compare=agree</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- Both LLMs flag sub 2 on a locally-allowed block: agree(modifying) -> the
+         EXISTING veto path fires exactly as today. effect=veto (not llm2-disagree). -->
+    <test-case expected="ask" category="LT3-02-Agree-Veto-Ask"
+               level="complex_commands" min="2" mock="idx:2" mock2="idx:2"
+               in-scope="true" verdict="modifying" effect="veto" flagged="2"
+               reason-contains="*** LLM-VETO ***"
+               llm2-present="true" llm2-verdict="modifying" llm2-compare="agree">
+      <description>Get-Date; Get-Process - pair agrees modifying[2] -> today's veto</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================= -->
+    <!-- DISAGREEMENT: unconditional forced ask BEFORE suppression (D5)    -->
+    <!-- ================================================================= -->
+
+    <!-- The headline rule: LLM1 says modifying[2], LLM2 says read-only -> ask. -->
+    <test-case expected="ask" category="LT3-03-Disagree-ForcedAsk"
+               level="complex_commands" min="2" mock="idx:2" mock2="idx:"
+               in-scope="true" verdict="modifying" effect="llm2-disagree"
+               reason-contains="*** LLM-DISAGREE ***;LLM1 (m1);LLM2 (m2)"
+               llm2-present="true" llm2-verdict="read-only" llm2-compare="disagree">
+      <description>Get-Date; Get-Process - verdict tokens differ -> forced ask, both models named</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- Same token (modifying), different index sets: [1,2] vs [1,2,4] -> DIFFERENT
+         (D4: exact index-set equality). Contested detail names sub 4 (D16). -->
+    <test-case expected="ask" category="LT3-04-Disagree-IndicesOnly"
+               level="complex_commands" min="2" mock="idx:1,2" mock2="idx:1,2,4"
+               in-scope="true" verdict="modifying" effect="llm2-disagree"
+               reason-contains="*** LLM-DISAGREE ***;contested: [4]"
+               llm2-present="true" llm2-compare="disagree">
+      <description>4-sub block - same token, [1,2] vs [1,2,4] -> ask + contested: [4]</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process; Get-ChildItem; Get-Service]]></copilot-command>
+    </test-case>
+
+    <!-- Order-insensitive: [2,4] vs [4,2] are the SAME set -> agree -> LLM1's veto
+         path (NOT llm2-disagree). Pins set-equality, not sequence-equality. -->
+    <test-case expected="ask" category="LT3-05-Agree-OrderInsensitive"
+               level="complex_commands" min="2" mock="idx:2,4" mock2="idx:4,2"
+               in-scope="true" verdict="modifying" effect="veto"
+               llm2-present="true" llm2-compare="agree">
+      <description>4-sub block - [2,4] vs [4,2] -> agree, today's veto fires</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process; Get-ChildItem; Get-Service]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================= -->
+    <!-- FAILURE MODES: LLM2 never has decision authority (D7/D8)          -->
+    <!-- ================================================================= -->
+
+    <!-- LLM2 down, LLM1 flags sub 2: proceed on LLM1 -> today's veto. NOT disagree. -->
+    <test-case expected="ask" category="LT3-06-Llm2Down-ProceedOnLlm1"
+               level="complex_commands" min="2" mock="idx:2" mock2="down"
+               in-scope="true" verdict="modifying" effect="veto"
+               reason-contains="*** LLM-VETO ***"
+               llm2-present="true" llm2-verdict="down" llm2-compare="llm2-down">
+      <description>Get-Date; Get-Process - LLM2 down -> LLM1 veto proceeds (compare=llm2-down)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- LLM2 unusable (prose), both would say read-only: local allow stands. -->
+    <test-case expected="allow" category="LT3-07-Llm2Garbage-Proceed"
+               level="complex_commands" min="2" mock="idx:" mock2="garbage"
+               in-scope="true" verdict="read-only" effect="agree"
+               llm2-present="true" llm2-verdict="unusable" llm2-compare="llm2-down">
+      <description>Get-Date; Get-Process - LLM2 unusable -> allow stands (compare=llm2-down)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- LLM1 down, LLM2 verdict available: today's fail-closed ask PLUS the
+         non-authoritative FYI line carrying LLM2's (uppercased) verdict (D8). -->
+    <test-case expected="ask" category="LT3-08-Llm1Down-FYI"
+               level="complex_commands" min="2" mock="down" mock2="idx:2"
+               in-scope="true" verdict="down" effect="forced-ask"
+               reason-contains="*** LLM-DOWN ***;LLM2 second-opinion (no authority, FYI): MODIFYING indices=[2]"
+               llm2-present="true" llm2-verdict="modifying" llm2-compare="llm1-down">
+      <description>Get-Date; Get-Process - LLM1 down -> ask + LLM2 FYI MODIFYING [2]</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- LLM1 unusable + LLM2 read-only: LLM-UNUSABLE forced ask + FYI READ-ONLY. -->
+    <test-case expected="ask" category="LT3-09-Llm1Unusable-FYI"
+               level="complex_commands" min="2" mock="garbage" mock2="read-only"
+               in-scope="true" verdict="unusable" effect="forced-ask"
+               reason-contains="*** LLM-UNUSABLE ***;LLM2 second-opinion (no authority, FYI): READ-ONLY"
+               llm2-present="true" llm2-verdict="read-only" llm2-compare="llm1-down">
+      <description>Get-Date; Get-Process - LLM1 unusable -> ask + LLM2 FYI READ-ONLY</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- Both down: today's LLM-DOWN ask; NO FYI line (nothing to cite). -->
+    <test-case expected="ask" category="LT3-10-BothDown"
+               level="complex_commands" min="2" mock="down" mock2="down"
+               in-scope="true" verdict="down" effect="forced-ask"
+               reason-contains="*** LLM-DOWN ***"
+               reason-not-contains="FYI"
+               llm2-present="true" llm2-verdict="down" llm2-compare="llm1-down">
+      <description>Get-Date; Get-Process - both down -> today's ask, no FYI append</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================= -->
+    <!-- CHECK_BLINDSPOT: pair joins, decision NEVER changes (D9)          -->
+    <!-- ================================================================= -->
+
+    <!-- Single unknown-tier sub-command: 1 < min 2 => out of normal scope =>
+         blindspot rescue consults the PAIR. LLM2 agrees -> note only, local ask. -->
+    <test-case expected="ask" category="LT3-11-Blindspot-Agree"
+               level="complex_commands" min="2" check_blindspot="true" mock="idx:"
+               in-scope="true" check_blindspot-triggered="true" effect="check-blindspot-ask"
+               reason-contains="*** CHECK_BLINDSPOT ***;LLM2 agrees"
+               llm2-present="true" llm2-verdict="read-only" llm2-compare="agree">
+      <description>foobarbaz --x - blindspot consult, pair agrees (note only, ask stands)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[foobarbaz --x]]></copilot-command>
+    </test-case>
+
+    <!-- Blindspot disagreement: FYI line only (D9) - the blindspot headline
+         survives, effect stays check-blindspot-ask (NOT llm2-disagree).
+         reason-not-contains pins the D9 guard in design 4.5: an unguarded
+         disagree early-return would stamp '*** LLM-DISAGREE ***' here and
+         fail this pin (sibling fixture-audit catch, 2026-10-01). -->
+    <test-case expected="ask" category="LT3-12-Blindspot-Disagree"
+               level="complex_commands" min="2" check_blindspot="true" mock="idx:" mock2="idx:1"
+               in-scope="true" check_blindspot-triggered="true" effect="check-blindspot-ask"
+               reason-contains="*** CHECK_BLINDSPOT ***;LLM2 DISAGREES"
+               reason-not-contains="*** LLM-DISAGREE ***"
+               llm2-present="true" llm2-verdict="modifying" llm2-compare="disagree">
+      <description>foobarbaz --x - blindspot pair disagrees (FYI only, ask stands)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[foobarbaz --x]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================= -->
+    <!-- PARITY + SLAVE-SCOPE INVARIANTS                                   -->
+    <!-- ================================================================= -->
+
+    <!-- Disabled third block: LLM1 exactly as today; llm2 ABSENT from the log
+         (byte-identical records when the feature is off). PASSes RED (parity pin). -->
+    <test-case expected="ask" category="LT3-13-Disabled-Parity"
+               config="config.llm2-disabled.json"
+               level="complex_commands" min="2" mock="idx:2"
+               in-scope="true" verdict="modifying" effect="veto" flagged="2"
+               llm2-present="false">
+      <description>Get-Date; Get-Process - third block disabled -> today's veto, no llm2 object</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- R2 pre-skip: EVERY sub-command trusted (tool-a/tool-b in trusted_programs)
+         => the PAIR is skipped too (LLM2 fires iff LLM1 fires) and the skip is
+         SELF-DOCUMENTED: compare='skipped-trusted-editable' (D14 - NOT ll2-absence). -->
+    <test-case expected="allow" category="LT3-14-R2Skip-Note"
+               level="complex_commands" min="2"
+               in-scope="true" verdict="not_called" effect="llm-skipped-trusted-editable"
+               llm2-present="true" llm2-compare="skipped-trusted-editable">
+      <description>tool-a.exe ; tool-b.exe - all-trusted block: pair skipped, compare records it</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[tool-a.exe ; tool-b.exe]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================= -->
+    <!-- V1 (unattributed) PAIR MODE (D4) - also pins that llm2's ignored   -->
+    <!-- attributed_verdicts=true copy does NOT flip the mode (D2)          -->
+    <!-- ================================================================= -->
+
+    <test-case expected="ask" category="LT3-15-V1-Disagree"
+               config="config.v1.json" attributed="false"
+               level="complex_commands" min="2" mock="modifying" mock2="read-only"
+               in-scope="true" verdict="modifying" effect="llm2-disagree"
+               reason-contains="*** LLM-DISAGREE ***"
+               llm2-present="true" llm2-verdict="read-only" llm2-compare="disagree">
+      <description>Get-Date; Get-Process - V1 bare tokens disagree -> ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="LT3-16-V1-Agree"
+               config="config.v1.json" attributed="false"
+               level="complex_commands" min="2" mock="read-only"
+               in-scope="true" verdict="read-only" effect="agree"
+               llm2-present="true" llm2-verdict="read-only" llm2-compare="agree">
+      <description>Get-Date; Get-Process - V1 both read-only (fallback) -> allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================= -->
+    <!-- SKIP-NOTE: LLM2 armed, LLM1 not (D3 addendum + D13)               -->
+    <!-- ================================================================= -->
+
+    <!-- LLM1 disabled + LLM2 enabled: NO LLM call; a skip log object still exists
+         with effect=skipped-primary-disabled and llm2.compare recording WHY
+         (spec D13: the skip is RECORDS-VISIBLE, not .log-only). enabled="false"
+         is required because the runner's per-case default re-enables LLM1. -->
+    <test-case expected="allow" category="LT3-17-SkipNote-Classify"
+               config="config.llm1-disabled.json" enabled="false"
+               in-scope="false" verdict="not_called" effect="skipped-primary-disabled"
+               llm2-present="true" llm2-compare="skipped-primary-disabled">
+      <description>Get-Date - LLM1 disabled, LLM2 armed -> skip log (classify leg)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <!-- Same case through the REAL hook (block absent entirely): the .log gains
+         the dedicated one-liner. log-contains reads the newest entry in the
+         fixture log dir (config.llm1-absent.json log_file_path). -->
+    <test-case expected="allow" category="LT3-18-SkipNote-Fullpipe"
+               config="config.llm1-absent.json" mode="fullpipe"
+               log-contains="LLM2          : llm_third_opinion enabled but llm_second_opinion disabled - LLM2 skipped">
+      <description>Get-Date - LLM1 block ABSENT, LLM2 armed -> hook .log skip line (fullpipe)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================= -->
+    <!-- D5 HEADLINE + EDGE CASES                                          -->
+    <!-- ================================================================= -->
+
+    <!-- The spec's own example: LLM1 flags the TRUSTED sub 2, LLM2 says read-only.
+         Comparison runs BEFORE suppression => ask even though index 2 is
+         trusted territory (unconditional, D5). -->
+    <test-case expected="ask" category="LT3-19-Disagree-TrustedOnly"
+               level="complex_commands" min="2" mock="idx:2" mock2="idx:"
+               in-scope="true" verdict="modifying" effect="llm2-disagree"
+               reason-contains="*** LLM-DISAGREE ***"
+               llm2-present="true" llm2-verdict="read-only" llm2-compare="disagree">
+      <description>git status ; src\Classifier.ps1 - trusted-only disagreement STILL asks (D5)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git status ; src\Classifier.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- One-sided indices: LLM1 clean JSON modifying[2]; LLM2 bare-token recovery
+         'modifying' (Indices null). NOT comparable-as-equal => DISAGREE (fail-closed:
+         a lower-fidelity recovered answer must not count as agreement). -->
+    <test-case expected="ask" category="LT3-20-Disagree-OneSidedIndices"
+               level="complex_commands" min="2" mock="idx:2" mock2="modifying"
+               in-scope="true" verdict="modifying" effect="llm2-disagree"
+               reason-contains="*** LLM-DISAGREE ***"
+               llm2-present="true" llm2-verdict="modifying" llm2-compare="disagree">
+      <description>Get-Date; Get-Process - [2] vs bare-token modifying -> disagree (fail-closed)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================= -->
+    <!-- END-TO-END (fullpipe: the REAL Hook.ps1 in a child process)       -->
+    <!-- ================================================================= -->
+
+    <!-- Fullpipe disagree: the child hook inherits BOTH mock env vars; stdout
+         decision ask + reason carries the banner; the .log carries LLM2-RECV. -->
+    <test-case expected="ask" category="LT3-21-FullPipe-Disagree"
+               mode="fullpipe" mock="idx:2" mock2="read-only"
+               reason-contains="*** LLM-DISAGREE ***"
+               log-contains="LLM2-RECV">
+      <description>Get-Date; Get-Process - fullpipe disagree -> ask + LLM2-RECV in .log</description>
+      <tool-name>run_in_terminal</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- MOCK2 set, MOCK unset (legal edge, never otherwise used): per-SIDE mock
+         gate - LLM1 does a REAL HTTP call to the discard port (fast refuse =>
+         down) while LLM2 is mocked. Expect LLM-DOWN forced ask + FYI MODIFYING [2],
+         llm2.mocked=true. Pins the v3-borrowed per-side gate (design section 4.5). -->
+    <test-case expected="ask" category="LT3-22-Mock2Only-Edge"
+               level="complex_commands" min="2" mock2="idx:2"
+               in-scope="true" verdict="down" effect="forced-ask"
+               reason-contains="*** LLM-DOWN ***;LLM2 second-opinion (no authority, FYI): MODIFYING indices=[2]"
+               llm2-present="true" llm2-verdict="modifying" llm2-mocked="true" llm2-compare="llm1-down">
+      <description>Get-Date; Get-Process - MOCK2 only: LLM1 real-HTTP down, LLM2 mocked [2]</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================= -->
+    <!-- SIBLING AUDIT ADDITIONS (2026-10-01) - gaps found reviewing the   -->
+    <!-- 22-case set; merged with two adjudications (see design 10.3):     -->
+    <!-- LT3-27 rebuilt (diff={0}-only actually catches the negative-index -->
+    <!-- bug), LT3-24 comment reworded (OUR spec stamps out-of-scope).     -->
+    <!-- ================================================================= -->
+
+    <!-- Reverse direction of LT3-03: LLM1 read-only, LLM2 modifying. Disagreement
+         is SYMMETRIC (D5) - forced ask even though LLM1 (the authority) would have
+         allowed. Without this pin, an implementation that only asks when LLM1 is
+         the stricter side would pass LT3-03 and fail silently here. -->
+    <test-case expected="ask" category="LT3-23-Disagree-Reverse-LLM2-Stricter"
+               level="complex_commands" min="2" mock="idx:" mock2="idx:2"
+               in-scope="true" verdict="read-only" effect="llm2-disagree"
+               reason-contains="*** LLM-DISAGREE ***;LLM1 (m1);LLM2 (m2)"
+               llm2-present="true" llm2-verdict="modifying" llm2-compare="disagree">
+      <description>Get-Date; Get-Process - LLM1 read-only vs LLM2 modifying [2] -> symmetric forced ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- Out-of-scope with the pair ARMED: no call; the llm2 sub-log is stamped
+         compare='out-of-scope' (OUR spec D13 / design 4.5 rule 3 - the llm2
+         sub-object exists whenever the pair is armed). NOTE: the non-authoritative
+         sibling-spec variant encodes this state by ABSENCE of llm2; if that ruling
+         were ever adopted, THIS is the case to flip (spec amendment first). -->
+    <test-case expected="allow" category="LT3-24-OutOfScope-PairArmed-Stamp"
+               level="complex_commands" min="3" mock="idx:2" mock2="idx:2"
+               in-scope="false" verdict="not_called" effect="none"
+               llm2-present="true" llm2-compare="out-of-scope">
+      <description>Get-Date; Get-Process - 2 subs &lt; min 3 => out of scope, pair stamped out-of-scope</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- Blindspot rescue + LLM2 down: the LLM1 blindspot consult still happens
+         (compare=llm2-down recorded), but NO 'LLM2' note is appended to the
+         reason (nothing to cite) and the decision NEVER changes (D9). -->
+    <test-case expected="ask" category="LT3-25-Blindspot-Llm2Down"
+               level="complex_commands" min="2" check_blindspot="true" mock="idx:" mock2="down"
+               in-scope="true" check_blindspot-triggered="true" effect="check-blindspot-ask"
+               reason-contains="*** CHECK_BLINDSPOT ***"
+               reason-not-contains="LLM2"
+               llm2-present="true" llm2-verdict="down" llm2-compare="llm2-down">
+      <description>foobarbaz --x - blindspot consult, LLM2 down -> no LLM2 note, ask stands</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[foobarbaz --x]]></copilot-command>
+    </test-case>
+
+    <!-- LLM1 down + LLM2 garbage: fold is llm1-down, today's LLM-DOWN ask, and NO
+         FYI line (D8: FYI only when LLM2 has a citable verdict). Completes the
+         failure matrix: LT3-08 (down+ok), LT3-10 (down+down), this (down+garbage). -->
+    <test-case expected="ask" category="LT3-26-Llm1Down-Llm2Garbage-NoFYI"
+               level="complex_commands" min="2" mock="down" mock2="garbage"
+               in-scope="true" verdict="down" effect="forced-ask"
+               reason-contains="*** LLM-DOWN ***"
+               reason-not-contains="FYI"
+               llm2-present="true" llm2-verdict="unusable" llm2-compare="llm1-down">
+      <description>Get-Date; Get-Process - LLM1 down + LLM2 garbage -> ask, no FYI append</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- Index-0 sentinel, REBUILT construction (sibling audit found the gap; this
+         variant actually DISTINGUISHES guarded vs unguarded code): 3 subs, LLM1
+         flags [0,1], LLM2 flags [1] -> same token, diff = {0} ONLY. The design's
+         firstIdx>=1 guard finds nothing to name => NO contested part at all.
+         UNGUARDED code would PS-negative-index SubCommands[0-1] = the LAST sub
+         ('Get-Service') and wrongly render "contested: [0] 'Get-Service'" -
+         caught by reason-not-contains. -->
+    <test-case expected="ask" category="LT3-27-Disagree-IndexZero-Sentinel"
+               level="complex_commands" min="2" mock="idx:0,1" mock2="idx:1"
+               in-scope="true" verdict="modifying" effect="llm2-disagree"
+               reason-contains="*** LLM-DISAGREE ***"
+               reason-not-contains="contested"
+               llm2-present="true" llm2-verdict="modifying" llm2-compare="disagree">
+      <description>Get-Date; Get-Process; Get-Service - [0,1] vs [1] -> diff {0} only, no contested part</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process; Get-Service]]></copilot-command>
+    </test-case>
+
+    <!-- Fullpipe AGREE leg (LT3-21 pins the disagree leg): the LLM2-RECV log line
+         must also appear on the agree path (Logger gating: compare in
+         agree|disagree|llm1-down|llm2-down). Decision stays allow. -->
+    <test-case expected="allow" category="LT3-28-FullPipe-Agree"
+               mode="fullpipe" mock="idx:" mock2="idx:"
+               log-contains="LLM2-RECV">
+      <description>Get-Date; Get-Process - fullpipe agree -> allow + LLM2-RECV in .log</description>
+      <tool-name>run_in_terminal</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

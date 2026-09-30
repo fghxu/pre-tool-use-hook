@@ -112,7 +112,12 @@ $extraSuites = @(
     # Cwd=fixture dir); script-drilldown.llm is the llm_scope sub-suite run by the
     # llm-review fixture runner (mock verdicts, no network).
     @{ Name = 'script-drilldown';       File = (Join-Path $repoRoot 'test\config\script-drilldown\Run-Tests.ps1'); Args = @() },
-    @{ Name = 'script-drilldown.llm';   File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\script-drilldown\test-cases.llm.xml'), '-ConfigPath', (Join-Path $repoRoot 'test\config\script-drilldown\config.llm.json'), '-Cwd', (Join-Path $repoRoot 'test\config\script-drilldown')) }
+    @{ Name = 'script-drilldown.llm';   File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\script-drilldown\test-cases.llm.xml'), '-ConfigPath', (Join-Path $repoRoot 'test\config\script-drilldown\config.llm.json'), '-Cwd', (Join-Path $repoRoot 'test\config\script-drilldown')) },
+    # llm_third_opinion (2026-09-30): the LLM2 pair path - identical prompt to a
+    # second endpoint in parallel, disagreement forces ask. PF-1..PF-8 config
+    # preflights fire automatically (the runner detects the sibling
+    # config.pair.json); mock2 env var drives LLM2's verdict, no network.
+    @{ Name = 'llm-third-opinion.llm';  File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\llm-third-opinion\test-cases.llm.xml'), '-ConfigPath', (Join-Path $repoRoot 'test\config\llm-third-opinion\config.pair.json'), '-Cwd', (Join-Path $repoRoot 'test\config\llm-third-opinion')) }
 )
 if ($Filter) {
     $extraSuites = @($extraSuites | Where-Object { $_.Name -like "*$Filter*" })
