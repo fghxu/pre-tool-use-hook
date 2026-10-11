@@ -477,6 +477,41 @@ if (Test-Path (Join-Path (Split-Path $XmlPath -Parent) 'config.pair.json')) {
     catch {
         Record-Result -Ok $false -Name 'PF-8-DisabledBlock' -Detail "Load-Config threw: $($_.Exception.Message)"
     }
+
+    # ---- PF-9..PF-11: enforce_disagree switch (2026-10-10) ----------------
+    # PF-9: non-boolean enforce_disagree MUST throw with the
+    # llm_third_opinion.enforce_disagree prefix (fail-closed validation).
+    try {
+        $null = Load-Config -Path (Join-Path $pairDir 'config.bad-disagree.json')
+        Record-Result -Ok $false -Name 'PF-9-BadEnforceDisagree' -Detail 'Load-Config did NOT throw for enforce_disagree="yes"'
+    }
+    catch {
+        $ok = $_.Exception.Message -match 'llm_third_opinion\.enforce_disagree'
+        Record-Result -Ok $ok -Name 'PF-9-BadEnforceDisagree' -Detail "threw but unexpected message: $($_.Exception.Message)"
+    }
+
+    # PF-10: enforce_disagree=false compiles to EnforceDisagree=false.
+    try {
+        $pf10 = Load-Config -Path (Join-Path $pairDir 'config.pair.disagree-off.json')
+        $c10 = $pf10._compiled.llmThirdOpinion
+        $ok = ($null -ne $c10) -and $c10.Enabled -and ($c10.EnforceDisagree -eq $false)
+        Record-Result -Ok $ok -Name 'PF-10-EnforceOffCompile' -Detail "llmThirdOpinion.EnforceDisagree = $(if ($c10) { $c10.EnforceDisagree } else { 'NULL block' }) (want False)"
+    }
+    catch {
+        Record-Result -Ok $false -Name 'PF-10-EnforceOffCompile' -Detail "Load-Config threw: $($_.Exception.Message)"
+    }
+
+    # PF-11: key ABSENT (config.pair.json) -> default EnforceDisagree=true
+    # (today's forced ask stays the default for every existing config).
+    try {
+        $pf11 = Load-Config -Path (Join-Path $pairDir 'config.pair.json')
+        $c11 = $pf11._compiled.llmThirdOpinion
+        $ok = ($null -ne $c11) -and ($c11.EnforceDisagree -eq $true)
+        Record-Result -Ok $ok -Name 'PF-11-EnforceDefaultTrue' -Detail "llmThirdOpinion.EnforceDisagree = $(if ($c11) { $c11.EnforceDisagree } else { 'NULL block' }) (want True)"
+    }
+    catch {
+        Record-Result -Ok $false -Name 'PF-11-EnforceDefaultTrue' -Detail "Load-Config threw: $($_.Exception.Message)"
+    }
 }
 
 # =============================================================================

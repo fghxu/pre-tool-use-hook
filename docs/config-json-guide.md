@@ -417,9 +417,17 @@ verdicts are compared:
 \* agreement is **index-SET equality** (order-insensitive, deduped); one-sided
 indices (one side attributed, the other not) = **disagree** (fail-closed).
 
+**`enforce_disagree: false` (2026-10-10)** changes only the first row: a
+disagreement is still **detected and recorded** (`llm2.compare: "disagree"`) but
+never changes the decision — the flow falls through to the regular classification
+that existed before `llm_third_opinion`, i.e. **LLM1's verdict drives today's
+merge** (its own veto / suppression / agree rules apply as usual). LLM2 becomes a
+pure observer: useful while mining disagreement rates before trusting forced asks.
+
 ```jsonc
 "llm_third_opinion": {
   "enabled": false,
+  "enforce_disagree": true,
   "base_uri": "http://127.0.0.1:3031",
   "model": "gpt-5.6-sol",
   "api_key": "",
@@ -435,6 +443,7 @@ indices (one side attributed, the other not) = **disagree** (fail-closed).
 | `enabled` | Bool. Fires only when `llm_second_opinion.enabled` is also true (D1). `llm_second_opinion` off + this on = skip-note (D3/D13), never a silent no-op. |
 | `base_uri` / `model` / `api_key` | The second endpoint. `model` should differ from LLM1's (log/mining clarity). Required when enabled. |
 | `timeout_ms` | Default 12000. **Effective timeout = `min(this, llm_second_opinion.timeout_ms)`** (D11) — a pair consult can never exceed LLM1's budget; the hook hard cap is unchanged. |
+| `enforce_disagree` | Bool, **default `true`**. `true` = a disagreement forces ask (`*** LLM-DISAGREE ***`, D5). `false` = disagreement detected + recorded but NOT enforced — the decision follows the regular pre-pair flow (LLM1's merge drives it). `check_blindspot` consults are never affected either way (D9). |
 | everything else | **Accepted but ignored**: LLM1's values decide scope (`level`, `complex_min_subcommands`, `remote_indicators`, `check_blindspot`) and prompt/sampling (`attributed_verdicts`, `temperature`, `llm_response_max_tokens`, `json_mode`) for **both** models — the identical prompt is what makes the A/B comparison fair. Ignored keys are still schema-validated (a typo throws at load). |
 
 - **`check_blindspot` consults never change the decision** (D9): a blindspot ask
@@ -442,7 +451,9 @@ indices (one side attributed, the other not) = **disagree** (fail-closed).
 - **`.log` rendering:** the SENT line gains `model2=… timeout2=…ms`; a new
   `LLM2-RECV` line mirrors `LLM-RECV`; the RECONCILE line is prefixed
   `llm2-agree | ` / `llm1-down | ` / `llm2-down (proceeded on LLM1) | `, and on
-  disagreement renders `disagree LLM=… vs LLM2=… -> FINAL: ask`.
+  disagreement renders `disagree LLM=… vs LLM2=… -> FINAL: ask`. With
+  `enforce_disagree: false` the RECONCILE line is instead prefixed
+  `llm2-disagree (not enforced) | ` followed by LLM1's merge outcome.
 - **records.jsonl:** the `llm` object gains an `llm2` sub-object
   (`model`, `effective_timeout_ms`, `verdict`, `indices`, `latency_ms`,
   `recovered`, `mocked`, `error`, `raw_excerpt`, `compare`). `compare` enum:
@@ -452,7 +463,7 @@ indices (one side attributed, the other not) = **disagree** (fail-closed).
 - **Testing:** `PRETOOLHOOK_LLMREVIEW_MOCK2` injects LLM2's verdict with the
   same grammar as `PRETOOLHOOK_LLMREVIEW_MOCK`; **unset MOCK2 falls back to
   MOCK** (both sides identical → agree → today's behavior, D12). Fixture:
-  `test/config/llm-third-opinion/` (28 cases + 8 config preflights), plus the
+  `test/config/llm-third-opinion/` (33 cases + 11 config preflights), plus the
   real-HTTP pair cases in `test/config/llm-review/http/test-llm-pair.xml`.
   Design: `docs/superpowers/specs/2026-09-30-llm-third-opinion-design.md`.
 

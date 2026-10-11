@@ -52,6 +52,19 @@
        LT3-26         D8     LLM1 down + LLM2 garbage -> llm1-down fold, no FYI
        LT3-27         D16    diff={0}-only sentinel -> NO contested part (negative-index pin)
        LT3-28         e2e    fullpipe AGREE leg -> LLM2-RECV also on the agree path
+     Added by the 2026-10-10 enforce_disagree switch (llm_third_opinion.enforce_disagree):
+       PF-9           load   enforce_disagree non-boolean -> load throws
+       PF-10          load   enforce_disagree=false compiles to EnforceDisagree=false
+       PF-11          load   key ABSENT -> default EnforceDisagree=true (today's ask)
+       LT3-29         off    disagree + LLM1 modifying -> falls through to today's VETO
+       LT3-30         off    disagree + LLM1 read-only + local allow -> ALLOW (the switch)
+       LT3-31         off    blindspot + enforce off -> unchanged (D9 FYI only, ask)
+       LT3-32         off    trusted-only disagree -> falls through -> suppression -> ALLOW
+       LT3-33         off    fullpipe disagree -> allow + LLM2-RECV + 'not enforced' reconcile
+     Semantics: enforce_disagree=false still DETECTS and RECORDS the disagreement
+     (llm2.compare='disagree') but never changes the decision - the flow continues
+     exactly as before llm_third_opinion existed, i.e. LLM1's verdict drives today's
+     merge. Default (key absent) = true = today's forced *** LLM-DISAGREE *** ask.
      (Out-of-range hallucinated indices are NOT testable through the mock grammar:
       Test-ModifyingArray rejects idx > sub-command count as 'unusable' before any
       comparison code runs - the design's firstIdx range guard is defense-in-depth.)
@@ -445,6 +458,81 @@
                mode="fullpipe" mock="idx:" mock2="idx:"
                log-contains="LLM2-RECV">
       <description>Get-Date; Get-Process - fullpipe agree -> allow + LLM2-RECV in .log</description>
+      <tool-name>run_in_terminal</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- ================================================================= -->
+    <!-- enforce_disagree=false (2026-10-10): disagreement detected, NOT   -->
+    <!-- enforced - the decision falls through to the regular (pre-pair)   -->
+    <!-- classification flow. All cases use config.pair.disagree-off.json. -->
+    <!-- ================================================================= -->
+
+    <!-- The headline: mirror of LT3-23 (which ASKS). LLM1 read-only, LLM2
+         modifying[2] -> still recorded as compare='disagree', but the decision
+         comes from LLM1's merge: read-only + local allow -> ALLOW. -->
+    <test-case expected="allow" category="LT3-30-DisagreeOff-FallThrough-Allow"
+               config="config.pair.disagree-off.json"
+               level="complex_commands" min="2" mock="idx:" mock2="idx:2"
+               in-scope="true" verdict="read-only" effect="agree"
+               reason-not-contains="*** LLM-DISAGREE ***"
+               llm2-present="true" llm2-verdict="modifying" llm2-compare="disagree">
+      <description>enforce off - LLM1 read-only vs LLM2 modifying[2] -> allow (regular flow)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- Fall-through is NOT a blanket allow: LLM1's own verdict still drives
+         today's veto. modifying[2] on a locally-allowed block, sub 2 not
+         suppressible -> *** LLM-VETO *** ask (effect=veto, NOT llm2-disagree). -->
+    <test-case expected="ask" category="LT3-29-DisagreeOff-FallThrough-Veto"
+               config="config.pair.disagree-off.json"
+               level="complex_commands" min="2" mock="idx:2" mock2="idx:"
+               in-scope="true" verdict="modifying" effect="veto" flagged="2"
+               reason-contains="*** LLM-VETO ***"
+               reason-not-contains="*** LLM-DISAGREE ***"
+               llm2-present="true" llm2-verdict="read-only" llm2-compare="disagree">
+      <description>enforce off - disagree, LLM1 modifying[2] -> today's veto ask (not DISAGREE wording)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
+    </test-case>
+
+    <!-- Mirror of LT3-19 (the D5 headline, which ASKS): with enforcement off the
+         trusted-program suppression applies as usual -> all flags suppressed ->
+         allow. Proves the switch restores the pre-pair policy merge. -->
+    <test-case expected="allow" category="LT3-32-DisagreeOff-TrustedSuppressed"
+               config="config.pair.disagree-off.json"
+               level="complex_commands" min="2" mock="idx:2" mock2="idx:"
+               in-scope="true" verdict="modifying" effect="veto-suppressed-policy" suppressed="2"
+               reason-not-contains="*** LLM-DISAGREE ***"
+               llm2-present="true" llm2-verdict="read-only" llm2-compare="disagree">
+      <description>enforce off - trusted-only disagreement -> suppression applies -> allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git status ; src\Classifier.ps1]]></copilot-command>
+    </test-case>
+
+    <!-- check_blindspot is unaffected by the switch (D9 already never changes the
+         decision): FYI note only, ask stands, effect stays check-blindspot-ask. -->
+    <test-case expected="ask" category="LT3-31-DisagreeOff-Blindspot-Unchanged"
+               config="config.pair.disagree-off.json"
+               level="complex_commands" min="2" check_blindspot="true" mock="idx:" mock2="idx:1"
+               in-scope="true" check_blindspot-triggered="true" effect="check-blindspot-ask"
+               reason-contains="*** CHECK_BLINDSPOT ***;LLM2 DISAGREES"
+               reason-not-contains="*** LLM-DISAGREE ***"
+               llm2-present="true" llm2-verdict="modifying" llm2-compare="disagree">
+      <description>enforce off - blindspot disagreement unchanged (FYI only, ask stands)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[foobarbaz --x]]></copilot-command>
+    </test-case>
+
+    <!-- End-to-end: the real hook with the switch off. Decision allow, the .log
+         still shows LLM2-RECV (the pair really ran) and the reconcile line marks
+         the disagreement as detected-but-not-enforced. -->
+    <test-case expected="allow" category="LT3-33-FullPipe-DisagreeOff"
+               config="config.pair.disagree-off.json" mode="fullpipe"
+               mock="idx:" mock2="idx:2"
+               log-contains="LLM2-RECV;llm2-disagree (not enforced)">
+      <description>enforce off - fullpipe disagree -> allow + LLM2-RECV + 'not enforced' reconcile</description>
       <tool-name>run_in_terminal</tool-name>
       <copilot-command><![CDATA[Get-Date; Get-Process]]></copilot-command>
     </test-case>

@@ -1230,7 +1230,13 @@ function Invoke-LlmReview {
         # *** headline and violate D9 (FYI only; effect stays
         # check-blindspot-ask). Blindspot disagreements fall through; the
         # blindspot branch renders the 'LLM2 DISAGREES' FYI. Pinned by LT3-12.
-        if ($null -ne $agree -and -not $agree -and -not $isCheckBlindspot) {
+        # enforce_disagree=false (2026-10-10 switch): the disagreement is still
+        # DETECTED and recorded (compare='disagree' below via
+        # Get-LlmPairCompareState) but the early-return is SKIPPED - the flow
+        # continues exactly as before llm_third_opinion existed, i.e. LLM1's
+        # verdict drives today's merge. Pinned by LT3-29/LT3-30/LT3-32/LT3-33.
+        $enforceDisagree = $llm2.EnforceDisagree
+        if ($null -ne $agree -and -not $agree -and -not $isCheckBlindspot -and $enforceDisagree) {
             $log.llm2.compare = 'disagree'
             $log.effect       = 'llm2-disagree'
             $reason = Get-LlmDisagreeReason -Verdict1 $verdict -Verdict2 $verdict2 -Model1 $llm.Model -Model2 $llm2.Model -SubCommands $scope.SubCommands

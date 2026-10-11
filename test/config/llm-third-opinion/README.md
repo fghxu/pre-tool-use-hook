@@ -6,6 +6,13 @@ cases + 8 PF config preflights + assertion checks), all green; full regression 1
 with zero flips on the pre-existing 1412. The RED record (56 total / 40 passed / 16 failed)
 is in `debug/_red_baseline.txt`.
 
+**enforce_disagree switch (2026-10-10, spec D18):** +8 checks (LT3-29..LT3-33 + PF-9..PF-11)
+= 72 total. `llm_third_opinion.enforce_disagree` (bool, default `true`): when `false`, a pair
+disagreement is still detected + recorded (`llm2.compare='disagree'`, RECONCILE prefix
+`llm2-disagree (not enforced) | `) but never changes the decision — the flow falls through to
+the regular pre-pair classification (LLM1's merge drives it). RED record: 72/65/7 in
+`debug/_red_enforce.txt`; GREEN: 72/72 in `debug/_green_enforce.txt`.
+
 - Spec (authority): `docs/superpowers/specs/2026-09-30-llm-third-opinion-spec.md` (D1–D17)
 - Design (implementation contract): `docs/superpowers/specs/2026-09-30-llm-third-opinion-design.md` (§7 = this suite)
 
@@ -33,8 +40,9 @@ test/config/llm-review/Run-Tests.ps1
 | `config.llm2-disabled.json` | Third block present, `enabled:false` — disabled-block byte-identical parity (LT3-13) + PF-8. |
 | `config.llm1-disabled.json` | LLM1 disabled + LLM2 enabled — skip-note classify leg (LT3-17). |
 | `config.llm1-absent.json` | NO llm_second_opinion block — skip-note fullpipe leg (LT3-18) + PF-7 (legal combination). |
-| `config.bad-*.json` (×5) | Malformed third blocks for validation preflights PF-2..PF-6 (nouri / nomodel / timeout "abc" / level "bogus" / temperature 3.0 — the last two are IGNORED keys, still validated per D15). |
-| `test-cases.llm.xml` | The 28 LT3 cases with a per-case pin map in the header (22 original + 6 from the 2026-10-01 sibling fixture audit, merged with two adjudications — see design §10.3). |
+| `config.bad-*.json` (×6) | Malformed third blocks for validation preflights PF-2..PF-6 + PF-9 (nouri / nomodel / timeout "abc" / level "bogus" / temperature 3.0 / enforce_disagree "yes" — ignored keys still validated per D15). |
+| `config.pair.disagree-off.json` | `enforce_disagree:false` (2026-10-10) — the fall-through cases LT3-29..LT3-33 + PF-10. PF-11 pins the ABSENT-key default (`true`) on `config.pair.json`. |
+| `test-cases.llm.xml` | The 33 LT3 cases with a per-case pin map in the header (22 original + 6 from the 2026-10-01 sibling fixture audit + 5 enforce_disagree cases, see design §10.3 / spec D18). |
 
 ## STATE of the shared runner extensions (audit-note, 2026-10-01)
 

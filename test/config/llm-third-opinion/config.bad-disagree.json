@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for PF-9: llm_third_opinion.enforce_disagree must be a boolean. 'yes' is a string -> Load-Config MUST throw with the 'llm_third_opinion.enforce_disagree' prefix (fail-closed validation, same philosophy as the other bad-* third-block fixtures).",
+  "global_modifying_strictness": "normal",
+  "log_file_path": "c:\\temp\\pretoolhook-llm-third-opinion-testlogs\\",
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+  "trusted_programs": [],
+  "system_paths": {
+    "linux": ["/etc", "/usr", "/bin", "/sbin"],
+    "windows": ["C:\\\\Windows", "C:\\\\Program Files"]
+  },
+  "intercept_tool_name": [ "Bash", "run_in_terminal" ],
+  "tool_name_mapping": {
+    "Bash": "tool_input.command",
+    "run_in_terminal": "tool_input.command"
+  },
+  "ignore_tool_name": [],
+  "llm_second_opinion": {
+    "enabled": true,
+    "level": "complex_commands",
+    "base_uri": "http://127.0.0.1:9",
+    "model": "m1",
+    "api_key": "",
+    "timeout_ms": 30000,
+    "temperature": 0.0,
+    "llm_response_max_tokens": 256,
+    "complex_min_subcommands": 2,
+    "attributed_verdicts": true,
+    "json_mode": true,
+    "check_blindspot": {
+      "enabled": false,
+      "tiers": ["unclassified", "unregistered_verb", "unregistered_static", "unregistered", "unknown_domain"]
+    }
+  },
+  "llm_third_opinion": {
+    "enabled": true,
+    "enforce_disagree": "yes",
+    "level": "complex_commands",
+    "base_uri": "http://127.0.0.1:9",
+    "model": "m2",
+    "api_key": "",
+    "timeout_ms": 60000,
+    "temperature": 0.0,
+    "llm_response_max_tokens": 256,
+    "complex_min_subcommands": 2,
+    "attributed_verdicts": true,
+    "json_mode": true
+  },
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "description": "Minimal PowerShell domain.",
+      "read_only_verbs": ["Get-*"],
+      "modifying_verbs": { "high": ["Remove-*"], "medium": [], "low": [] },
+      "read_only": [],
+      "modifying": [],
+      "strictness_gated": []
+    }
+  }
+}

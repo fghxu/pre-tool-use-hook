@@ -1,0 +1,25 @@
+
+=== llm-third-opinion.llm ===
+Failed: 7
+Run log: c:\temp\pretoolhook-llm-third-opinion-testlogs\llm-review-run-20261010-181303.log
+Failed:
+  PF-9-BadEnforceDisagree
+  PF-10-EnforceOffCompile
+  PF-11-EnforceDefaultTrue
+  LT3-30-DisagreeOff-FallThrough-Allow
+  LT3-29-DisagreeOff-FallThrough-Veto
+  LT3-32-DisagreeOff-TrustedSuppressed
+  LT3-33-FullPipe-DisagreeOff
+========================================
+
+  65/72 passed, 7 failed (7.4s) - REGRESSION (7 > 0 known)
+
+========================================
+All Suites Summary
+========================================
+Suite                                          Total  Passed  Failed  Known Seconds  Status
+llm-third-opinion.llm                             72      65       7      0     7.4  REGRESSION (7 > 0 known)
+----------------------------------------
+GRAND TOTAL                                       72      65       7      0
+
+OVERALL: REGRESSION - at least one suite exceeds its known-failure baseline

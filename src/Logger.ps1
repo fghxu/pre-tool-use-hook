@@ -291,6 +291,14 @@ function Format-LlmLogBlock {
         elseif ($llm2Compare -eq 'llm1-down') { $reconPrefix = 'llm1-down | ' }
         else { $reconPrefix = 'llm2-down (proceeded on LLM1) | ' }
     }
+    # enforce_disagree=false (2026-10-10): the pair disagreed but the early-return
+    # did NOT fire, so compare='disagree' fell through to LLM1's merge (effect is
+    # the merge's own: veto / agree / veto-suppressed-policy / ...). Mark it so the
+    # log shows the disagreement was detected but not enforced. The enforced case
+    # (effect='llm2-disagree') is handled by the branch below.
+    if ($pairCalled -and $llm2Compare -eq 'disagree' -and "$($LlmLog.effect)" -ne 'llm2-disagree') {
+        $reconPrefix = 'llm2-disagree (not enforced) | '
+    }
     if ("$($LlmLog.effect)" -eq 'llm2-disagree') {
         # The pair disagreed: the ask came from the comparison, not from LLM1's
         # merge. Name both verdicts (spec: "log mentions LLM and LLM2 return

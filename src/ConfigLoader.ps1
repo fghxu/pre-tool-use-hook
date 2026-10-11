@@ -45,6 +45,17 @@ function Test-LlmBlockSchema {
         $llm.json_mode -isnot [bool]) {
         throw "Configuration validation failed: '$Prefix.json_mode' must be a boolean"
     }
+    # enforce_disagree (2026-10-10): only llm_third_opinion READS this at runtime,
+    # but it is validated for BOTH blocks so a stray key on llm_second_opinion is a
+    # load-time throw, not a silent no-op (same "ignored keys are still validated"
+    # philosophy as level/temperature). true (default) = a pair disagreement forces
+    # ask (*** LLM-DISAGREE ***, D5); false = the disagreement is still DETECTED and
+    # recorded (llm2.compare='disagree') but never changes the decision - the flow
+    # falls through to the regular pre-pair classification (LLM1's merge drives it).
+    if ((Get-Member -InputObject $llm -Name 'enforce_disagree' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+        $llm.enforce_disagree -isnot [bool]) {
+        throw "Configuration validation failed: '$Prefix.enforce_disagree' must be a boolean"
+    }
     if ((Get-Member -InputObject $llm -Name 'level' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
         $llm.level -notin @('all', 'complex_commands', 'complex_remote')) {
         throw "Configuration validation failed: '$Prefix.level' must be 'all', 'complex_commands', or 'complex_remote', got '$($llm.level)'"
@@ -889,6 +900,12 @@ function Load-Config {
         if (Get-Member -InputObject $l2Raw -Name 'timeout_ms' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $l2TimeoutMs = [int]$l2Raw.timeout_ms }
         $l2EffectiveTimeoutMs = $l2TimeoutMs
         if ($llmCompiled) { $l2EffectiveTimeoutMs = [math]::Min($l2TimeoutMs, $llmCompiled.TimeoutMs) }
+        # enforce_disagree (2026-10-10): DEFAULT TRUE - absent key keeps today's
+        # forced-ask-on-disagreement behavior (byte-identical for every existing
+        # config). false = detect + record the disagreement but never let it change
+        # the decision (fall through to the regular pre-pair flow).
+        $l2EnforceDisagree = $true
+        if (Get-Member -InputObject $l2Raw -Name 'enforce_disagree' -MemberType NoteProperty -ErrorAction SilentlyContinue) { $l2EnforceDisagree = [bool]$l2Raw.enforce_disagree }
         $llm2Compiled = [PSCustomObject]@{
             Enabled            = $l2Enabled
             BaseUri            = $l2BaseUri
@@ -896,6 +913,7 @@ function Load-Config {
             ApiKey             = $l2ApiKey
             TimeoutMs          = $l2TimeoutMs          # raw config value
             EffectiveTimeoutMs = $l2EffectiveTimeoutMs # min(raw, llm1.timeout_ms)
+            EnforceDisagree    = $l2EnforceDisagree    # default true (2026-10-10 switch)
         }
     }
     $config._compiled | Add-Member -MemberType NoteProperty -Name 'llmThirdOpinion' -Value $llm2Compiled -Force
