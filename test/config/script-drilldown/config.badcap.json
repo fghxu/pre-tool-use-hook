@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for script_drilldown validation (2026-09-20). max_chained_files is 0 - Load-Config MUST throw fail-closed (design 4.2 rule 5: integer >= 1).",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "trusted_programs": [
+    "trusted.ps1"
+  ],
+
+  "script_drilldown": {
+    "enabled": true,
+    "runners": ["powershell"],
+    "max_chained_files": 0,
+    "max_file_bytes": 4096,
+    "llm_scope": "count"
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*", "Write-Host"],
+      "modifying_verbs": {
+        "high":   ["Remove-*"],
+        "medium": ["Copy-*"],
+        "low":    []
+      },
+      "read_only": [
+        { "name": "pwsh", "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"], "description": "PowerShell wrapper" }
+      ],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

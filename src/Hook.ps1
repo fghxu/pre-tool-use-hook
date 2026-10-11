@@ -99,6 +99,12 @@ if ($config._compiled.llmSecondOpinion -and $config._compiled.llmSecondOpinion.E
     $classifyResult = $llmOutcome.Result
     $llmLog = $llmOutcome.Log
 }
+elseif ($config._compiled.llmThirdOpinion -and $config._compiled.llmThirdOpinion.Enabled) {
+    # D3 (2026-09-30 pair design 6): the pair cannot fire without its primary.
+    # No LLM calls; an explicit skip log object makes the state records-visible
+    # (D13) and renders the dedicated 'LLM2 skipped' line in the .log.
+    $llmLog = New-Llm2SkipLog -Config $config
+}
 
 # ----------------------------------------------------
 # Step 9: Calculate elapsed time

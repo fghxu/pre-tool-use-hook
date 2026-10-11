@@ -22,26 +22,62 @@ For anything touching patterns or prefixes, run the full differential (`src/Run-
 | `global_modifying_strictness` | `normal` or `strict` (or `loose`). Global strictness — renamed from `modifying_strictness` 2026-07-28; the loader **rejects** the legacy key fail-closed. Governs redirect-write policy and some AWS/mixed cases. Per-domain `commands.<domain>.modifying_strictness` keeps the old name. | Test suites run both values (`-Strictness normal/strict`); changes here shift redirect-suite results. |
 | `risk_legend` | Text descriptions of low/medium/high. | Documentation only — not read by logic. |
 
-## 2. `editable_paths` / `system_paths` — redirect write policy
+## 2. `editable_paths` / `system_paths` — write + deletion path policy
 
-**What they do:** applied by the Parser's redirect analysis (`echo x > target`) to the *target path* of `>` / `>>` inside **shell commands**.
+**What they do:** applied to *target paths* in two places:
 
-- `editable_paths`: writes under these roots auto-approve in **every** strictness mode (the CWD/editable check runs before the strictness fallbacks in `Resolve-PathPolicy`).
-- `system_paths`: writes under these roots **always prompt**, any strictness. Windows entries are raw regex; linux entries too (see ConfigLoader notes).
+1. **Shell redirects** (`echo x > target`) — the Parser's redirect analysis checks the `>` / `>>` target via `Resolve-PathPolicy`.
+2. **Deletions (R2, 2026-09-18)** — `Resolver.ps1` Step 0g-delete extracts the filesystem targets of a deletion command (`remove-item`, `rm`, `del`, `ri`, `erase`, `rd`, `rmdir`, `unlink`, `clear-content`) and runs them through the same path-policy ladder.
+
+- `editable_paths`: writes AND deletions under these roots auto-approve in **every** strictness mode (the CWD/editable check runs before the strictness fallbacks). Deletion is recursive at any depth (`c:\temp\1\2\a.txt`) and wildcard-safe (`c:\temp\*.tmp`).
+- `system_paths`: writes AND deletions under these roots **always prompt**, any strictness. Windows entries are raw regex; linux entries too (see ConfigLoader notes). A deletion whose target canonicalizes to a system path is NEVER allowed — this is absolute (INV-3) and cannot be over-rulled by the remote LLM.
+
+**Deletion decision ladder (Step 0g-delete, order matters):**
+
+| # | Condition (over ALL extracted targets, canonicalized) | Decision | Tier |
+|---|---|---|---|
+| 1 | any target matches `system_paths` | ask | `modifying` |
+| 2 | any target is a drive root / bare UNC root / fails canonicalization / variable-only (`$v`, `%V%`) | ask | `modifying` |
+| 3 | EVERY target is under an editable path / CWD subtree / temp form (`/tmp/`, `%TEMP%`, `$env:TEMP`, …) | **allow** | `editable_delete` |
+| 4 | otherwise (foreign non-system target, or mixed sets) | ask | `modifying` |
+
+If NO filesystem target can be extracted (e.g. `Remove-Item -Filter *.tmp`, or a registry provider path like `HKLM:\…`), the command falls through to the existing tiers — today's behavior is preserved. Remote deletions (`ssh host "rm …"`, `docker exec … rm …`) are NOT auto-allowed by this machine's policy (they run on another host).
 - **POSIX-path gotcha (Windows host):** redirect targets like `/home/user/x` are resolved through `GetFullPath` inside `Test-EditableOrCwd`, so the regex sees `C:\home\user\x` — a plain `/home/user/` pattern never matches. Use the `([A-Za-z]:)?[/\\]home[/\\](user|dev)[/\\]` form (see the shipped `linux` entries and their `_comment_linux`). `~` home paths keep their `~\` form.
 
 **When adding entries:**
-- These apply **only to shell redirection**, NOT to file-tool writes (Write/Edit). File-tool writes are governed by `trusted_pattern`/`untrusted_pattern` (see companion doc).
-- Windows backslashes are JSON-escaped twice: `"C:\\\\temp\\\\"` → regex `C:\\temp\\`.
+- These apply to **shell redirection AND deletions**, NOT to file-tool writes (Write/Edit). File-tool writes are governed by `trusted_pattern`/`untrusted_pattern` (see companion doc) and the path-branch (§7.5).
+- Windows backslashes are JSON-escaped twice: `"C:\\\\temp\\\\"` → regex `C:\\temp\\`. A trailing single backslash is an invalid regex escape — always end a directory pattern with a doubled backslash (`\\\\`).
 - Entries are regex, not plain prefixes — escape `(` `)` etc. (see the `Program Files \(x86\)` entry).
-- Overlap between the two lists: system_paths wins (checked first in the redirect analysis).
+- Overlap between the two lists: system_paths wins (checked first in both the redirect analysis and the deletion ladder).
 
 ## 3. `safe_expressions`
 
 **What it does:** the AST arbiter's .NET method allowlist. A PowerShell expression that the AST certifier (`Test-SafeAst`) proves contains no commands may still call .NET methods; only methods listed here are permitted (matched case-insensitively). Anything else → ask.
 
+Two lists, two shapes:
+- `dotnet_method_allowlist` — **instance-style** calls (`$obj.Name(...)`), name-only.
+- `dotnet_static_method_allowlist` — **static** calls (`[Type]::Method(...)`), `TypeName::Method` form matched against the type as written AND its reflected full name. Since the 2026-09-19 broad-patterns consolidation this list is tiny (one exact entry, `guid::NewGuid`); everything else is covered by the regex rows below. The 248 pruned entries were temporarily kept in an inert record key (`dotnet_static_method_allowlist_removed`, never loaded) and removed from all configs on 2026-09-19 — they remain recoverable from git history (commit `2e4af9f`).
+
+**Regex entries (R3, 2026-09-18; broad-patterns consolidation 2026-09-19):** each list has a sibling `*_regex` key:
+- `dotnet_method_allowlist_regex` — regexes tried AFTER the exact instance names miss, against the method name.
+- `dotnet_static_method_allowlist_regex` — regexes tried AFTER the exact static entries miss, against both the written key (`regex::IsMatch`) and the reflected full-name key (`System.Text.RegularExpressions.Regex::IsMatch`).
+
+The shipped static rows (2026-09-19) come in three classes, all anchored `^…$` (an unanchored `int::` would substring-match `point::`/`printqueue::`):
+- **Class A — whole-type wildcard** (`^(system\\.)?(math|convert|bitconverter|string)::\w+$`, …): types whose statics are provably all pure.
+- **Class B — type + pure method prefixes** (`file::(read\w*|openread|opentext|exists|\get\w*)$`): mixed-purity types, only the safe prefixes.
+- **Class C — cross-type method-name families** (`^\w[\w.]*::(try)?parse\w*$`, `…::get\w*$`, `…::is\w*$`, `…::to\w*$`, `…::from\w*$`): the never-enumerate net (any type, safe family).
+
+Matching is unanchored `-match`, case-insensitive; anchor with `^…$` when you want exact semantics. Invalid patterns throw at load time (fail-fast). Absent/empty regex keys = byte-identical behavior to before R3.
+
+**Static denylist (2026-09-19):** two NEW sibling keys, checked **FIRST** in `Test-SafeAst` — a deny hit returns ask and **outranks every allow path** (exact set AND all regex rows):
+- `dotnet_static_method_denylist` — exact entries, either `Type::Method` OR **bare `Method`** (matches that method on ANY type). The bare form closes the alias-spelling gap: when a type cannot be reflection-resolved (e.g. `[Marshal]` under PS 5.1) only the written key exists, and a bare entry still catches it. Shipped entries: `gettempfilename` (creates a file), `getobject` (COM launch via moniker), `intern` (explicit Q4 decision — `string::Intern` stays ask despite the whole-type string row).
+- `dotnet_static_method_denylist_regex` — **tail-anchored** deny regexes (`^[\w.]*marshal::get\w*$`) that catch BOTH reflected full names AND non-canonical written spellings. The leading segment is OPTIONAL (`[\w.]*`, not `\w[\w.]*`) so a bare `[Marshal]`/`[IsolatedStorageFile]` spelling (written key only, no reflected key) is still denied — this was a TDD-caught bug in the original design.
+
+Denylist entries are lowercased verbatim; invalid deny regexes throw at load time (fail-fast). Absent/empty deny keys = byte-identical behavior to before 2026-09-19. Since F5 (2026-09-19) the ask REASON names the denylist when the blocker is a denied static — `static method denied by denylist: [Type]::Method (see safe_expressions.dotnet_static_method_denylist)` — at both wording sites (Classifier.ps1 Layer-2 atomic path and the Resolver.ps1 Step-3 static fallback, via the shared `Test-StaticDeniedByText` helper in Parser.ps1). Decision and tiers are unchanged: ask either way, wording only.
+
 **When adding entries:**
 - Add only methods with **no side effects** (pure readers/transforms). A single mutating method (e.g. `Kill`, `Delete`, `WriteAllText`) silently auto-approves destructive code. The `AST-Arbiter-Guard` adhoc group pins this — add a guard test for every new method.
+- Regex entries widen the allow surface: prefer anchored patterns and keep them narrow. An over-broad static regex (e.g. `.*::.*`) would auto-approve arbitrary static calls. Class C family rows are deliberately broad by threat model (LLMs emit official MS classes); any outlier a family row lets through goes into the denylist, not back into exact entries.
 
 ## 4. `known_command_prefixes`
 
@@ -63,6 +99,17 @@ Cardinal rules (violating these is how you get `rm -rf /` auto-approved):
 - **Never** an unanchored or catch-all `trusted_pattern` (`.*`, `^(?!…).*$`). Trusted short-circuits all classification.
 - Always anchor with `^` (and usually `.*$`).
 - Keep the command-side exe asker in `untrusted_pattern` — without it, bare full-path executables (`C:\temp\tool.exe` via Bash) hit the zero-command allow.
+
+## 5b. `trusted_programs` / `trusted_programs_regex`
+
+**What they do:** matched AFTER decomposition, against the **program token** (the `&` call-target / first token) of each sub-command — distinct from §5, which gates whole command text. A match grants `allow` for that sub-command ONLY IF no modifying command appears in its arguments or sibling statements (Option B: args are scanned; unknown args ignored). Tier `trusted_program`.
+
+- `trusted_programs` — literal entries: full path, partial path (path-suffix), or bare name (basename). Case-insensitive; `/` and `\` equivalent.
+- `trusted_programs_regex` (R1, 2026-09-18) — regex entries tried AFTER all literals miss, against the normalized token (lowercased, `/` → `\`), unanchored `-match`, case-insensitive. This is how you trust a whole family of agent-invented script names with one entry: `"src\\\\.*\\.ps1$"` matches `src\Parser.ps1`, `src\Resolver.ps1`, and any future `src\*.ps1`.
+
+**When adding entries:**
+- Regex entries widen the auto-allow surface. Prefer anchored patterns (`^…$`) and keep them scoped to a directory you control. Option B still arg-scans, so a trusted script invoked with a modifying argument (e.g. `& src\x.ps1 Remove-Item c:\temp`) still asks.
+- Invalid regex entries throw at load time (fail-fast). Absent/empty key = byte-identical behavior to before R1.
 
 ## 6. `intercept_tool_name` / `ignore_tool_name` / `strictness_gated_tool_name`
 
@@ -347,6 +394,84 @@ attributed JSON contract). Never run these against the ~1000-case main suites.
 gateway, run one in-scope command (e.g. `aws s3 ls && aws s3 cp a b`), then
 check the newest `*.records.jsonl` in your log directory for the `llm` object.
 
+### 10.5.1 `llm_third_opinion` — third-opinion LLM (the "pair", 2026-09-30)
+
+Optional sibling block. **Absent or `enabled: false` = byte-identical behavior**
+(no `llm2` member appears in any record). When enabled — and only when
+`llm_second_opinion` is *also* enabled and the command is in scope — the
+**identical prompt** is sent to a **second endpoint in parallel** (PowerShell
+runspaces, so wall-clock ≈ `max(t1, t2)`, never the sum). The two parsed
+verdicts are compared:
+
+| LLM1 | LLM2 | Final | `llm2.compare` |
+|------|------|-------|----------------|
+| any | **disagreeing** | **ask** — unconditional, `*** LLM-DISAGREE ***` (also vetoes a local `ask`→allow suppression; D5/D7) | `disagree` |
+| modifying | read-only | ask (LLM1's veto drives) | `agree`* |
+| read-only | modifying | allow stands — LLM2 has **no authority** to veto alone | `agree`* |
+| any | unreachable / unparseable | LLM1 drives exactly as before | `llm2-down` |
+| unreachable / unparseable | any | today's fail-closed ask, with an LLM2 FYI note appended | `llm1-down` |
+| (out of scope) | — | unchanged | `out-of-scope` |
+| (all sub-commands trusted/editable — R2 skip) | — | unchanged | `skipped-trusted-editable` |
+| `llm_second_opinion` disabled | enabled | LLM skipped entirely; a skip-note line is logged | `skipped-primary-disabled` |
+
+\* agreement is **index-SET equality** (order-insensitive, deduped); one-sided
+indices (one side attributed, the other not) = **disagree** (fail-closed).
+
+**`enforce_disagree: false` (2026-10-10)** changes only the first row: a
+disagreement is still **detected and recorded** (`llm2.compare: "disagree"`) but
+never changes the decision — the flow falls through to the regular classification
+that existed before `llm_third_opinion`, i.e. **LLM1's verdict drives today's
+merge** (its own veto / suppression / agree rules apply as usual). LLM2 becomes a
+pure observer: useful while mining disagreement rates before trusting forced asks.
+
+```jsonc
+"llm_third_opinion": {
+  "enabled": false,
+  "enforce_disagree": true,
+  "base_uri": "http://127.0.0.1:3031",
+  "model": "gpt-5.6-sol",
+  "api_key": "",
+  "timeout_ms": 30000
+  // level / temperature / llm_response_max_tokens / attributed_verdicts /
+  // json_mode / complex_min_subcommands / remote_indicators / check_blindspot
+  // are ACCEPTED-BUT-IGNORED (see below) — still validated, so typos throw.
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `enabled` | Bool. Fires only when `llm_second_opinion.enabled` is also true (D1). `llm_second_opinion` off + this on = skip-note (D3/D13), never a silent no-op. |
+| `base_uri` / `model` / `api_key` | The second endpoint. `model` should differ from LLM1's (log/mining clarity). Required when enabled. |
+| `timeout_ms` | Default 12000. **Effective timeout = `min(this, llm_second_opinion.timeout_ms)`** (D11) — a pair consult can never exceed LLM1's budget; the hook hard cap is unchanged. |
+| `enforce_disagree` | Bool, **default `true`**. `true` = a disagreement forces ask (`*** LLM-DISAGREE ***`, D5). `false` = disagreement detected + recorded but NOT enforced — the decision follows the regular pre-pair flow (LLM1's merge drives it). `check_blindspot` consults are never affected either way (D9). |
+| everything else | **Accepted but ignored**: LLM1's values decide scope (`level`, `complex_min_subcommands`, `remote_indicators`, `check_blindspot`) and prompt/sampling (`attributed_verdicts`, `temperature`, `llm_response_max_tokens`, `json_mode`) for **both** models — the identical prompt is what makes the A/B comparison fair. Ignored keys are still schema-validated (a typo throws at load). |
+
+- **`check_blindspot` consults never change the decision** (D9): a blindspot ask
+  just gains ` | LLM2 agrees` / ` | LLM2 DISAGREES: …` in the reason.
+- **`.log` rendering:** the SENT line gains `model2=… timeout2=…ms`; a new
+  `LLM2-RECV` line mirrors `LLM-RECV`; the RECONCILE line is prefixed
+  `llm2-agree | ` / `llm1-down | ` / `llm2-down (proceeded on LLM1) | `, and on
+  disagreement renders `disagree LLM=… vs LLM2=… -> FINAL: ask`. With
+  `enforce_disagree: false` the RECONCILE line is instead prefixed
+  `llm2-disagree (not enforced) | ` followed by LLM1's merge outcome.
+- **records.jsonl:** the `llm` object gains an `llm2` sub-object
+  (`model`, `effective_timeout_ms`, `verdict`, `indices`, `latency_ms`,
+  `recovered`, `mocked`, `error`, `raw_excerpt`, `compare`). `compare` enum:
+  `agree | disagree | llm1-down | llm2-down | out-of-scope |
+  skipped-trusted-editable | skipped-primary-disabled`. Absent `llm2` member =
+  the pair was not armed (feature off) — old records stay byte-identical.
+- **Testing:** `PRETOOLHOOK_LLMREVIEW_MOCK2` injects LLM2's verdict with the
+  same grammar as `PRETOOLHOOK_LLMREVIEW_MOCK`; **unset MOCK2 falls back to
+  MOCK** (both sides identical → agree → today's behavior, D12). Fixture:
+  `test/config/llm-third-opinion/` (33 cases + 11 config preflights), plus the
+  real-HTTP pair cases in `test/config/llm-review/http/test-llm-pair.xml`.
+  Design: `docs/superpowers/specs/2026-09-30-llm-third-opinion-design.md`.
+
+**Recipe — enable it:** set `llm_second_opinion.enabled: true` first, then set
+this block's `enabled: true` + `base_uri`/`model`, run an in-scope command, and
+check the newest record's `llm.llm2.compare` — mine `disagree` rates before
+relying on the forced asks.
+
 ## 10.6 `ask_notification` — toast + sound on ask decisions
 
 **What it does:** pops a Windows toast notification and plays a sound whenever the hook decides `ask` (approval needed). Useful when the IDE is in the background or on another monitor — you hear/see the alert instead of wondering why the agent went quiet.
@@ -372,6 +497,34 @@ check the newest `*.records.jsonl` in your log directory for the `llm` object.
 - Fires on ALL `ask` paths: local classification, LLM veto, LLM-down, check_blindspot, and hard-timeout.
 - Validated at load time: wrong types (`enabled: "yes"`) throw and fail-closed the hook.
 - Testing: env var `PRETOOLHOOK_ASKNOTIFY_MOCK=<dir>` makes the notifier write `<dir>\ask-notified.txt` instead of a real toast (used by `test/config/ask-notification/`).
+
+## 10.7 `script_drilldown` — expand + classify statements of `-File` scripts
+
+**What it does:** when a command invokes a script via `pwsh -File <script>.ps1`, the hook opens the file, splits it into statements using the same AST walker used for command lines, and classifies each statement as if it had been typed on the command line. The result is a numbered `[N]` list; every sub-command that came from a script is prefixed `<script:basename>` in both the log and the LLM prompt (e.g. `[2] <script:restore.ps1> Get-ChildItem $dir`). This closes the gap where an untrusted `pwsh -File some-script.ps1` was a single opaque token — now its contents are inspected, so a hidden `Remove-Item` inside the script still prompts.
+
+```json
+"script_drilldown": {
+  "enabled": false,
+  "runners": ["powershell"],
+  "max_chained_files": 3,
+  "max_file_bytes": 4096,
+  "llm_scope": "count"
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `enabled` | bool | `false` | Master switch. **Ships disabled.** `false` (or an absent block) = byte-identical to before this feature. |
+| `runners` | string[] | `["powershell"]` | Which runners' `-File` invocations are expanded. Implemented set is currently `{ "powershell" }`. An unknown name OR an empty array throws fail-closed (an empty list would silently arm zero matchers). |
+| `max_chained_files` | int ≥ 1 | `3` | Max number of script files read per decision (chain/loop guard). Exceeding it fails closed. |
+| `max_file_bytes` | int ≥ 1 | `4096` | Refuse to read a script larger than this; fail-closed ask. |
+| `llm_scope` | `count`\|`exclude` | `count` | `count`: script-origin statements count toward `complex_min_subcommands` and appear in the LLM list. `exclude`: they are dropped from both — the LLM never sees them (only the wrapper entry counts). |
+
+- **Trusted paths are never read.** A `-File` target matching `trusted_programs` / `trusted_programs_regex` is NOT opened; it behaves exactly as today (allow via the trust path). This keeps the repo's own `src\*.ps1` dev scripts out of scope by construction.
+- **Fail-closed everywhere:** missing file, size cap, chain cap, recursion/loop detection, and unparseable content each produce a single ask with a specific reason (`script file not found: …`, `script too large to inspect (…)`, `max chained files exceeded (…)`, `recursive script invocation detected: …`).
+- **Idempotent per decision:** the visited-file set is reset at the start of every classification (STEP 4), so a re-parse of the same line never double-counts.
+- Validation runs whenever the block is present (even if `enabled: false`); properties prefixed `_` (e.g. `_comment_*`) are ignored.
+- Testing: `test/config/script-drilldown/Run-Tests.ps1` (core + OFF-parity matrix, no network).
 
 ## 11. Editing checklist (any config change)
 

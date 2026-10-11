@@ -36,6 +36,11 @@ Incoming tool call (JSON on stdin)
   │     ├─ 4b decompose into sub-commands (AST for PowerShell, regex otherwise;
   │     │    wrappers unwrapped recursively: ssh, pwsh -Command, Invoke-Command,
   │     │    docker exec, bash -c, sudo, ...)
+  │     │    └─ script drilldown (script_drilldown gate armed): a 'pwsh -File
+  │     │       <script>.ps1' wrapper OPENS the file, splits it into statements via
+  │     │       the same walker, and classifies each as if typed on the command line
+  │     │       (recursion + loop/cap/size guards; fail-closed ask on any failure).
+  │     │       Numbered [N] sub-commands are prefixed <script:basename> in log+LLM.
   │     ├─ 4c redirect analysis (Test-RedirectionTarget → Resolve-PathPolicy;
   │     │    a redirect target is a pseudo sub-result, MatchedPattern=redirection-target)
   │     ├─ 4d per-sub-command resolution (Resolver, §5) → sub-results WITH Tier
@@ -45,6 +50,8 @@ Incoming tool call (JSON on stdin)
   │          (+ tier stamp-back onto untiered sub-results, §6.4)
   ├─ STEP 8b (llm_second_opinion, when enabled): scope gate → LLM call →
   │     attributed merge (§8); may force ask, never downgrades an ask
+  │     └─ llm_third_opinion pair (when armed): identical prompt to a SECOND
+  │        endpoint in parallel (runspaces); disagreement ⇒ forced ask (§8.11)
   └─ Always: log (daily .log + .records.jsonl per IDE) → stdout decision JSON
 ```
 
@@ -68,11 +75,11 @@ edits with `Load-Config` immediately).
 |---|---|
 | `Hook.ps1` | Entry: stdin JSON → detect IDE → load config → Invoke-Classify → Invoke-LlmReview (STEP 8b, when enabled) → log → stdout. Conditional hard cap: `timeout_ms + 2000` when LLM enabled, else 3000ms (500ms soft warning). Config path override: `PRETOOLHOOK_CONFIG_PATH` env (production default = repo config.json). |
 | `HookAdapter.ps1` | IDE detection, command/path extraction (dot-path walker `Get-InputFieldValues` + `Resolve-FieldPathLeaves` with `[*]` array enumeration, leaves streamed), output shaping per IDE, `ask`→`deny` mapping for Codex. |
-| `ConfigLoader.ps1` | Load + validate + compile config: pattern arrays → regex (auto-anchor `^`; glob `*`→`.*` only after a non-special char), `system_paths`/`editable_paths` → one anchored alternation each, CWD capture (`_cwd`, `_cwdNorm`), per-domain `_parameterCommandLookup`, `trusted_programs`, `safe_expressions` allowlists, `llm_second_opinion` compiled block (optional; absent ⇒ `$null`). Legacy-key guards throw fail-closed (e.g. old `modifying_strictness` top-level key). |
-| `Parser.ps1` | Domain detection; decomposition (AST + regex); wrapper/nested extraction (`Find-NestedCommands` with value-taking-flag table); subshell splitting; `Test-RedirectionTarget`; `Resolve-PathPolicy`; `Test-EditableOrCwd`; canonicalization (`ConvertTo-CanonicalWritePath`: relative→CWD anchor, `..` collapse, `\\?\` strip, separator unify, `~` home). |
+| `ConfigLoader.ps1` | Load + validate + compile config: pattern arrays → regex (auto-anchor `^`; glob `*`→`.*` only after a non-special char), `system_paths`/`editable_paths` → one anchored alternation each, CWD capture (`_cwd`, `_cwdNorm`), per-domain `_parameterCommandLookup`, `trusted_programs`, `safe_expressions` allowlists, `llm_second_opinion` compiled block (optional; absent ⇒ `$null`), `script_drilldown` compiled gate (absent/disabled ⇒ `$null`; publishes shared `$script:ScriptDrilldown`). Legacy-key guards throw fail-closed (e.g. old `modifying_strictness` top-level key). |
+| `Parser.ps1` | Domain detection; decomposition (AST + regex); wrapper/nested extraction (`Find-NestedCommands` with value-taking-flag table); subshell splitting; `Test-RedirectionTarget`; `Resolve-PathPolicy`; `Test-EditableOrCwd`; canonicalization (`ConvertTo-CanonicalWritePath`: relative→CWD anchor, `..` collapse, `\\?\` strip, separator unify, `~` home). Script drilldown engine: runner registry + dispatcher (`Find-ScriptRunnerInvocation`), `Expand-ScriptFile` (gate→trust→resolve→exists→loop→cap→size→claim+read→empty→emit; HT-backed idempotence via `$script:DrilldownVisited` + `Reset-ScriptDrilldownState`), AST walker `-File` sites (SITE A `Get-AstWrapperInnerCommands`, SITE B `Find-NestedCommands`) with a `-DrilldownEnabled` flag so the engine's own content walk collapses nested `-File` to bare paths for step 9b. |
 | `Resolver.ps1` | `Resolve-Command` per sub-command (step order in §5.1); `New-ResolutionResult` (Decision/Reason/MatchedPattern/Risk/Tier); `Get-EffectiveStrictness`; `Test-TrustedProgram` + `Test-StatementContainsModifying`; parameter_commands evaluator + the two parameter parsers (AST for PowerShell, shell tokenizer otherwise). |
-| `Classifier.ps1` | Pipeline orchestration; `Test-TrustedUntrusted`; AST-as-arbiter (`Invoke-PowerShellArbitration`, `Resolve-AsArbiter`, `Merge-WorstTier`); path branch (STEP 1.5); aggregation + reasons (pipeline chains). |
-| `LlmReview.ps1` | `Test-LlmReviewScope`, `Get-LlmReviewVerdict` (+`ConvertTo-LlmVerdict` layered parser), `Invoke-LlmReview` (scope→verdict→merge→log), `Test-GatedInvocationSafe` (stage-2 guard) + `Split-GuardTokens`. |
+| `Classifier.ps1` | Pipeline orchestration; `Test-TrustedUntrusted`; AST-as-arbiter (`Invoke-PowerShellArbitration`, `Resolve-AsArbiter`, `Merge-WorstTier`); path branch (STEP 1.5); aggregation + reasons (pipeline chains). Script drilldown: `Reset-ScriptDrilldownState` at STEP 4 entry; 4e stamps OriginScript/LineNumber/DisplayText onto SubResults + rewrites blocking-statement reasons to the `<script:b> contains …` template + `DrilldownMarker ⇒ MatchedPattern='script-drilldown'`; 4f prints pre-formatted script reasons verbatim. |
+| `LlmReview.ps1` | `Test-LlmReviewScope`, `Get-LlmReviewVerdict` (+`ConvertTo-LlmVerdict` layered parser), `Invoke-LlmReview` (scope→verdict→merge→log), `Test-GatedInvocationSafe` (stage-2 guard) + `Split-GuardTokens`. Script drilldown: `llm_scope='exclude'` drops script-origin entries from the count+sent list; `$subTexts` renders `DisplayText ?? Command` so the LLM prompt/log carry the `<script:basename>` prefix. |
 | `Logger.ps1` | Daily `yyyy-MM-dd.<ide>.log` (text) + `yyyy-MM-dd.<ide>.records.jsonl` (full raw input + structured fields incl. `llm`); `Format-LlmLogBlock` shared reconciliation formatter; per-IDE suffix (claude/copilot/codex). Log dir: `log_file_path` or `~/.pretoolhook/`. |
 | `TestRunner.ps1` | XML-driven runner (`-XmlPath`, `-Filter`, `-Strictness`, `-Cwd`, `-ConfigPath`). |
 | `Run-AllTests.ps1` | One-shot differential over every live suite (auto-discovers; KnownFails baselines; REGRESSION/OK/IMPROVED; `-Filter`, `-ShowOutput`). ASCII-only output (powershell.exe 5.1 mangles UTF-8 em-dashes into smart quotes). |
@@ -162,7 +169,17 @@ the mapping. A forced ask from the LLM feature maps the same way.
     }
   },
 
-  "llm_second_opinion": { /* §8.9 — optional block; absent = feature off, zero overhead */ }
+  "llm_second_opinion": { /* §8.9 — optional block; absent = feature off, zero overhead */ },
+
+  "llm_third_opinion": { /* §8.11 — optional pair block; absent/disabled = byte-identical; fires only when llm_second_opinion is enabled+in-scope */ },
+
+  "script_drilldown": { /* script drilldown — ships DISABLED; absent OR enabled=false ⇒ byte-identical to before this feature (§1/4b) */
+    "enabled": false,          // bool, default false (master switch)
+    "runners": ["powershell"],  // array; implemented set = ['powershell']; empty array throws
+    "max_chained_files": 3,     // int >= 1, default 3 — max file reads per decision (D11/D12)
+    "max_file_bytes": 4096,     // int >= 1, default 4096 — refuse to read a larger file (fail-closed)
+    "llm_scope": "count"        // 'count' | 'exclude', default 'count'; 'exclude' hides script statements from the LLM
+  }
 }
 ```
 
@@ -558,6 +575,43 @@ allow the local engine didn't produce; index `0` cannot be suppressed. A model
 that can't honor the attributed contract flips `attributed_verdicts` to `false`
 (decided per model by the opt-in live suite).
 
+### 8.11 Third-opinion LLM pair (`llm_third_opinion`, 2026-09-30)
+
+A second endpoint consulted with the **identical prompt/sampling** in parallel
+(`[powershell]::Create()` runspaces — host-proof on 5.1 and pwsh 7; the request
+body is built on the main thread, the worker script never touches `$script:`
+state). Wall-clock ≈ `max(t1, t2)`; LLM2's timeout is clamped to
+`min(llm2.timeout_ms, llm1.timeout_ms)` at compile (`EffectiveTimeoutMs`), so
+the pair can never exceed LLM1's budget and the hook hard cap is unchanged.
+
+Decision rules (spec `2026-09-30-llm-third-opinion-design.md`, D1–D16):
+
+- **Armed** = this block enabled AND `llm_second_opinion` enabled AND in scope
+  (D1). Not armed ⇒ every path byte-identical, no `llm2` member in records.
+- **Compare BEFORE suppression** (D5): the two raw parsed verdicts (token +
+  index SET — order-insensitive, deduped; one-sided indices ⇒ disagree,
+  fail-closed, D4) are compared first; **disagreement ⇒ unconditional forced
+  ask** (`*** LLM-DISAGREE ***`, `effect=llm2-disagree`, contested part names
+  the differing sub-command) — it also overrides a veto-suppression.
+- **Agree / LLM2 down** ⇒ LLM1 drives today's merge exactly as before.
+  **LLM1 down** ⇒ today's fail-closed ask + an LLM2 FYI note (no authority).
+- **check_blindspot consults** get an FYI note only, never a decision change (D9).
+- **R2 all-trusted/editable skip** stamps `compare=skipped-trusted-editable`
+  (D14); **LLM1 disabled + LLM2 enabled** ⇒ the LLM is skipped and a dedicated
+  skip-note line is logged, `compare=skipped-primary-disabled` (D3/D13).
+- `compare` enum: `agree | disagree | llm1-down | llm2-down | out-of-scope |
+  skipped-trusted-editable | skipped-primary-disabled`. Only `enabled`,
+  `base_uri`, `model`, `api_key`, `timeout_ms` are LIVE; every other key is
+  accepted-but-ignored (LLM1's values decide scope + prompt for BOTH models —
+  the identical prompt is what makes the A/B fair) yet still schema-validated.
+- Logging: SENT line gains `model2=… timeout2=…ms`; new `LLM2-RECV` line;
+  RECONCILE gains `llm2-agree | ` / `llm1-down | ` / `llm2-down (proceeded on
+  LLM1) | ` prefixes; records gain the `llm.llm2` sub-object.
+- Tests: `test/config/llm-third-opinion/` (28 cases + 8 config preflights, mock
+  env `PRETOOLHOOK_LLMREVIEW_MOCK2`, unset ⇒ falls back to MOCK = agree, D12)
+  and the real-socket pair cases in `test/config/llm-review/http/test-llm-pair.xml`
+  (mock server scripts per-model responses via `BodyByModel`).
+
 ---
 
 ## 9. Testing architecture
@@ -591,11 +645,20 @@ compiled regex matches nothing). Runner `Run-Tests.ps1 -XmlPath`:
   matrix, levels, fallback/malformed, effects/log/reason, scope/numbering,
   attributed-off regression, G7 stage-2 path-guard).
 - `test-cases.xml` (phase I): 32 checks, regression.
-- `http/Run-LlmCallTests.ps1`: 27 checks against a local HttpListener mock
+- `http/Run-LlmCallTests.ps1`: 30 checks against a local HttpListener mock
   server — proves the real HTTP path incl. a spawned Hook.ps1 (zero quota).
+- `http/test-llm-pair.xml` (inside the 30): 3 pair cases — the ONLY offline
+  proof of the real parallel runspace dispatch (server scripts per-model
+  responses via `BodyByModel`, asserts both models arrive).
 - `http/Run-LlmLiveTests.ps1`: **opt-in, real gateway, ~2k tokens**; the
   `Live-Attr-*` cases measure a model's index compliance and decide production
   `attributed_verdicts` per model.
+
+**Pair fixture** (`test/config/llm-third-opinion/`, suite `llm-third-opinion.llm`):
+28 LT3 cases + 8 config preflights (64 checks) run by the llm-review runner with
+`config.pair.json`; LLM2's verdict injected via `PRETOOLHOOK_LLMREVIEW_MOCK2`
+(unset ⇒ falls back to MOCK = agree, D12). Design
+`specs/2026-09-30-llm-third-opinion-design.md`.
 
 Every fixture runner writes per-run reconciliation logs to
 `c:\temp\pretoolhook-llm-review-testlogs\llm-review-run-<ts>.log` via

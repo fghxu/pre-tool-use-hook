@@ -1,0 +1,13 @@
+
+=== llm-third-opinion.llm ===
+  72/72 passed, 0 failed (6.7s) - PASS
+
+========================================
+All Suites Summary
+========================================
+Suite                                          Total  Passed  Failed  Known Seconds  Status
+llm-third-opinion.llm                             72      72       0      0     6.7  PASS
+----------------------------------------
+GRAND TOTAL                                       72      72       0      0
+
+OVERALL: all suites match expectations (72/72 passed, 0 failures all within baseline)

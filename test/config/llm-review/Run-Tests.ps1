@@ -48,6 +48,11 @@
 #       down       -> behaves as if the LLM server were unreachable
 #   ...and returns WITHOUT any HTTP call. Every XML case that would reach the
 #   LLM sets one of these; out-of-scope cases never reach the call at all.
+#   llm_third_opinion (2026-09-30 pair): PRETOOLHOOK_LLMREVIEW_MOCK2 injects
+#   LLM2's verdict with the SAME grammar. UNSET MOCK2 falls back to MOCK (both
+#   sides get the identical raw answer -> agree -> today's behavior, D12), so
+#   every pre-existing case stays green without touching a single XML file.
+#   MOCK2 set while MOCK unset is legal (LLM1 real HTTP, LLM2 mocked - LT3-22).
 #
 # PER-CASE XML ATTRIBUTES (what you can set on a <test-case>)
 #   expected         allow|ask (required) - the final decision we assert
@@ -57,20 +62,42 @@
 #   min              complex_min_subcommands override (default 2)
 #   enabled          true|false (default true) - feature on/off for this case
 #   mock             modifying|read-only|garbage|down (unset = env var cleared)
+#   mock2            same grammar, LLM2's verdict (llm_third_opinion; unset =
+#                    env var cleared -> engine falls back to mock, D12)
 #   in-scope         true|false - asserted against Log.in_scope (optional)
 #   verdict          asserted against Log.verdict (optional)
 #   effect           asserted against Log.effect (optional)
 #   reason-contains  substring asserted on the final Reason text (optional)
+#   config           alternate fixture config file for THIS case only (2026-09-20;
+#                    relative to the fixture dir or absolute; default: none)
+#   sent-contains    substring that must appear in at least one entry of the
+#                    numbered list sent to the LLM (Log.sent) (2026-09-20)
+#   llm2-present     true|false - asserted against the Log.llm2 sub-object being
+#                    non-null (2026-09-30 pair; "false" = the byte-identical
+#                     feature-off guarantee)
+#   llm2-verdict     asserted against Log.llm2.verdict (optional)
+#   llm2-compare     asserted against Log.llm2.compare - agree|disagree|
+#                    llm1-down|llm2-down|out-of-scope|skipped-trusted-editable|
+#                    skipped-primary-disabled (optional)
+#   llm2-mocked      true|false - asserted against Log.llm2.mocked (optional)
 #   mode             classify (default) | fullpipe (spawns src/Hook.ps1)
 #
 # Spec: docs/superpowers/specs/2026-08-01-llm-second-opinion-design.md
+#       docs/superpowers/specs/2026-09-30-llm-third-opinion-design.md (pair)
 # Run from repo root:  pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1
 # Wait-Debugger
 
 param(
     # Default = the phase-II small file (fast typical pass). Point at
     # test-cases.xml (phase-I) or test-cases.p2.large.xml (opt-in matrix).
-    [string]$XmlPath = "$PSScriptRoot\test-cases.p2.small.xml"
+    [string]$XmlPath = "$PSScriptRoot\test-cases.p2.small.xml",
+    # 2026-09-20 (script-drilldown spec 13.4): optional alternate fixture config.
+    # Default = this fixture's own config.json (backward-compatible).
+    [string]$ConfigPath = "",
+    # Optional CWD anchor: when set, rewrites $config._cwd/_cwdNorm after
+    # Load-Config exactly like TestRunner.ps1 L31-37, so relative script paths
+    # in the commands resolve against this directory.
+    [string]$Cwd = ""
 )
 
 # Stop on any unexpected error - a broken runner must not masquerade as green.
@@ -83,7 +110,7 @@ $ErrorActionPreference = "Stop"
 $fixtureDir = $PSScriptRoot
 $srcDir     = Join-Path $fixtureDir "..\..\..\src"
 $hookPath   = Join-Path $srcDir "Hook.ps1"        # spawned by fullpipe cases
-$configPath = Join-Path $fixtureDir "config.json" # this fixture's own config
+$configPath = if ($ConfigPath) { $ConfigPath } else { Join-Path $fixtureDir "config.json" }
 
 # ---------------------------------------------------------------------------
 # Dot-source the REAL engine modules (same files the production hook uses).
@@ -117,6 +144,17 @@ if (Test-Path (Join-Path $srcDir "LlmReview.ps1")) {
 # block the scope engine reads (Enabled / Level / RemoteIndicators / ...).
 # ---------------------------------------------------------------------------
 $config = Load-Config -Path $configPath
+
+# Optional CWD anchor (script-drilldown spec 13.4): rewrite _cwd/_cwdNorm
+# exactly like TestRunner.ps1 L31-37 so relative script paths resolve against
+# the given directory. No-op when -Cwd is not passed.
+if ($Cwd) {
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $cwdResolved = ($Cwd -replace '[/\\]', $sep)
+    if (-not $cwdResolved.EndsWith($sep)) { $cwdResolved += $sep }
+    $config._cwd = $cwdResolved
+    $config._cwdNorm = $cwdResolved.ToLowerInvariant()
+}
 
 # Baseline global strictness from the fixture file; each case may override it
 # via its strictness= attribute and is reset to this afterwards.
@@ -374,6 +412,109 @@ else {
 }
 
 # =============================================================================
+# PAIR PREFLIGHTS PF-1..PF-8 (llm_third_opinion design 7.4). These run ONLY
+# when the XML suite lives in the llm-third-opinion fixture dir (detected by
+# the sibling config.pair.json) so the pre-existing llm-review suites keep
+# their exact check counts (baseline parity, acceptance #1).
+# Bad-config preflights use the shipped bad-* fixture files in that dir -
+# NEVER the repo-root config.json (project rule).
+# =============================================================================
+if (Test-Path (Join-Path (Split-Path $XmlPath -Parent) 'config.pair.json')) {
+    $pairDir = Split-Path $XmlPath -Parent
+
+    # PF-1: config.pair.json loads; llmThirdOpinion compiled, enabled, model
+    # 'm2', raw timeout 60000, EFFECTIVE 30000 (clamped to LLM1's 30000, D11).
+    try {
+        $pf1 = Load-Config -Path (Join-Path $pairDir 'config.pair.json')
+        $c2 = $pf1._compiled.llmThirdOpinion
+        $ok = ($null -ne $c2) -and $c2.Enabled -and ("$($c2.Model)" -eq 'm2') -and ([int]$c2.TimeoutMs -eq 60000) -and ([int]$c2.EffectiveTimeoutMs -eq 30000)
+        Record-Result -Ok $ok -Name 'PF-1-PairCompile-Clamp' -Detail "llmThirdOpinion = $(if ($c2) { "Enabled=$($c2.Enabled) Model=$($c2.Model) TimeoutMs=$($c2.TimeoutMs) Effective=$($c2.EffectiveTimeoutMs)" } else { 'NULL' }) (want enabled/m2/60000/30000)"
+    }
+    catch {
+        Record-Result -Ok $false -Name 'PF-1-PairCompile-Clamp' -Detail "Load-Config threw: $($_.Exception.Message)"
+    }
+
+    # PF-2..PF-6: bad third-block values MUST throw with the llm_third_opinion
+    # prefix (ignored keys are still validated - a typo throws at load).
+    $pfBad = @(
+        @{ Name = 'PF-2-NoBaseUri';  File = 'config.bad-nouri.json';   Pattern = 'llm_third_opinion\.base_uri' },
+        @{ Name = 'PF-3-NoModel';    File = 'config.bad-nomodel.json'; Pattern = 'llm_third_opinion\.model' },
+        @{ Name = 'PF-4-BadTimeout'; File = 'config.bad-timeout.json'; Pattern = 'llm_third_opinion\.timeout_ms' },
+        @{ Name = 'PF-5-BadLevel';   File = 'config.bad-level.json';   Pattern = 'llm_third_opinion\.level' },
+        @{ Name = 'PF-6-BadTemp';    File = 'config.bad-temp.json';    Pattern = 'llm_third_opinion\.temperature' }
+    )
+    foreach ($pb in $pfBad) {
+        try {
+            $null = Load-Config -Path (Join-Path $pairDir $pb.File)
+            Record-Result -Ok $false -Name $pb.Name -Detail "Load-Config did NOT throw for $($pb.File)"
+        }
+        catch {
+            $ok = $_.Exception.Message -match $pb.Pattern
+            Record-Result -Ok $ok -Name $pb.Name -Detail "threw but unexpected message: $($_.Exception.Message)"
+        }
+    }
+
+    # PF-7: llm_second_opinion ABSENT + third block enabled -> loads with NO
+    # throw (no cross-block rule, D15) and compiles llmThirdOpinion (effective
+    # timeout = raw 60000, no clamp partner).
+    try {
+        $pf7 = Load-Config -Path (Join-Path $pairDir 'config.llm1-absent.json')
+        $c7 = $pf7._compiled.llmThirdOpinion
+        $ok = ($null -ne $c7) -and $c7.Enabled -and ([int]$c7.EffectiveTimeoutMs -eq 60000)
+        Record-Result -Ok $ok -Name 'PF-7-Llm1AbsentLoads' -Detail "llmThirdOpinion = $(if ($c7) { "Enabled=$($c7.Enabled) Effective=$($c7.EffectiveTimeoutMs)" } else { 'NULL' }) (want enabled/60000)"
+    }
+    catch {
+        Record-Result -Ok $false -Name 'PF-7-Llm1AbsentLoads' -Detail "Load-Config threw: $($_.Exception.Message)"
+    }
+
+    # PF-8: disabled third block loads; compiled Enabled=false.
+    try {
+        $pf8 = Load-Config -Path (Join-Path $pairDir 'config.llm2-disabled.json')
+        $c8 = $pf8._compiled.llmThirdOpinion
+        $ok = ($null -ne $c8) -and (-not $c8.Enabled)
+        Record-Result -Ok $ok -Name 'PF-8-DisabledBlock' -Detail "llmThirdOpinion = $(if ($c8) { "Enabled=$($c8.Enabled)" } else { 'NULL' }) (want present/Enabled=false)"
+    }
+    catch {
+        Record-Result -Ok $false -Name 'PF-8-DisabledBlock' -Detail "Load-Config threw: $($_.Exception.Message)"
+    }
+
+    # ---- PF-9..PF-11: enforce_disagree switch (2026-10-10) ----------------
+    # PF-9: non-boolean enforce_disagree MUST throw with the
+    # llm_third_opinion.enforce_disagree prefix (fail-closed validation).
+    try {
+        $null = Load-Config -Path (Join-Path $pairDir 'config.bad-disagree.json')
+        Record-Result -Ok $false -Name 'PF-9-BadEnforceDisagree' -Detail 'Load-Config did NOT throw for enforce_disagree="yes"'
+    }
+    catch {
+        $ok = $_.Exception.Message -match 'llm_third_opinion\.enforce_disagree'
+        Record-Result -Ok $ok -Name 'PF-9-BadEnforceDisagree' -Detail "threw but unexpected message: $($_.Exception.Message)"
+    }
+
+    # PF-10: enforce_disagree=false compiles to EnforceDisagree=false.
+    try {
+        $pf10 = Load-Config -Path (Join-Path $pairDir 'config.pair.disagree-off.json')
+        $c10 = $pf10._compiled.llmThirdOpinion
+        $ok = ($null -ne $c10) -and $c10.Enabled -and ($c10.EnforceDisagree -eq $false)
+        Record-Result -Ok $ok -Name 'PF-10-EnforceOffCompile' -Detail "llmThirdOpinion.EnforceDisagree = $(if ($c10) { $c10.EnforceDisagree } else { 'NULL block' }) (want False)"
+    }
+    catch {
+        Record-Result -Ok $false -Name 'PF-10-EnforceOffCompile' -Detail "Load-Config threw: $($_.Exception.Message)"
+    }
+
+    # PF-11: key ABSENT (config.pair.json) -> default EnforceDisagree=true
+    # (today's forced ask stays the default for every existing config).
+    try {
+        $pf11 = Load-Config -Path (Join-Path $pairDir 'config.pair.json')
+        $c11 = $pf11._compiled.llmThirdOpinion
+        $ok = ($null -ne $c11) -and ($c11.EnforceDisagree -eq $true)
+        Record-Result -Ok $ok -Name 'PF-11-EnforceDefaultTrue' -Detail "llmThirdOpinion.EnforceDisagree = $(if ($c11) { $c11.EnforceDisagree } else { 'NULL block' }) (want True)"
+    }
+    catch {
+        Record-Result -Ok $false -Name 'PF-11-EnforceDefaultTrue' -Detail "Load-Config threw: $($_.Exception.Message)"
+    }
+}
+
+# =============================================================================
 # MAIN LOOP - the 16 XML cases
 # Each case either runs fully in-process (mode=classify, the default) or
 # through a real child hook process (mode=fullpipe). Per-case attributes reset
@@ -407,9 +548,13 @@ foreach ($tc in $testCases) {
     # means CLEAR the env var (paranoia: never leak one case's mock into the
     # next). With no mock set, an in-scope case WOULD attempt a real HTTP
     # call - which fails the case and thereby flags the authoring mistake.
+    # mock2 (llm_third_opinion, 2026-09-30): LLM2's verdict; UNSET falls back
+    # to mock inside the engine (both agree = the regression baseline, D12).
     # ------------------------------------------------------------------
     if ($tc.HasAttribute('mock')) { $env:PRETOOLHOOK_LLMREVIEW_MOCK = $tc.GetAttribute('mock') }
     else { Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK -ErrorAction SilentlyContinue }
+    if ($tc.HasAttribute('mock2')) { $env:PRETOOLHOOK_LLMREVIEW_MOCK2 = $tc.GetAttribute('mock2') }
+    else { Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK2 -ErrorAction SilentlyContinue }
 
     # ==================================================================
     # MODE: fullpipe - spawn the REAL hook as a child process
@@ -434,9 +579,17 @@ foreach ($tc in $testCases) {
         # repo-root config.json) and hand it the mock verdict via inheritance.
         # Fullpipe config: the fixture file as-is, OR a strictness-overridden
         # temp copy when the case asks for one (the file default is strict).
+        # 2026-09-30 pair: a case may also name an alternate fixture config via
+        # its config= attribute (LT3-18 uses config.llm1-absent.json) - resolve
+        # it the same way the classify branch does (relative to the base dir).
         $fpConfigPath = $configPath
+        if ($tc.HasAttribute('config')) {
+            $fpAlt = $tc.GetAttribute('config')
+            if (-not [System.IO.Path]::IsPathRooted($fpAlt)) { $fpAlt = Join-Path (Split-Path $configPath -Parent) $fpAlt }
+            $fpConfigPath = $fpAlt
+        }
         if ($tc.HasAttribute('strictness')) {
-            $fpCfg = Get-Content $configPath -Raw
+            $fpCfg = Get-Content $fpConfigPath -Raw
             $fpCfg = $fpCfg -replace '"global_modifying_strictness": "\w+"', ('"global_modifying_strictness": "' + $tc.GetAttribute('strictness') + '"')
             $fpConfigPath = 'c:\temp\llm-review-fp-config.json'
             Set-Content $fpConfigPath $fpCfg -Encoding UTF8
@@ -452,6 +605,7 @@ foreach ($tc in $testCases) {
         # are unaffected.
         Remove-Item Env:\PRETOOLHOOK_CONFIG_PATH -ErrorAction SilentlyContinue
         Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK -ErrorAction SilentlyContinue
+        Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK2 -ErrorAction SilentlyContinue
 
         # Assert: stdout parses as JSON, permissionDecision matches expected,
         # exit code is 0, and (if asked) the reason carries the eye-catch text.
@@ -489,12 +643,41 @@ foreach ($tc in $testCases) {
     # ==================================================================
 
     # ------------------------------------------------------------------
+    # Per-case CONFIG switch (script-drilldown spec 13.4): a case may name an
+    # alternate fixture config file via its config= attribute (relative to the
+    # BASE config's directory, or absolute). We load it, apply the same -Cwd
+    # anchor, and use ITS compiled llm block + object for this one case only;
+    # later cases without the attribute keep using the base config. Absent
+    # attribute => the base config (backward-compatible).
+    # ------------------------------------------------------------------
+    $caseConfig = $config
+    if ($tc.HasAttribute('config')) {
+        $altCfgPath = $tc.GetAttribute('config')
+        if (-not [System.IO.Path]::IsPathRooted($altCfgPath)) { $altCfgPath = Join-Path (Split-Path $configPath -Parent) $altCfgPath }
+        try {
+            $caseConfig = Load-Config -Path $altCfgPath
+            if ($Cwd) {
+                $sep2 = [System.IO.Path]::DirectorySeparatorChar
+                $cwdResolved2 = ($Cwd -replace '[/\\]', $sep2)
+                if (-not $cwdResolved2.EndsWith($sep2)) { $cwdResolved2 += $sep2 }
+                $caseConfig._cwd = $cwdResolved2
+                $caseConfig._cwdNorm = $cwdResolved2.ToLowerInvariant()
+            }
+        }
+        catch {
+            # A broken per-case config must fail THIS case, not abort the suite.
+            Record-Result -Ok $false -Name $name -Detail "config='$($tc.GetAttribute('config'))' failed to load: $($_.Exception.Message)"
+            continue
+        }
+    }
+
+    # ------------------------------------------------------------------
     # Per-case feature-config overrides. We mutate the COMPILED block
     # directly (same object Test-LlmReviewScope reads) - equivalent to
     # editing config.json for just this one case. Every case sets all three,
     # so there is no cross-case leakage even though the object is shared.
     # ------------------------------------------------------------------
-    $llmCfg = $config._compiled.llmSecondOpinion
+    $llmCfg = $caseConfig._compiled.llmSecondOpinion
     $llmCfg.Enabled               = if ($tc.HasAttribute('enabled')) { [bool]::Parse($tc.GetAttribute('enabled')) } else { $true }
     $llmCfg.Level                 = if ($tc.HasAttribute('level')) { $tc.GetAttribute('level') } else { 'complex_remote' }
     $llmCfg.ComplexMinSubcommands = if ($tc.HasAttribute('min')) { [int]$tc.GetAttribute('min') } else { 2 }
@@ -522,8 +705,8 @@ foreach ($tc in $testCases) {
     }
     $cbBlock.Enabled = $cbEnabled
     # strictness override (suppression cases need normal so gated allows).
-    if ($tc.HasAttribute('strictness')) { $config.global_modifying_strictness = $tc.GetAttribute('strictness') }
-    else { $config.global_modifying_strictness = $fileStrictness }
+    if ($tc.HasAttribute('strictness')) { $caseConfig.global_modifying_strictness = $tc.GetAttribute('strictness') }
+    else { $caseConfig.global_modifying_strictness = $fileStrictness }
 
     # Build the minimal fake IDE input: the shape HookAdapter expects after
     # tool_name_mapping ("Bash" -> tool_input.command in the fixture config).
@@ -541,13 +724,18 @@ foreach ($tc in $testCases) {
     # ------------------------------------------------------------------
     $result = $null; $llmLog = $null
     try {
-        $result = Invoke-Classify -RawInput $rawInput -IDE "ClaudeCode" -Config $config
+        $result = Invoke-Classify -RawInput $rawInput -IDE "ClaudeCode" -Config $caseConfig
         # Mirror the Hook.ps1 gate
         if ($llmCfg.Enabled) {
             if (-not $LlmReviewLoaded) { throw "LlmReview.ps1 not loaded (TDD red phase)" }
-            $outcome = Invoke-LlmReview -ClassifyResult $result -Config $config
+            $outcome = Invoke-LlmReview -ClassifyResult $result -Config $caseConfig
             $result = $outcome.Result
             $llmLog = $outcome.Log
+        }
+        elseif ($caseConfig._compiled.llmThirdOpinion -and $caseConfig._compiled.llmThirdOpinion.Enabled) {
+            # Mirror of Hook.ps1 Step 8b skip-note (2026-09-30 pair): LLM1 off
+            # + LLM2 on still produces the skip-note record (D3/D13, LT3-17).
+            $llmLog = New-Llm2SkipLog -Config $caseConfig
         }
     }
     catch {
@@ -556,6 +744,7 @@ foreach ($tc in $testCases) {
 
     # Disarm the mock right after the call (belt-and-braces cleanup).
     Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK -ErrorAction SilentlyContinue
+    Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK2 -ErrorAction SilentlyContinue
 
     # ------------------------------------------------------------------
     # ASSERTIONS, in a chain - each only runs if all previous held, and the
@@ -617,12 +806,55 @@ foreach ($tc in $testCases) {
         $ok = ($gotCB -eq $wantCB)
         if (-not $ok) { $detail += " | check_blindspot_triggered expected $wantCB got $gotCB" }
     }
+    if ($ok -and $tc.HasAttribute('sent-contains')) {
+        # script-drilldown spec 13.4: assert the numbered list SENT to the LLM
+        # (Log.sent) carries a marker in at least one entry (e.g. the
+        # <script:basename> DisplayText prefix). No log => nothing was sent.
+        $wantSent = $tc.GetAttribute('sent-contains')
+        $sentItems = @()
+        if ($llmLog -and $null -ne $llmLog.sent) { $sentItems = @($llmLog.sent | ForEach-Object { "$_" }) }
+        $sentOk = ($sentItems | Where-Object { $_.Contains($wantSent) }).Count -gt 0
+        if (-not $sentOk) {
+            $ok = $false
+            $detail += " | sent list missing '$wantSent' (sent: $(($sentItems -join ' | ')))"
+        }
+    }
+    # ------------------------------------------------------------------
+    # llm_third_opinion (2026-09-30 pair) assertions. The llm2 sub-object is
+    # ABSENT (null) whenever the pair was not armed for this case - that is
+    # the byte-identical-records guarantee - so llm2-present="false" is the
+    # regression assertion, and the field assertions only make sense when it
+    # is present.
+    # ------------------------------------------------------------------
+    if ($ok -and $tc.HasAttribute('llm2-present')) {
+        $wantP = [bool]::Parse($tc.GetAttribute('llm2-present'))
+        $gotP = ($llmLog -and $null -ne $llmLog.llm2)
+        $ok = ($gotP -eq $wantP)
+        if (-not $ok) { $detail += " | llm2-present expected $wantP got $gotP" }
+    }
+    if ($ok -and $tc.HasAttribute('llm2-verdict')) {
+        $got = if ($llmLog -and $llmLog.llm2) { "$($llmLog.llm2.verdict)" } else { '<absent>' }
+        $ok = ($got -eq $tc.GetAttribute('llm2-verdict'))
+        if (-not $ok) { $detail += " | llm2-verdict expected $($tc.GetAttribute('llm2-verdict')) got $got" }
+    }
+    if ($ok -and $tc.HasAttribute('llm2-compare')) {
+        $got = if ($llmLog -and $llmLog.llm2) { "$($llmLog.llm2.compare)" } else { '<absent>' }
+        $ok = ($got -eq $tc.GetAttribute('llm2-compare'))
+        if (-not $ok) { $detail += " | llm2-compare expected $($tc.GetAttribute('llm2-compare')) got $got" }
+    }
+    if ($ok -and $tc.HasAttribute('llm2-mocked')) {
+        $wantM = [bool]::Parse($tc.GetAttribute('llm2-mocked'))
+        $gotM = ($llmLog -and $llmLog.llm2 -and [bool]$llmLog.llm2.mocked)
+        $ok = ($gotM -eq $wantM)
+        if (-not $ok) { $detail += " | llm2-mocked expected $wantM got $gotM" }
+    }
     Record-Result -Ok $ok -Name $name -Detail $detail
     Write-CaseLog -Name $name -Ok $ok -Result $result -LlmLog $llmLog -Mode 'classify'
 }
 
 # Final cleanup: never leave the mock armed in the caller's environment.
 Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK -ErrorAction SilentlyContinue
+Remove-Item Env:\PRETOOLHOOK_LLMREVIEW_MOCK2 -ErrorAction SilentlyContinue
 
 # =============================================================================
 # SUMMARY - totals always print; the failed list prints only when non-empty.

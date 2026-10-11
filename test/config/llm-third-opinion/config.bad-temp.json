@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "description": "BAD CONFIG (preflight PF-6): llm_third_opinion.temperature = 3.0 (range is 0.0-2.0) - IGNORED key, still VALIDATED. Load-Config must throw containing 'llm_third_opinion.temperature'.",
+  "global_modifying_strictness": "normal",
+  "log_file_path": "c:\\temp\\pretoolhook-llm-third-opinion-testlogs\\",
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+  "trusted_programs": [ "tool-a.exe", "tool-b.exe", "src\\Classifier.ps1" ],
+  "system_paths": { "linux": ["/etc", "/usr", "/bin", "/sbin"], "windows": ["C:\\\\Windows", "C:\\\\Program Files"] },
+  "intercept_tool_name": [ "Bash", "run_in_terminal" ],
+  "tool_name_mapping": { "Bash": "tool_input.command", "run_in_terminal": "tool_input.command" },
+  "ignore_tool_name": [],
+  "llm_second_opinion": {
+    "enabled": true, "level": "complex_commands", "base_uri": "http://127.0.0.1:9", "model": "m1", "api_key": "",
+    "timeout_ms": 30000, "temperature": 0.0, "llm_response_max_tokens": 256, "complex_min_subcommands": 2,
+    "attributed_verdicts": true, "json_mode": true,
+    "check_blindspot": { "enabled": false, "tiers": ["unclassified"] }
+  },
+  "llm_third_opinion": {
+    "enabled": true,
+    "level": "complex_commands",
+    "base_uri": "http://127.0.0.1:9",
+    "model": "m2",
+    "api_key": "",
+    "timeout_ms": 60000,
+    "temperature": 3.0,
+    "llm_response_max_tokens": 256,
+    "complex_min_subcommands": 2,
+    "attributed_verdicts": true,
+    "json_mode": true,
+    "check_blindspot": { "enabled": true, "tiers": ["unclassified"] }
+  },
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal", "description": "Minimal.",
+      "read_only_verbs": ["Get-*"], "modifying_verbs": { "high": [], "medium": [], "low": [] },
+      "read_only": [], "modifying": [], "strictness_gated": []
+    },
+    "Linux": {
+      "modifying_strictness": "normal", "description": "Minimal.",
+      "read_only": [ { "name": "ls", "patterns": ["ls *"], "description": "List" } ],
+      "modifying": [ { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove" } ],
+      "strictness_gated": []
+    }
+  }
+}

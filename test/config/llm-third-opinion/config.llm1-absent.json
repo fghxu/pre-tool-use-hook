@@ -1,0 +1,60 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE variant: NO llm_second_opinion block at all + llm_third_opinion ENABLED - the block-ABSENT skip case (LT3-18, fullpipe leg). Legal config (spec D15: no cross-block requirement); the hook's .log must contain the explicit 'LLM2 skipped' line. Also preflight PF-7: loads with NO throw and compiles llmThirdOpinion (effective timeout = raw 60000, no clamp partner).",
+  "_comment_fixture": "Delta vs config.pair.json: the entire llm_second_opinion block REMOVED. FULLPIPE-ONLY for cases: the classify path of the runner mutates _compiled.llmSecondOpinion per case, which would crash on a null block - LT3-18 runs mode=\"fullpipe\".",
+
+  "global_modifying_strictness": "normal",
+  "log_file_path": "c:\\temp\\pretoolhook-llm-third-opinion-testlogs\\",
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+  "trusted_programs": [ "tool-a.exe", "tool-b.exe", "src\\Classifier.ps1" ],
+  "system_paths": { "linux": ["/etc", "/usr", "/bin", "/sbin"], "windows": ["C:\\\\Windows", "C:\\\\Program Files"] },
+  "intercept_tool_name": [ "Bash", "run_in_terminal" ],
+  "tool_name_mapping": { "Bash": "tool_input.command", "run_in_terminal": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "llm_third_opinion": {
+    "enabled": true,
+    "level": "complex_commands",
+    "base_uri": "http://127.0.0.1:9",
+    "model": "m2",
+    "api_key": "",
+    "timeout_ms": 60000,
+    "temperature": 0.0,
+    "llm_response_max_tokens": 256,
+    "complex_min_subcommands": 2,
+    "attributed_verdicts": true,
+    "json_mode": true,
+    "_comment_ignored": "Ignored keys (template).",
+    "check_blindspot": { "enabled": true, "tiers": ["unclassified", "unregistered_verb", "unregistered_static", "unregistered", "unknown_domain"] }
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "description": "Minimal PowerShell domain.",
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Format-*", "Write-Host", "Write-Output"],
+      "modifying_verbs": { "high": ["Remove-*", "Stop-*"], "medium": ["Set-*", "New-*", "Copy-*", "Move-*", "Rename-*"], "low": [] },
+      "read_only": [], "modifying": [],
+      "strictness_gated": [ { "name": "Set-Content", "patterns": ["Set-Content *"], "description": "Write file (gated)" } ]
+    },
+    "Linux": {
+      "modifying_strictness": "normal",
+      "description": "Minimal Linux domain.",
+      "read_only": [ { "name": "ls", "patterns": ["ls *"], "description": "List" }, { "name": "cat", "patterns": ["cat *"], "description": "Print" } ],
+      "modifying": [ { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove" } ],
+      "strictness_gated": [ { "name": "printf", "patterns": ["printf *"], "description": "Data args" } ],
+      "parameter_commands": {
+        "git": {
+          "modifying_strictness": "normal",
+          "global_value_flags": ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"],
+          "rules": [
+            { "subcommand": ["push"], "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["status","log","diff","show","fetch"], "decision": "read-only" }
+          ],
+          "default": "read-only"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- TRUSTED-PROGRAMS-REGEX SUITE (R1) - isolated fixture (test/config/trusted-programs-regex/config.json).
+     Proves trusted_programs_regex: regex entries matched AFTER the literal list,
+     against the normalized program token (lowercased, '/' -> '\'), unanchored -match.
+     Run:
+       pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/config/trusted-programs-regex/test-cases.xml -ConfigPath test/config/trusted-programs-regex/config.json -->
+<commands>
+  <category-group name="TrustedProgramsRegex">
+
+    <!-- R1 core: a FUTURE agent-invented script name under src\ is trusted by the regex entry -->
+    <test-case expected="allow" reason="regex entry matches future src\\*.ps1 name" category="TPR-Allow-FutureName" subresult-reason-contains="trusted program (regex): src" subresult-tier="trusted_program">
+      <description>&amp; src\Brand-New.ps1 Get-ChildItem c:\temp - never listed literally, matched by src\\\\.*\\.ps1$</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& src\Brand-New.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- Substring semantics over a full-path token (unanchored, like trusted_pattern) -->
+    <test-case expected="allow" reason="regex substring matches full-path token" category="TPR-Allow-FullPath">
+      <description>&amp; c:\repo\src\other.ps1 Get-ChildItem c:\temp - src\\.*\.ps1$ matches inside the full path</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& c:\repo\src\other.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- Option B intact: regex trust still arg-scans for modifying commands -->
+    <test-case expected="ask" reason="regex-trusted program with modifying arg => ask (Option B)" category="TPR-Ask-ModifyingArg">
+      <description>&amp; src\Brand-New.ps1 Remove-Item c:\temp - modifying arg scanned</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& src\Brand-New.ps1 Remove-Item c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- Sibling worst-case-wins intact -->
+    <test-case expected="ask" reason="regex-trusted program + modifying sibling => ask" category="TPR-Ask-Sibling">
+      <description>&amp; src\Brand-New.ps1 ; Remove-Item c:\temp - sibling modifying statement</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& src\Brand-New.ps1 ; Remove-Item c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- Non-matching token is NOT trusted (regex miss falls through to tiers) -->
+    <test-case expected="ask" reason="non-matching token not trusted => ask" category="TPR-Ask-NotMatched">
+      <description>&amp; tools\notps1.cmd Get-ChildItem - no regex entry matches a .cmd under tools\</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& tools\notps1.cmd Get-ChildItem]]></copilot-command>
+    </test-case>
+
+    <!-- pwsh -File extraction feeds the same matcher (Find-NestedCommands -> Step 0f-trust) -->
+    <test-case expected="allow" reason="-File path matched by regex entry" category="TPR-Allow-PwshFile" subresult-tier="trusted_program">
+      <description>pwsh -File src\agent-made.ps1 -Flag - script path extracted and regex-matched</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -File src\agent-made.ps1 -Flag]]></copilot-command>
+    </test-case>
+
+    <!-- Precedence: a token matching BOTH lists reports the LITERAL entry -->
+    <test-case expected="allow" reason="literal entry wins over regex (precedence)" category="TPR-Allow-LiteralPrecedence" subresult-reason-contains="trusted program: barename.ps1" subresult-tier="trusted_program">
+      <description>&amp; src\barename.ps1 Get-ChildItem - matches literal 'barename.ps1' AND regex; literal reported</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& src\barename.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- Second regex entry (safe-.+\.ps1) matches a non-src location -->
+    <test-case expected="allow" reason="second regex entry matches elsewhere" category="TPR-Allow-SecondRegex">
+      <description>&amp; tools\safe-helper.ps1 Get-ChildItem - matched by safe-.+\.ps1</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[& tools\safe-helper.ps1 Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

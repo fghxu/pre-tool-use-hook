@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for script_drilldown (2026-09-20). Drilldown ON: untrusted -File scripts are opened, split into statements, and classified as if typed on the command line. Run via test/config/script-drilldown/Run-Tests.ps1.",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "_comment_trusted_programs": "Basename form - matches the script anywhere. trusted.ps1 is the D9 short-circuit target (never read when drilldown is ON).",
+  "trusted_programs": [
+    "trusted.ps1"
+  ],
+
+  "_comment_script_drilldown": "The feature under test. enabled=true, powershell runner, caps 3 files / 4096 bytes, llm_scope=count.",
+  "script_drilldown": {
+    "enabled": true,
+    "runners": ["powershell"],
+    "max_chained_files": 3,
+    "max_file_bytes": 4096,
+    "llm_scope": "count"
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "_comment_read_only_verbs": "Write-Host/Write-Output are read-only verbs (house style). Copy-Item/Remove-Item/Set-Content fall to modifying_verbs.",
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Format-*", "Out-GridView", "Write-Host", "Write-Output"],
+      "modifying_verbs": {
+        "high":   ["Remove-*", "Stop-*", "Disable-*", "Clear-*", "Reset-*"],
+        "medium": ["Set-*", "New-*", "Copy-*", "Move-*", "Rename-*", "Start-*", "Send-*", "Push-*"],
+        "low":    []
+      },
+      "_comment_pwsh_wrapper": "The pwsh wrapper line itself must classify read_only so it renders as a harmless [1] entry (mirrors live config.json L485).",
+      "read_only": [
+        { "name": "pwsh", "patterns": ["pwsh(?:\\.exe)? *", "powershell(?:\\.exe)? *"], "description": "PowerShell wrapper (inner commands classified separately)" }
+      ],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" },
+        { "name": "cat", "patterns": ["cat *"], "description": "Print file contents" },
+        { "name": "cd", "patterns": ["cd *", "chdir *"], "description": "Change directory (read-only for filesystem)" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

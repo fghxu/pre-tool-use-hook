@@ -96,7 +96,28 @@ $extraSuites = @(
     @{ Name = 'dsh-hook.unit';       File = (Join-Path $repoRoot 'test\config\live\test-cases.dsh.ps1'); Args = @() },
     @{ Name = 'dsh-plugin.node';     File = (Join-Path $repoRoot 'dsh-plugin\test\Run-NodeTests.ps1'); Args = @() },
     @{ Name = 'tool-gate';           File = (Join-Path $repoRoot 'test\config\tool-gate\Run-Tests.ps1'); Args = @() },
-    @{ Name = 'tool-gate.strictness'; File = (Join-Path $repoRoot 'test\config\test-strictness-gate\tool-gate\Run-Tests.ps1'); Args = @() }
+    @{ Name = 'tool-gate.strictness'; File = (Join-Path $repoRoot 'test\config\test-strictness-gate\tool-gate\Run-Tests.ps1'); Args = @() },
+    # R1/R2/R3 (2026-09-18): regex allowlists + editable_paths deletion authority.
+    # trusted-programs-regex (R1) and safe-expr-regex (R3) are self-contained runners.
+    # editable-delete (R2) is the Step 0g-delete XML fixture (wrapper runs TestRunner
+    # under powershell.exe with Cwd=d:\work); editable-delete.llm is the R2 LLM
+    # sub-suite run by the llm-review fixture runner (mock verdicts, no network).
+    @{ Name = 'trusted-programs-regex'; File = (Join-Path $repoRoot 'test\config\trusted-programs-regex\Run-Tests.ps1'); Args = @() },
+    @{ Name = 'safe-expr-regex';        File = (Join-Path $repoRoot 'test\config\safe-expr-regex\Run-Tests.ps1'); Args = @() },
+    @{ Name = 'editable-delete';        File = (Join-Path $repoRoot 'test\config\editable-delete\Run-Tests.ps1'); Args = @() },
+    @{ Name = 'editable-delete.llm';    File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\editable-delete\test-cases.llm.xml')) },
+    # script_drilldown (2026-09-20): untrusted `pwsh -File <script>.ps1` is opened,
+    # split into statements, and classified as if typed on the command line.
+    # Self-contained runner (preflights + TestRunner under powershell.exe with
+    # Cwd=fixture dir); script-drilldown.llm is the llm_scope sub-suite run by the
+    # llm-review fixture runner (mock verdicts, no network).
+    @{ Name = 'script-drilldown';       File = (Join-Path $repoRoot 'test\config\script-drilldown\Run-Tests.ps1'); Args = @() },
+    @{ Name = 'script-drilldown.llm';   File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\script-drilldown\test-cases.llm.xml'), '-ConfigPath', (Join-Path $repoRoot 'test\config\script-drilldown\config.llm.json'), '-Cwd', (Join-Path $repoRoot 'test\config\script-drilldown')) },
+    # llm_third_opinion (2026-09-30): the LLM2 pair path - identical prompt to a
+    # second endpoint in parallel, disagreement forces ask. PF-1..PF-8 config
+    # preflights fire automatically (the runner detects the sibling
+    # config.pair.json); mock2 env var drives LLM2's verdict, no network.
+    @{ Name = 'llm-third-opinion.llm';  File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\llm-third-opinion\test-cases.llm.xml'), '-ConfigPath', (Join-Path $repoRoot 'test\config\llm-third-opinion\config.pair.json'), '-Cwd', (Join-Path $repoRoot 'test\config\llm-third-opinion')) }
 )
 if ($Filter) {
     $extraSuites = @($extraSuites | Where-Object { $_.Name -like "*$Filter*" })

@@ -42,6 +42,28 @@
     }
   },
 
+  "_comment_llm_third_opinion": "Third-opinion LLM (the 'pair', 2026-09-30). When enabled AND llm_second_opinion is enabled+in-scope, the IDENTICAL prompt is sent to a SECOND endpoint in parallel (PowerShell runspaces); the two parsed verdicts are compared. DISAGREEMENT forces ask with *** LLM-DISAGREE *** wording (unconditional, D5/D7). Agreement, or LLM2 unreachable/unparseable, leaves LLM1 driving today's merge exactly as before. LLM1 unreachable keeps today's fail-closed ask and appends an LLM2 FYI note. check_blindspot consults get an FYI note only - never a decision change (D9). llm_second_opinion disabled + this enabled => the LLM is skipped entirely and a skip-note is logged (D3/D13).\n\nFIELD REFERENCE:\n- LIVE fields: enabled, base_uri, model, api_key, timeout_ms. Effective timeout = min(this timeout_ms, llm_second_opinion.timeout_ms) (D11).\n- ALL other keys are ACCEPTED-BUT-IGNORED: llm_second_opinion's values decide scope (level, complex_min_subcommands, remote_indicators, check_blindspot) and prompt/sampling (attributed_verdicts, temperature, llm_response_max_tokens, json_mode) for BOTH models, so the identical prompt guarantees a fair A/B comparison. Ignored keys are still VALIDATED (a typo throws at load).\n- enabled: true|false. Fires only when llm_second_opinion is also enabled AND the command is in scope (D1).\n- base_uri / model / api_key: the second endpoint. model SHOULD differ from llm_second_opinion.model (log/mining clarity).\n- timeout_ms: integer (>=1). Clamped to min(this, llm_second_opinion.timeout_ms) so a pair consult never exceeds LLM1's budget (wall-clock ~ max(t1,t2)).\n- compare enum in records.jsonl: agree | disagree | llm1-down | llm2-down | out-of-scope | skipped-trusted-editable | skipped-primary-disabled. The llm2 sub-object is ABSENT when the pair is not armed (feature-off records stay byte-identical).\n- Test mock: PRETOOLHOOK_LLMREVIEW_MOCK2 injects LLM2's verdict; unset falls back to PRETOOLHOOK_LLMREVIEW_MOCK (both agree = the regression baseline, D12).\nSee docs/superpowers/specs/2026-09-30-llm-third-opinion-design.md.",
+  "llm_third_opinion": {
+    "enabled": false,
+    "_comment_enforce_disagree": "true (default, key absent) = pair disagreement forces ask (*** LLM-DISAGREE ***, D5). false = disagreement detected + recorded (llm2.compare='disagree') but the decision falls through to the regular pre-pair classification: LLM1's verdict drives today's merge. check_blindspot never affected either way (D9). D18 amendment 2026-10-10.",
+    "enforce_disagree": true,
+    "level": "complex_remote",
+    "base_uri": "http://127.0.0.1:3031",
+    "_models_for_pick": "GLM-5.2 , deepseek-v4-flash, deepseek-v4-pro, claude-opus-4.7, gpt-5.6-sol",
+    "model": "gpt-5.6-sol",
+    "api_key": "",
+    "timeout_ms": 30000,
+    "temperature": 0.0,
+    "llm_response_max_tokens": 256,
+    "complex_min_subcommands": 2,
+    "attributed_verdicts": true,
+    "json_mode": true,
+    "check_blindspot": {
+      "enabled": true,
+      "tiers": ["unclassified", "unregistered_verb", "unregistered_static", "unregistered", "unknown_domain"]
+    }
+  },
+
 
   "_comment_ask_notification": "Windows toast popup + sound whenever the hook decides 'ask' (approval needed). Fire-and-forget: never blocks the hook, never changes the decision. Fields: enabled (default true, master switch) | popup (default true, show toast) | sound (default true, play sound) | sound_file (default '', path to .wav file; empty = system beep).",
   "ask_notification": {
@@ -51,18 +73,28 @@
     "sound_file": ""
   },
 
+  "_comment_script_drilldown_1": "Script drilldown (2026-09-20): when a command invokes a script via 'pwsh -File <script>.ps1', the hook opens the file, splits it into statements via the AST walker, and classifies each as if typed on the command line. Numbered [N] sub-commands are prefixed <script:basename> in the log + LLM prompt.",
+  "_comment_script_drilldown_2": "SHIPS DISABLED. Absent key OR enabled=false => behavior is byte-identical to before this feature (spec D2/I1). Fields: enabled (bool, default false) | runners (array; implemented set = ['powershell']; empty array throws) | max_chained_files (int >= 1, default 3) | max_file_bytes (int >= 1, default 4096) | llm_scope ('count'|'exclude', default 'count').",
+  "script_drilldown": {
+    "enabled": false,
+    "runners": ["powershell"],
+    "max_chained_files": 3,
+    "max_file_bytes": 4096,
+    "llm_scope": "count"
+  },
+
 
   "_comment_trusted_programs": "Programs trusted to run. Matched AFTER decomposition, against the program token of each decomposed sub-command (the & call-target / first token). A match grants 'allow' for that sub-command ONLY IF no modifying command also appears in its arguments or sibling statements (Option B: args are scanned; unknown args ignored). Entry forms: full path, partial path (path-suffix match; '/' and '\\' are equivalent), or bare name (basename match). Case-insensitive. Covers the & path / bare-path invocation forms; pwsh -File is NOT unwrapped (those invocations are already allowed by the pwsh read_only pattern). The entries below are the project's OWN dev/test scripts (tracked in the repo, used by the test suites); add any machine-specific programs in your private config.local.json (see _comment_local_override).",
   "trusted_programs": [
 	"TestRunner.ps1",
-	"src\\Parser.ps1",
-	"src\\Resolver.ps1",
 	"live\\Sync-Fixtures.ps1",
 	"llm-review\\Run-Tests.ps1",
 	"test-strictness-gate\\Run-Tests.ps1",
-	"src\\Run-AllTests.ps1",
-	"src\\ConfigLoader.ps1",
 	"Classifier.ps1"
+  ],
+  "_comment_trusted_programs_regex": "Regex entries (R1, 2026-09-18) matched AFTER literals miss, against the normalized program token (lowercased, '/' -> '\\'), unanchored -match, case-insensitive. src\\\\.*\\.ps1$ covers all src\\*.ps1 scripts including future agent-invented names (replaces the 4 former literal entries).",
+  "trusted_programs_regex": [
+	"src\\\\.*\\.ps1$"
   ],
 
 
@@ -325,34 +357,39 @@
       "SelectNodes", "SelectSingleNode", "GetElementsByTagName", "GetElementById",
       "ReadLine", "ReadToEnd", "Next", "NextDouble", "GetTypeCode"
     ],
-    "_comment_dotnet_static_method_allowlist": "Type-qualified allowlist for STATIC .NET method calls ([Type]::Method(...)) in expression position, used by the safe-expression certifier + AST arbiter (Test-SafeAst InvokeMemberExpressionAst). Entry form 'TypeName::Method' matched case-insensitively against the type AS WRITTEN (e.g. regex::Matches) AND its reflected full name (e.g. System.Text.RegularExpressions.Regex::Matches). 183 entries, ALL verified via .NET reflection (public static, 2026-07-31, temp/verify-static-list.ps1). Only provably read-only statics: pure computations, conversions, parses, searches, and filesystem READS. Deliberately EXCLUDED (still ask): writers/mutators (File::Write*/Append*/Delete/Copy/Move/Create/SetAttributes, Directory::Create/Delete/Move, Array::Sort/Reverse/Clear/Copy, Environment::SetEnvironmentVariable, Path::GetTempFileName [creates a file], String::Intern, Process::Start). Distinct from dotnet_method_allowlist above (name-only, covers instance-style calls).",
-    
-	
-	"dotnet_static_method_allowlist": [
-      "regex::Matches", "regex::Match", "regex::IsMatch", "regex::Replace", "regex::Split", "regex::Escape", "regex::Unescape",
-      "System.Management.Automation.PSParser::Tokenize", "System.Management.Automation.Language.Parser::ParseInput","System.Management.Automation.Language.Parser::ParseFile",
-      "System.IO.Path::Combine", "System.IO.Path::Join", "System.IO.Path::GetFileName", "System.IO.Path::GetFileNameWithoutExtension", "System.IO.Path::GetExtension", "System.IO.Path::GetDirectoryName", "System.IO.Path::GetFullPath", "System.IO.Path::ChangeExtension", "System.IO.Path::HasExtension", "System.IO.Path::IsPathRooted", "System.IO.Path::GetPathRoot", "System.IO.Path::GetRandomFileName", "System.IO.Path::GetRelativePath", "System.IO.Path::TrimEndingDirectorySeparator", "System.IO.Path::GetInvalidPathChars", "System.IO.Path::GetInvalidFileNameChars", "System.IO.Path::GetTempPath",
-      "System.IO.File::ReadAllText", "System.IO.File::ReadAllBytes", "System.IO.File::ReadAllLines", "System.IO.File::ReadLines", "System.IO.File::OpenRead", "System.IO.File::Exists", "System.IO.File::GetAttributes", "System.IO.File::GetCreationTime", "System.IO.File::GetCreationTimeUtc", "System.IO.File::GetLastAccessTime", "System.IO.File::GetLastAccessTimeUtc", "System.IO.File::GetLastWriteTime", "System.IO.File::GetLastWriteTimeUtc",
-      "System.IO.Directory::Exists", "System.IO.Directory::GetFiles", "System.IO.Directory::GetDirectories", "System.IO.Directory::GetFileSystemEntries", "System.IO.Directory::EnumerateFiles", "System.IO.Directory::EnumerateDirectories", "System.IO.Directory::EnumerateFileSystemEntries", "System.IO.Directory::GetCurrentDirectory", "System.IO.Directory::GetDirectoryRoot", "System.IO.Directory::GetLogicalDrives", "System.IO.Directory::GetParent", "System.IO.Directory::GetCreationTime", "System.IO.Directory::GetLastWriteTime", "System.IO.Directory::GetLastAccessTime",
-      "math::Abs", "math::Acos", "math::Asin", "math::Atan", "math::Atan2", "math::Ceiling", "math::Cos", "math::Cosh", "math::Exp", "math::Floor", "math::Log", "math::Log10", "math::Max", "math::Min", "math::Pow", "math::Round", "math::Sign", "math::Sin", "math::Sinh", "math::Sqrt", "math::Tan", "math::Tanh", "math::Truncate", "math::DivRem", "math::IEEERemainder", "math::Clamp", "math::BigMul", "math::Cbrt", "math::Log2",
-      "Convert::ToBase64String", "Convert::FromBase64String", "Convert::ToHexString", "Convert::FromHexString", "Convert::ToInt32", "Convert::ToInt64", "Convert::ToDouble", "Convert::ToBoolean", "Convert::ToByte", "Convert::ToChar", "Convert::ToDateTime", "Convert::ToDecimal", "Convert::ToString", "Convert::ChangeType", "Convert::ToBase64CharArray",
-      "System.BitConverter::ToString", "System.BitConverter::GetBytes", "System.BitConverter::ToInt16", "System.BitConverter::ToInt32", "System.BitConverter::ToInt64", "System.BitConverter::ToUInt16", "System.BitConverter::ToUInt32", "System.BitConverter::ToUInt64", "System.BitConverter::ToSingle", "System.BitConverter::ToDouble", "System.BitConverter::ToBoolean", "System.BitConverter::ToChar", "System.BitConverter::DoubleToInt64Bits", "System.BitConverter::Int64BitsToDouble", "System.BitConverter::SingleToInt32Bits", "System.BitConverter::Int32BitsToSingle",
-      "string::Format", "string::Join", "string::Concat", "string::IsNullOrEmpty", "string::IsNullOrWhiteSpace", "string::Compare", "string::CompareOrdinal", "string::Equals", "string::Copy",
-      "guid::NewGuid", "guid::Parse", "guid::TryParse", "guid::ParseExact",
-      "System.DateTime::Parse", "System.DateTime::ParseExact", "System.DateTime::TryParse", "System.DateTime::TryParseExact", "System.DateTime::FromBinary", "System.DateTime::FromFileTime", "System.DateTime::FromFileTimeUtc", "System.DateTime::FromOADate", "System.DateTime::IsLeapYear", "System.DateTime::DaysInMonth", "System.DateTime::Compare",
-      "System.DateTimeOffset::Parse", "System.DateTimeOffset::ParseExact", "System.DateTimeOffset::TryParse", "System.DateTimeOffset::TryParseExact", "System.DateTimeOffset::FromFileTime", "System.DateTimeOffset::FromUnixTimeSeconds", "System.DateTimeOffset::FromUnixTimeMilliseconds",
-      "System.TimeSpan::Parse", "System.TimeSpan::TryParse", "System.TimeSpan::FromDays", "System.TimeSpan::FromHours", "System.TimeSpan::FromMinutes", "System.TimeSpan::FromSeconds", "System.TimeSpan::FromMilliseconds", "System.TimeSpan::FromTicks",
-      "System.Version::Parse", "System.Version::TryParse",
-      "System.Array::BinarySearch", "System.Array::IndexOf", "System.Array::LastIndexOf", "System.Array::Find", "System.Array::FindAll", "System.Array::FindIndex", "System.Array::FindLast", "System.Array::FindLastIndex", "System.Array::Exists", "System.Array::TrueForAll", "System.Array::ConvertAll", "System.Array::Empty", "System.Array::AsReadOnly",
-      "System.Environment::GetEnvironmentVariable", "System.Environment::GetFolderPath", "System.Environment::ExpandEnvironmentVariables", "System.Environment::GetCommandLineArgs",
-      "int::Parse", "int::TryParse", "long::Parse", "long::TryParse", "double::Parse", "double::TryParse", "byte::Parse", "byte::TryParse", "bool::Parse", "bool::TryParse",
-      "System.Net.IPAddress::Parse", "System.Net.IPAddress::TryParse",
-      "System.Uri::EscapeDataString", "System.Uri::EscapeUriString", "System.Uri::UnescapeDataString", "System.Uri::CheckHostName", "System.Uri::CheckSchemeName", "System.Uri::IsWellFormedUriString", "System.Uri::IsHexDigit", "System.Uri::IsHexEncoding", "System.Uri::HexUnescape", "System.Uri::HexEscape",
-      "System.Linq.Enumerable::Where", "System.Linq.Enumerable::Select", "System.Linq.Enumerable::SelectMany", "System.Linq.Enumerable::OrderBy", "System.Linq.Enumerable::OrderByDescending", "System.Linq.Enumerable::ThenBy", "System.Linq.Enumerable::ThenByDescending", "System.Linq.Enumerable::GroupBy", "System.Linq.Enumerable::GroupJoin", "System.Linq.Enumerable::Join", "System.Linq.Enumerable::Distinct", "System.Linq.Enumerable::DistinctBy", "System.Linq.Enumerable::Union", "System.Linq.Enumerable::UnionBy", "System.Linq.Enumerable::Intersect", "System.Linq.Enumerable::IntersectBy", "System.Linq.Enumerable::Except", "System.Linq.Enumerable::ExceptBy", "System.Linq.Enumerable::Concat", "System.Linq.Enumerable::Zip", "System.Linq.Enumerable::Take", "System.Linq.Enumerable::TakeLast", "System.Linq.Enumerable::TakeWhile", "System.Linq.Enumerable::Skip", "System.Linq.Enumerable::SkipLast", "System.Linq.Enumerable::SkipWhile", "System.Linq.Enumerable::Chunk", "System.Linq.Enumerable::First", "System.Linq.Enumerable::FirstOrDefault", "System.Linq.Enumerable::Last", "System.Linq.Enumerable::LastOrDefault", "System.Linq.Enumerable::Single", "System.Linq.Enumerable::SingleOrDefault", "System.Linq.Enumerable::ElementAt", "System.Linq.Enumerable::ElementAtOrDefault", "System.Linq.Enumerable::Any", "System.Linq.Enumerable::All", "System.Linq.Enumerable::Count", "System.Linq.Enumerable::LongCount", "System.Linq.Enumerable::Sum", "System.Linq.Enumerable::Average", "System.Linq.Enumerable::Aggregate", "System.Linq.Enumerable::SequenceEqual", "System.Linq.Enumerable::Cast", "System.Linq.Enumerable::OfType", "System.Linq.Enumerable::ToArray", "System.Linq.Enumerable::ToList", "System.Linq.Enumerable::ToDictionary", "System.Linq.Enumerable::ToLookup", "System.Linq.Enumerable::ToHashSet", "System.Linq.Enumerable::DefaultIfEmpty", "System.Linq.Enumerable::MinBy", "System.Linq.Enumerable::MaxBy",
-      "System.Diagnostics.Process::GetProcesses", "System.Diagnostics.Process::GetProcessById", "System.Diagnostics.Process::GetCurrentProcess",
-      "System.ServiceProcess.ServiceController::GetServices",
-      "System.Console::ReadLine",
-      "System.Enum::GetNames", "System.Enum::GetValues", "System.Enum::GetName", "System.Enum::IsDefined"
+    "_comment_dotnet_static_method_allowlist": "Type-qualified allowlist for STATIC .NET method calls ([Type]::Method(...)) in expression position, used by the safe-expression certifier + AST arbiter (Test-SafeAst InvokeMemberExpressionAst). Entry form 'TypeName::Method' matched case-insensitively against the type AS WRITTEN AND its reflected full name. COLLAPSED 2026-09-19: the former 248 entries are covered by dotnet_static_method_allowlist_regex below (mechanical preservation proof, temp/collapse-proof.ps1: every pruned entry matches >=1 allow row and no deny entry). Only guid::NewGuid stays exact because its bare alias spelling is not matched by the system.-prefixed Class-A guid row. Distinct from dotnet_method_allowlist above (name-only, covers instance-style calls).",
+    "dotnet_static_method_allowlist": [
+      "guid::NewGuid"
+    ],
+    "_comment_dotnet_static_method_allowlist_regex": "Broad-patterns rows (2026-09-19 consolidation; supersedes the R3 single-row form, which is retained as row 1). Every row anchored ^...$ (D1: an unanchored 'int::' would substring-match point::/printqueue::). Class A = whole-type wildcard (provably all-pure statics); Class B = type + pure method prefixes (mixed types); Class C = cross-type method-name families (the never-enumerate net). Tried AFTER the exact set; the denylist below is checked FIRST and outranks everything.",
+    "dotnet_static_method_allowlist_regex": [
+      "^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch|replace|split|escape|unescape)$",
+      "^(system\\.)?(math|convert|bitconverter|string)::\\w+$",
+      "^(system\\.io\\.)?path::\\w+$",
+      "^system\\.(uri|datetime|datetimeoffset|timespan|version|guid|enum|net\\.ipaddress)::\\w+$",
+      "^system\\.(text\\.encoding|linq\\.enumerable)::\\w+$",
+      "^(system\\.)?(int32|int|int64|long|int16|short|uint32|uint|uint64|ulong|uint16|ushort|single|float|double|decimal|byte|sbyte|char|boolean|bool)::\\w+$",
+      "^(system\\.io\\.)?file::(read\\w*|openread|opentext|exists|get\\w*)$",
+      "^(system\\.io\\.)?directory::(get|enumerate|exists)\\w*$",
+      "^(system\\.)?environment::(get|expand)\\w*$",
+      "^(system\\.)?array::(binarysearch|indexof|lastindexof|find\\w*|exists|trueforall|convertall|empty|asreadonly)$",
+      "^(system\\.)?console::read\\w*$",
+      "^\\w[\\w.]*::(try)?parse\\w*$",
+      "^\\w[\\w.]*::get\\w*$",
+      "^\\w[\\w.]*::is\\w*$",
+      "^\\w[\\w.]*::to\\w*$",
+      "^\\w[\\w.]*::from\\w*$"
+    ],
+    "_comment_dotnet_static_method_denylist": "STATIC denylist (2026-09-19): checked FIRST in Test-SafeAst, outranks every allow path (exact + regex). Exact entries may be 'Type::Method' OR bare 'Method' (matches the method on ANY type - closes the alias-spelling gap where a type cannot be reflection-resolved and only the written key exists). gettempfilename: Path::GetTempFileName creates a zero-byte file. getobject: Microsoft.VisualBasic.Interaction::GetObject launches COM via moniker. intern: Q4 explicit decision - string::Intern stays ask despite the whole-type string row.",
+    "dotnet_static_method_denylist": [
+      "gettempfilename",
+      "getobject",
+      "intern"
+    ],
+    "_comment_dotnet_static_method_denylist_regex": "Tail-anchored deny regexes (2026-09-19): catch BOTH reflected full names AND non-canonical written spellings. Leading segment optional ([\\w.]*) so a bare [Marshal]/[IsolatedStorageFile] spelling (written key only, no reflected key) is still denied - TDD fix 2026-09-19.",
+    "dotnet_static_method_denylist_regex": [
+      "^[\\w.]*isolatedstoragefile::get\\w*$",
+      "^[\\w.]*marshal::get\\w*$"
     ]
   },
 

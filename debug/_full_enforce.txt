@@ -1,0 +1,105 @@
+
+=== test-cases-regression.xml ===
+  11/11 passed, 0 failed (2.1s) - PASS
+
+=== test-cases.git-param-strict.xml ===
+  10/10 passed, 0 failed (1.2s) - PASS
+
+=== test-cases.git-param.xml ===
+  27/27 passed, 0 failed (1.4s) - PASS
+
+=== test-cases.redirect-strict.xml ===
+  25/25 passed, 0 failed (1.5s) - PASS
+
+=== test-cases.strictness-gated.normal.xml ===
+  48/48 passed, 0 failed (1.7s) - PASS
+
+=== test-cases.strictness-gated.strict.xml ===
+  49/49 passed, 0 failed (1.7s) - PASS
+
+=== test-cases.trustedpattern.xml ===
+  74/74 passed, 0 failed (1.6s) - PASS
+
+=== test-cases.xml ===
+  790/790 passed, 0 failed (12.2s) - PASS
+
+=== test-fullpipe.xml ===
+  32/32 passed, 0 failed (21.7s) - PASS
+
+=== llm-review.small ===
+  46/46 passed, 0 failed (1.8s) - PASS
+
+=== llm-review.phase-I ===
+  46/46 passed, 0 failed (3.1s) - PASS
+
+=== llm-review.check-blindspot ===
+  35/35 passed, 0 failed (0.8s) - PASS
+
+=== llm-review.http-mock ===
+  30/30 passed, 0 failed (10.8s) - PASS
+
+=== dsh-hook.unit ===
+  17/17 passed, 0 failed (0.4s) - PASS
+
+=== dsh-plugin.node ===
+  19/19 passed, 0 failed (1.7s) - PASS
+
+=== tool-gate ===
+  32/32 passed, 0 failed (3.4s) - PASS
+
+=== tool-gate.strictness ===
+  28/28 passed, 0 failed (2.9s) - PASS
+
+=== trusted-programs-regex ===
+  3/3 passed, 0 failed (1.3s) - PASS
+
+=== safe-expr-regex ===
+  6/6 passed, 0 failed (2.5s) - PASS
+
+=== editable-delete ===
+  1/1 passed, 0 failed (1.3s) - PASS
+
+=== editable-delete.llm ===
+  34/34 passed, 0 failed (0.8s) - PASS
+
+=== script-drilldown ===
+  18/18 passed, 0 failed (4.3s) - PASS
+
+=== script-drilldown.llm ===
+  34/34 passed, 0 failed (0.9s) - PASS
+
+=== llm-third-opinion.llm ===
+  72/72 passed, 0 failed (6.6s) - PASS
+
+========================================
+All Suites Summary
+========================================
+Suite                                          Total  Passed  Failed  Known Seconds  Status
+test-cases-regression.xml                         11      11       0      0     2.1  PASS
+test-cases.git-param-strict.xml                   10      10       0      0     1.2  PASS
+test-cases.git-param.xml                          27      27       0      0     1.4  PASS
+test-cases.redirect-strict.xml                    25      25       0      0     1.5  PASS
+test-cases.strictness-gated.normal.xml            48      48       0      0     1.7  PASS
+test-cases.strictness-gated.strict.xml            49      49       0      0     1.7  PASS
+test-cases.trustedpattern.xml                     74      74       0      0     1.6  PASS
+test-cases.xml                                   790     790       0      0    12.2  PASS
+test-fullpipe.xml                                 32      32       0      0    21.7  PASS
+llm-review.small                                  46      46       0      0     1.8  PASS
+llm-review.phase-I                                46      46       0      0     3.1  PASS
+llm-review.check-blindspot                        35      35       0      0     0.8  PASS
+llm-review.http-mock                              30      30       0      0    10.8  PASS
+dsh-hook.unit                                     17      17       0      0     0.4  PASS
+dsh-plugin.node                                   19      19       0      0     1.7  PASS
+tool-gate                                         32      32       0      0     3.4  PASS
+tool-gate.strictness                              28      28       0      0     2.9  PASS
+trusted-programs-regex                             3       3       0      0     1.3  PASS
+safe-expr-regex                                    6       6       0      0     2.5  PASS
+editable-delete                                    1       1       0      0     1.3  PASS
+editable-delete.llm                               34      34       0      0     0.8  PASS
+script-drilldown                                  18      18       0      0     4.3  PASS
+script-drilldown.llm                              34      34       0      0     0.9  PASS
+llm-third-opinion.llm                             72      72       0      0     6.6  PASS
+----------------------------------------
+GRAND TOTAL                                     1487    1487       0      0
+
+OVERALL: all suites match expectations (1487/1487 passed, 0 failures all within baseline)

@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for trusted_programs_regex (R1). Proves regex-matched trusted programs: a single regex entry covers all src\\*.ps1 scripts, including future agent-invented names.",
+
+  "global_modifying_strictness": "normal",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "_comment_trusted_programs": "Literal entries (fast path). One bare-name entry to prove precedence over regex.",
+  "trusted_programs": [
+    "barename.ps1"
+  ],
+
+  "_comment_trusted_programs_regex": "Regex entries (matched after literals miss). src\\\\.*\\.ps1$ covers all src\\*.ps1 scripts. safe-.+\\.ps1 covers safe-*.ps1 anywhere.",
+  "trusted_programs_regex": [
+    "src\\\\.*\\.ps1$",
+    "safe-.+\\.ps1"
+  ],
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*", "Format-*", "Out-GridView", "Write-Host", "Write-Output"],
+      "modifying_verbs": {
+        "high":   ["Remove-*", "Stop-*", "Disable-*", "Clear-*", "Reset-*"],
+        "medium": ["Set-*", "New-*", "Copy-*", "Move-*", "Rename-*", "Start-*", "Send-*", "Push-*"],
+        "low":    []
+      },
+      "read_only": [],
+      "modifying": []
+    },
+
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List directory contents" },
+        { "name": "cat", "patterns": ["cat *"], "description": "Print file contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

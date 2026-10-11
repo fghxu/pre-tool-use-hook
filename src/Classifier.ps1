@@ -542,6 +542,14 @@ function Invoke-Classify {
     # STEP 4: Classification engine
     # =========================================================================
 
+    # Script drilldown state reset (2026-09-20): clear the visited-file HT and
+    # refresh the gate's Cwd from $Config._cwd (TestRunner -Cwd rewrites it AFTER
+    # Load-Config). Called unconditionally at the top of STEP 4 — cheap, and it is
+    # what makes TestRunner cases independent (one process, many cases). Engine
+    # idempotence (§7) means any re-entry within this classify hits the loop-check
+    # and returns a FAILURE into a discarded list; the reset only runs ONCE here.
+    Reset-ScriptDrilldownState
+
     # -- 4a: Domain detection (content-based) --
     $domain = Get-CommandDomain -Command $command
 
@@ -566,7 +574,21 @@ function Invoke-Classify {
     }
 
     # -- 4c: Find nested commands (pwsh -Command, ssh, docker exec, kubectl exec) --
-    $nestedCommands = @(Find-NestedCommands -Command $command -ParentDomain $domain)
+    # Run per sub-command SEGMENT, not on the full command string. The wrapper
+    # patterns inside Find-NestedCommands are anchored (^pwsh..., ^ssh..., ...),
+    # so calling it on a compound command ('cd x; pwsh -File y.ps1') never
+    # matches — the string starts with 'cd'. That left the whole 'pwsh -File'
+    # segment to the generic pwsh read_only pattern: a trusted script lost its
+    # trusted_program tier (LLM could veto a trusted run) and an UNTRUSTED
+    # script was allowed instead of asked (2026-09-17 production incident).
+    # Per-segment, the anchored patterns match the wrapper segment itself. For
+    # single-segment commands this is identical to the old full-string call.
+    # Each nested entry's ParentCommand is the SEGMENT text, so the combination
+    # step below suppresses exactly that segment (not the whole compound).
+    $nestedCommands = @()
+    foreach ($seg in $subCommands) {
+        $nestedCommands += @(Find-NestedCommands -Command $seg.CommandText -ParentDomain $seg.Domain)
+    }
 
     # -- 4c-2: Extract subshell commands $(command) --
     $subshellCommands = @(Split-SubshellCommands -Command $command)
@@ -620,13 +642,46 @@ function Invoke-Classify {
         if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetStaticMethodAllowlist' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
             $staticSet = $Config._dotnetStaticMethodAllowlist
         }
-        $isUnlistedStatic = $false
-        if ($command -match '\[([^\]]+)\]\s*::\s*([A-Za-z_]\w*)\s*\(') {
-            $writtenKey = "$($Matches[1].Trim())::$($Matches[2])"
-            $isUnlistedStatic = (-not $staticSet) -or (-not $staticSet.Contains($writtenKey))
+        # R3 (2026-09-18): static regex array for the miss-then-regex fallback.
+        $staticRegexes = @()
+        if ($Config -and (Get-Member -InputObject $Config -Name '_dotnetStaticMethodAllowlistRegex' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+            $staticRegexes = @($Config._dotnetStaticMethodAllowlistRegex)
         }
-        if ($isUnlistedStatic) {
-            $atomicReason = "static method not on allowlist: [$($Matches[1].Trim())]::$($Matches[2]) (see safe_expressions.dotnet_static_method_allowlist)"
+        $isUnlistedStatic = $false
+        $isDeniedStatic = $false
+        $atomType = $null
+        $atomMethod = $null
+        if ($command -match '\[([^\]]+)\]\s*::\s*([A-Za-z_]\w*)\s*\(') {
+            # Capture $Matches into locals IMMEDIATELY: the allow-regex loop
+            # below re-runs -match on $writtenKey and CLOBBERS $Matches (rows
+            # without capture groups, e.g. the Class-C families, leave
+            # $Matches[1] null -> method call on null crashed - caught by the
+            # F5 red/green run 2026-09-19).
+            $atomType = $Matches[1].Trim()
+            $atomMethod = $Matches[2]
+            $writtenKey = "$atomType::$atomMethod"
+            $onExact = $staticSet -and $staticSet.Contains($writtenKey)
+            # Regex fallback: an allowlisted-by-regex static is "on the allowlist"
+            # for truthfulness purposes (avoids a misleading 'not on allowlist'
+            # message). Decision stays ask either way.
+            $onRegex = $false
+            if (-not $onExact) {
+                foreach ($re in $staticRegexes) {
+                    if ($null -eq $re) { continue }
+                    if ($writtenKey -match $re) { $onRegex = $true; break }
+                }
+            }
+            $isUnlistedStatic = (-not $onExact) -and (-not $onRegex)
+            # F5 (2026-09-19): a DENIED static outranks both wordings - name the
+            # denylist so the ask reason says WHY (deny beats allow by design).
+            # Decision stays ask either way; wording only.
+            $isDeniedStatic = Test-StaticDeniedByText -Config $Config -TypeName $atomType -MethodName $atomMethod
+        }
+        if ($isDeniedStatic) {
+            $atomicReason = "static method denied by denylist: [$atomType]::$atomMethod (see safe_expressions.dotnet_static_method_denylist)"
+        }
+        elseif ($isUnlistedStatic) {
+            $atomicReason = "static method not on allowlist: [$atomType]::$atomMethod (see safe_expressions.dotnet_static_method_allowlist)"
         }
         else {
             $truncatedAtomic = $command.Substring(0, [Math]::Min(80, $command.Length))
@@ -685,7 +740,19 @@ function Invoke-Classify {
     $subResults = [System.Collections.Generic.List[PSCustomObject]]::new()
     $blockingCommands = [System.Collections.Generic.List[PSCustomObject]]::new()
 
+    # R2 (2026-09-18): a sub-command that executes on a REMOTE host must not be
+    # auto-allowed by this machine's editable_paths/CWD/temp policy. If the command
+    # contains a remote wrapper, treat its sub-commands as remote so Resolve-Command's
+    # Step 0g-delete skips them (pre-change ask behavior preserved). Remote wrappers:
+    # ssh / docker exec / kubectl exec / Invoke-Command -ComputerName. Local wrappers
+    # (pwsh -Command, bash -c, cmd /c, plain Invoke-Command) run on this machine and
+    # are NOT remote. Command-level (not per-sub-command) because the AST path drops
+    # ParentCommand; this is fail-closed — it can only over-ask a rare mixed local+
+    # remote compound, never under-ask (a security hole).
+    $remoteWrapperRe = '(?:\bssh\s|\bdocker\s+exec\b|\bkubectl\s+exec\b|\bInvoke-Command\s+.*?-ComputerName\b)'
+
     foreach ($sc in $allCommands) {
+        $isRemote = [bool]($command -match $remoteWrapperRe)
         # Atomic-unknown marker (2026-09-17 Layer 2): the reason was computed
         # at the combination step for the WHOLE statement. Re-resolving would
         # emit the generic 'unknown command' fallback, so use it verbatim.
@@ -698,10 +765,66 @@ function Invoke-Classify {
                 Risk           = 'unknown'
                 Tier           = 'unclassified'
             }
+            # Script drilldown FAILURE entry (2026-09-20, §8.3): stamp a KNOWN
+            # blocker pattern so the AST-arbiter gate stays closed for drilldown
+            # asks — the arbiter only re-parses the original command line and cannot
+            # see file contents, so letting it run would waste a parse and re-enter
+            # the engine (F6) before inevitably returning 'NO'. Decision is ask
+            # either way; this only keeps the reason truthful and the gate honest.
+            if ($sc.PSObject.Properties['DrilldownMarker']) {
+                $r.MatchedPattern = 'script-drilldown'
+            }
         }
         else {
-            $r = Resolve-Command -Command $sc.CommandText -Domain $sc.Domain -Config $Config
+            $r = Resolve-Command -Command $sc.CommandText -Domain $sc.Domain -Config $Config -IsRemote $isRemote
+
+            # Script drilldown origin stamping (2026-09-20, §8.3): a STATEMENT entry
+            # carries OriginScript/LineNumber/DisplayText from the engine. Copy them
+            # onto the SubResult so 4f can format script-origin reasons and the LLM
+            # scope filter sees the origin. For a BLOCKING statement (modifying OR
+            # unknown) rewrite Reason to the §6-2 template; allow statements keep
+            # their normal reason (they never reach 4f).
+            if ($sc.PSObject.Properties['OriginScript']) {
+                $r | Add-Member -Force NoteProperty 'OriginScript' "$($sc.OriginScript)"
+                # NOTE (2026-09-21 fix): build the int in a variable first. In
+                # ARGUMENT mode PowerShell does NOT treat a leading [int] as a cast -
+                # '[int]$sc.LineNumber' was parsed as an expandable string and stored
+                # the literal text '[int]<entry dump>.LineNumber' as the property
+                # value. An assignment (expression mode) performs a real conversion.
+                if ($sc.PSObject.Properties['LineNumber']) {
+                    $scLineNumber = [int]$sc.LineNumber
+                    $r | Add-Member -Force NoteProperty 'LineNumber' $scLineNumber
+                }
+                if ($sc.PSObject.Properties['DisplayText']) { $r | Add-Member -Force NoteProperty 'DisplayText' "$($sc.DisplayText)" }
+                if ($r.Decision -eq 'ask') {
+                    $stmt = "$($sc.CommandText)"
+                    if ($stmt.Length -gt 80) { $stmt = $stmt.Substring(0, 80) + '...' }
+                    $kind = if ($r.MatchedPattern) { 'modifying command' } else { 'unknown command' }
+                    $line = if ($sc.PSObject.Properties['LineNumber']) { " (line $($sc.LineNumber))" } else { '' }
+                    $r.Reason = "script $($sc.OriginScript) contains ${kind}: ${stmt}${line}"
+                }
+            }
         }
+
+        # R2 tier stamp (§4.3, merge-relevant): if this segment is an allow with a
+        # redirect whose target is editable/CWD/temp, stamp Tier='editable_path' so
+        # the LLM merge can suppress vetoes on it (INV-2 for writes). Never overwrite
+        # an existing MEANINGFUL tier (e.g. 'trusted_program', 'safe_expr'). A plain
+        # 'read_only' tier is NOT meaningful here — a read-only cmdlet that also writes
+        # to an editable/temp target via redirect IS path-policy-governed, so upgrade it
+        # to 'editable_path' (this is what makes INV-2-for-writes work: the segment the
+        # LLM's flagged index points at must carry the suppressible tier).
+        $curTier = "$($r.Tier)"
+        if ($r.Decision -eq 'allow' -and ($curTier -eq '' -or $curTier -eq 'read_only')) {
+            $segRedir = Test-RedirectionTarget -Command $sc.CommandText -Config $Config
+            if ($segRedir.HasRedirection -and $segRedir.Decision -eq 'allow') {
+                $rr = "$($segRedir.Reason)"
+                if ($rr -match 'temp path|under current directory|editable path') {
+                    $r | Add-Member -MemberType NoteProperty -Name 'Tier' -Value 'editable_path' -Force
+                }
+            }
+        }
+
         $subResults.Add($r)
 
         if ($r.Decision -eq "ask") {
@@ -711,12 +834,27 @@ function Invoke-Classify {
 
     # -- 4e-2: Integrate redirection target classification --
     if ($redirectionResult.HasRedirection) {
+        # R2 tier stamp (§4.3, display/logging only): this entry is EXCLUDED from the
+        # LLM's indexed list (scope filter drops MatchedPattern='redirection-target'),
+        # so the stamp changes nothing in the merge — it makes logs, subresult-tier
+        # assertions, and check_blindspot tier display truthful. ask -> modifying;
+        # allow with a real path-write target (temp/CWD/editable) -> editable_path.
+        $redirTier = ''
+        if ($redirectionResult.Decision -eq 'ask') {
+            $redirTier = 'modifying'
+        } elseif ($redirectionResult.Decision -eq 'allow') {
+            $rr = "$($redirectionResult.Reason)"
+            if ($rr -match 'temp path|under current directory|editable path') {
+                $redirTier = 'editable_path'
+            }
+        }
         $redirSubResult = [PSCustomObject]@{
             Command        = $command
             Decision       = $redirectionResult.Decision
             Reason         = $redirectionResult.Reason
             MatchedPattern = "redirection-target"
             Risk           = $redirectionResult.Risk
+            Tier           = $redirTier
         }
         $subResults.Add($redirSubResult)
 
@@ -790,7 +928,19 @@ function Invoke-Classify {
         # Build reason string listing ALL blocking commands
         $blockingReasons = [System.Collections.Generic.List[string]]::new()
         foreach ($bc in $blockingCommands) {
-            if ($bc.MatchedPattern -and $bc.Risk) {
+            # Script drilldown (2026-09-20, §8.4): two blocker shapes must print
+            # their pre-formatted Reason VERBATIM instead of the 'pattern (risk)'
+            # form — both carry a non-null MatchedPattern, so without this FIRST
+            # branch they would fall into the arm below and lose the reason text:
+            #   - a STATEMENT entry with OriginScript: 4e rewrote Reason to the §6-2
+            #     template ('script x.ps1 contains modifying command: Copy-Item (line 6)')
+            #   - a FAILURE entry (MatchedPattern='script-drilldown'): Reason is the
+            #     fail-closed AtomicReason ('script file not found: ...', 'recursive
+            #     script invocation detected', ...).
+            if (($bc.MatchedPattern -eq 'script-drilldown') -or ($bc.PSObject.Properties['OriginScript'] -and $bc.Reason)) {
+                $blockingReasons.Add("$($bc.Reason)")
+            }
+            elseif ($bc.MatchedPattern -and $bc.Risk) {
                 $blockingReasons.Add("$($bc.MatchedPattern) ($($bc.Risk))")
             }
             elseif ($bc.MatchedPattern) {

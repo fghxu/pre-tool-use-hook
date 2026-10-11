@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SAFE-EXPR-REGEX SUITE (R3) - isolated fixture (test/config/safe-expr-regex/config.json).
+     Exact allowlists EMPTY; only the *_regex keys are populated, proving regex-only operation.
+     Static cases route through Test-SafeAst via two paths:
+       - pure-expression certifier (needs a PowerShell marker like @() to detect powershell domain)
+       - AST-arbiter gate (linux-detected ;-chain with an unknown static blocker)
+     Run:
+       pwsh -NoProfile -File src/TestRunner.ps1 -XmlPath test/config/safe-expr-regex/test-cases.xml -ConfigPath test/config/safe-expr-regex/config.json -->
+<commands>
+  <category-group name="SafeExprRegex">
+
+    <!-- R3 static core: short alias form, written key 'regex::IsMatch' matched by the regex entry (certifier path) -->
+    <test-case expected="allow" reason="static regex hit on written short-alias form" category="SER-Allow-StaticWritten" subresult-tier="safe_expr">
+      <description>$z = @(); $null = [regex]::IsMatch("abc","a") - zero cmdlets, safe-expression certifier</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null = [regex]::IsMatch("abc","a")]]></copilot-command>
+    </test-case>
+
+    <!-- Reflected full-name form: written key 'System.Text.RegularExpressions.Regex::Matches' matched by the same regex entry (arbiter path) -->
+    <test-case expected="allow" reason="static regex hit on reflected full-name form" category="SER-Allow-StaticReflected">
+      <description>$null = [System.Text.RegularExpressions.Regex]::Matches("abc","a"); Get-ChildItem c:\temp - full type name, ;-chain</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$null = [System.Text.RegularExpressions.Regex]::Matches("abc","a"); Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- Regex miss fail-closed: Compile is not in the alternation. (Retargeted 2026-09-19:
+         Replace became ALLOWED by the broadened R3 row - intended flip, same procedure as R1.) -->
+    <test-case expected="ask" reason="static regex miss => ask (fail-closed)" category="SER-Ask-StaticMiss">
+      <description>$z = @(); $null = [regex]::Compile("abc") - Compile not matched by any allow row</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null = [regex]::Compile("abc")]]></copilot-command>
+    </test-case>
+
+    <!-- Instance regex: ToCharArray is NOT in the built-in default instance list, so an allow can only come from the regex key -->
+    <test-case expected="allow" reason="instance regex hit (method not in default exact list)" category="SER-Allow-InstanceRegex" subresult-tier="safe_expr">
+      <description>$z = @(); $s.ToCharArray() - instance method matched by dotnet_method_allowlist_regex</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $s.ToCharArray()]]></copilot-command>
+    </test-case>
+
+    <!-- Instance miss fail-closed: Mutate is in neither the default list nor the regex -->
+    <test-case expected="ask" reason="instance regex miss => ask (fail-closed)" category="SER-Ask-InstanceMiss">
+      <description>$z = @(); $s.Mutate() - instance method not allowlisted</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $s.Mutate()]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <!-- STATIC DENYLIST (2026-09-19 design). D1-D5 + D11 are RED pre-code (deny not yet
+       implemented, so the allow rows/families currently allow them); D6-D10 are GREEN
+       guards that pass as soon as the fixture rows land. Precedence proven:
+       deny exact > deny regex > exact allow > allow regex. -->
+  <category-group name="StaticDeny">
+
+    <!-- D1 RED: bare-name deny outranks EXACT allow + Class-A path row + get family (fixture deliberately exact-allows this key too) -->
+    <test-case expected="ask" reason="deny (bare gettempfilename) beats exact allow + path row + get family" category="SDeny-ExactBeatsAllAllows">
+      <description>$z = @(); $f=[System.IO.Path]::GetTempFileName() - also in fixture exact allowlist; deny must win</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $f=[System.IO.Path]::GetTempFileName()]]></copilot-command>
+    </test-case>
+
+    <!-- D2 RED: bare-name deny catches a non-canonical written spelling ([io.path] short form) -->
+    <test-case expected="ask" reason="bare-name deny catches alias spelling io.path::GetTempFileName" category="SDeny-BareAliasSpelling">
+      <description>$z = @(); $f=[io.path]::GetTempFileName() - written key io.path::gettempfilename; bare deny fires on the method name</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $f=[io.path]::GetTempFileName()]]></copilot-command>
+    </test-case>
+
+    <!-- D3 RED: type-scoped deny REGEX (the only mechanism that denies this) -->
+    <test-case expected="ask" reason="tail-anchored deny regex isolatedstoragefile::get*" category="SDeny-TypeScopedRegex">
+      <description>$z = @(); $s=[System.IO.IsolatedStorage.IsolatedStorageFile]::GetUserStoreForDomain() - creates store on disk</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $s=[System.IO.IsolatedStorage.IsolatedStorageFile]::GetUserStoreForDomain()]]></copilot-command>
+    </test-case>
+
+    <!-- D4 RED: bare-name deny for the COM-launcher GetObject (Microsoft.VisualBasic.Interaction) -->
+    <test-case expected="ask" reason="bare-name deny getobject (Interaction::GetObject launches COM via moniker)" category="SDeny-BareGetObject">
+      <description>$z = @(); $o=[Microsoft.VisualBasic.Interaction]::GetObject('C:\temp\x.xlsx') - COM server launch</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $o=[Microsoft.VisualBasic.Interaction]::GetObject('C:\temp\x.xlsx')]]></copilot-command>
+    </test-case>
+
+    <!-- D5 RED: deny regex matches the SHORT written spelling of Marshal (unresolvable without namespace) -->
+    <test-case expected="ask" reason="deny regex ^[\w.]*marshal::get\w*$ matches written key marshal::getactiveobject (optional leading segment)" category="SDeny-RegexWrittenSpelling">
+      <description>$z = @(); $o=[Marshal]::GetActiveObject('Excel.Application') - interop Get denied on any spelling</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $o=[Marshal]::GetActiveObject('Excel.Application')]]></copilot-command>
+    </test-case>
+
+    <!-- D6 GREEN: get family matches the WRITTEN key of an unresolvable type (third-party accepted per threat model) -->
+    <test-case expected="allow" reason="Class-C get family on written key of unresolvable type" category="SAllow-FamilyWrittenKeyOnly">
+      <description>$z = @(); $v=[Foo.Bar]::GetValues('x') - written key foo.bar::getvalues; no reflected key</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $v=[Foo.Bar]::GetValues('x')]]></copilot-command>
+    </test-case>
+
+    <!-- D7 GREEN: primitive Class-A row covers .NET 9+ static math members (pins the corrected Q7 evidence) -->
+    <test-case expected="allow" reason="primitive whole-type row covers int::Max (.NET 9+ static)" category="SAllow-PrimitiveNet10Math">
+      <description>$z = @(); $m=[int]::Max(3, 5) - Int32 static math member, pure</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $m=[int]::Max(3, 5)]]></copilot-command>
+    </test-case>
+
+    <!-- D8 GREEN: file Class-B row read\w* tail covers ReadLines (the readall\w* regression guard) -->
+    <test-case expected="allow" reason="file row read\w* covers ReadLines" category="SAllow-FileReadLines">
+      <description>$z = @(); $l=[System.IO.File]::ReadLines('c:\temp\x') - streaming reader, pure</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $l=[System.IO.File]::ReadLines('c:\temp\x')]]></copilot-command>
+    </test-case>
+
+    <!-- D9 GREEN: contrast with D1 - same type, neighbor method stays allowed -->
+    <test-case expected="allow" reason="path row + get family allow GetRandomFileName (pure, no file created)" category="SAllow-GetRandomFileName">
+      <description>$z = @(); $n=[System.IO.Path]::GetRandomFileName() - returns a name string only</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $n=[System.IO.Path]::GetRandomFileName()]]></copilot-command>
+    </test-case>
+
+    <!-- D10 GREEN guard: file writer stays ask (OpenWrite not matched by any row or family) -->
+    <test-case expected="ask" reason="file Class B excludes writers; openwrite matches no row/family" category="SAsk-FileOpenWrite">
+      <description>$z = @(); [void][System.IO.File]::OpenWrite('c:\temp\x') - writer, fail-closed</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); [void][System.IO.File]::OpenWrite('c:\temp\x')]]></copilot-command>
+    </test-case>
+
+    <!-- D11 RED (Q4 pin): string whole-type row allows Intern, but the bare deny 'intern' wins -->
+    <test-case expected="ask" reason="bare-name deny intern beats string Class-A row (Q4 explicit decision)" category="SDeny-StringIntern">
+      <description>$z = @(); $s=[string]::Intern("abc") - whole-type string row would allow; deny keeps it ask</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $s=[string]::Intern("abc")]]></copilot-command>
+    </test-case>
+
+    <!-- D12 RED (F5 wording): zero-cmdlet atomic path - a DENIED static must say so,
+         not the generic 'unsafe PowerShell expression (fail-closed)' wording -->
+    <test-case expected="ask" reason="static deny wording beats generic fail-closed (Classifier Layer-2 atomic path)" category="SDeny-ReasonAtomic" reason-contains="denied by denylist">
+      <description>$z = @(); $f=[System.IO.Path]::GetTempFileName() - zero cmdlets, denied static -&gt; ask with deny-specific reason</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $f=[System.IO.Path]::GetTempFileName()]]></copilot-command>
+    </test-case>
+
+    <!-- D13 RED (F5 wording): Resolver Step-3 static fallback (leading static in a ;-chain) -
+         deny wording must outrank 'static method not on allowlist' -->
+    <test-case expected="ask" reason="static deny wording beats 'not on allowlist' (Resolver Step-3 fallback)" category="SDeny-ReasonResolverFallback" reason-contains="denied by denylist">
+      <description>[System.IO.Path]::GetTempFileName(); echo hi - leading denied static, regex-split fallback -&gt; ask with deny-specific reason</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[[System.IO.Path]::GetTempFileName(); echo hi]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <!-- SECTION 10 GREEN ACCEPTANCE CASES (added 2026-09-19 audit pass - they were in the
+       spec's test plan but missing from this suite). G4/G7/G9b are already covered by
+       D9/D10/D8 respectively, so only the remaining seven are added here. -->
+  <category-group name="StaticGreen">
+
+    <!-- G1: file Class-B row get prefix (also get family) - pure reader -->
+    <test-case expected="allow" reason="file Class-B row + get family allow GetAttributes" category="SGreen-FileGetAttributes">
+      <description>$z = @(); $null=[System.IO.File]::GetAttributes("c:\temp\x") - pure reader</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null=[System.IO.File]::GetAttributes("c:\temp\x")]]></copilot-command>
+    </test-case>
+
+    <!-- G2: primitive Class-A row + parse family on the alias spelling -->
+    <test-case expected="allow" reason="primitive row + parse family allow int::Parse" category="SGreen-IntParse">
+      <description>$z = @(); $x=[int]::Parse("42") - pure conversion</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $x=[int]::Parse("42")]]></copilot-command>
+    </test-case>
+
+    <!-- G3: the \w* tail proof - plain '.*::parse' would miss TryParse; [ref] out-arg must stay certifier-safe -->
+    <test-case expected="allow" reason="parse family (try)?parse\w* covers TryParse with [ref] out-arg" category="SGreen-TryParseRef">
+      <description>$z = @(); [void][int]::TryParse("42",[ref]$y) - tail proof + ref arg</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); [void][int]::TryParse("42",[ref]$y)]]></copilot-command>
+    </test-case>
+
+    <!-- G5: math Class-A whole-type (non-family member Sqrt - only the whole-type row covers it) -->
+    <test-case expected="allow" reason="math Class-A whole-type row allows Sqrt (no family covers it)" category="SGreen-MathSqrt">
+      <description>$z = @(); $s=[math]::Sqrt(2) - pure math static</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $s=[math]::Sqrt(2)]]></copilot-command>
+    </test-case>
+
+    <!-- G6: linq.enumerable Class-A (new coverage from the consolidation; Range is not a family member) -->
+    <test-case expected="allow" reason="linq.enumerable Class-A row allows Range" category="SGreen-EnumerableRange">
+      <description>$z = @(); $r=[System.Linq.Enumerable]::Range(1,10) - lazy pure iterator</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $r=[System.Linq.Enumerable]::Range(1,10)]]></copilot-command>
+    </test-case>
+
+    <!-- G8: Array must NOT be type-wildcarded - Sort mutates in place and matches no row/family -->
+    <test-case expected="ask" reason="Array not wildcarded; Sort matches no row or family => ask" category="SGreen-ArraySortAsk">
+      <description>$z = @(); [void][Array]::Sort($a) - in-place mutator, fail-closed</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); [void][Array]::Sort($a)]]></copilot-command>
+    </test-case>
+
+    <!-- G9: file Class-B read prefix (ReadAllText; ReadLines is D8/G9b) -->
+    <test-case expected="allow" reason="file Class-B row read\w* allows ReadAllText" category="SGreen-FileReadAllText">
+      <description>$z = @(); $t=[System.IO.File]::ReadAllText('c:\temp\x') - pure reader</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $t=[System.IO.File]::ReadAllText('c:\temp\x')]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

@@ -192,6 +192,15 @@ function Test-LlmReviewScope {
     if ($ClassifyResult.SubResults) {
         $subs = @($ClassifyResult.SubResults | Where-Object { $_.MatchedPattern -ne 'redirection-target' })
     }
+    # script_drilldown llm_scope (2026-09-20, spec 8.5): 'exclude' drops every
+    # script-origin entry from BOTH the count and the sent list, so the LLM never
+    # sees expanded-script statements. 'count' (default) keeps them. No-op without
+    # the OriginScript property (feature OFF / non-drilldown commands).
+    $llmScope = 'count'
+    if ($llm.PSObject.Properties['LlmScope']) { $llmScope = "$($llm.LlmScope)" }
+    if ($llmScope -eq 'exclude') {
+        $subs = @($subs | Where-Object { -not ($_.PSObject.Properties['OriginScript']) })
+    }
     if ($subs.Count -eq 0) { $scope.Reason = 'no sub-commands (fast-path gate or path branch)'; return $scope }
     $scope.SubCommandCount = $subs.Count
     $scope.SubCommands = $subs
@@ -452,6 +461,457 @@ function ConvertTo-LlmVerdict {
     return (New-Verdict 'unusable' $false $null)
 }
 
+# =============================================================================
+# llm_third_opinion pair support (2026-09-30 design 4.1-4.5).
+# Spec: docs/superpowers/specs/2026-09-30-llm-third-opinion-spec.md
+# Design: docs/superpowers/specs/2026-09-30-llm-third-opinion-design.md
+# =============================================================================
+
+function New-LlmRequestBody {
+    <#
+    .SYNOPSIS
+        Builds ONE OpenAI chat-completions request payload (design 4.1 -
+        extracted VERBATIM from Get-LlmReviewVerdict so the pair path reuses
+        it byte-for-byte). Two-parameter form enforces the D2 identical-prompt
+        contract structurally: $Llm1Config supplies ALL prompt/sampling
+        parameters (Temperature, LlmResponseMaxTokens, AttributedVerdicts,
+        JsonMode, TimeoutMs -> default TimeoutSec); $EndpointConfig supplies
+        ONLY transport identity (BaseUri, Model, ApiKey).
+        Returns @{ Uri; BodyJson; TimeoutSec; ApiKey }.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][PSCustomObject]$Llm1Config,
+        [Parameter(Mandatory = $true)][PSCustomObject]$EndpointConfig,
+        [string[]]$SubCommands = @()
+    )
+    # Payload guard
+    $cmdText = $Command
+    if ($cmdText.Length -gt 8000) { $cmdText = $cmdText.Substring(0, 8000) }
+
+    # User message: raw block, plus the numbered sub-command list in V2 mode
+    $userPrompt = "<command_block>`n$cmdText`n</command_block>"
+    $sysPrompt = $script:LlmSystemPrompt
+    $attributed = $false
+    if ($Llm1Config.AttributedVerdicts) {
+        $sysPrompt = $script:LlmSystemPromptV2
+        $attributed = $true
+        if ($SubCommands.Count -gt 0) {
+            $numbered = @()
+            for ($i = 0; $i -lt $SubCommands.Count; $i++) { $numbered += "{0}. {1}" -f ($i + 1), $SubCommands[$i] }
+            $userPrompt += "`n<sub_commands>`n" + ($numbered -join "`n") + "`n</sub_commands>"
+        }
+        # First-character rule, repeated at the point of decision (recency):
+        # a response starting with '{' cannot ramble into analysis prose.
+        $userPrompt += "`nReply with the JSON object only. The first character of your response must be '{'."
+    }
+
+    $body = [ordered]@{
+        model       = $EndpointConfig.Model
+        messages    = @(
+            @{ role = 'system'; content = $sysPrompt },
+            @{ role = 'user';   content = $userPrompt }
+        )
+        temperature = $Llm1Config.Temperature
+        max_tokens  = $Llm1Config.LlmResponseMaxTokens
+        seed        = 0
+    }
+    # JSON mode (config json_mode, default off): constrain the response to be
+    # valid JSON at the API level (response_format: json_object). Attributed
+    # calls only - the V1 contract is a bare token, which is not JSON. This is
+    # the hard fix for reasoning-leaning models that ignore the output
+    # contract and answer with analysis prose (observed 2026-08-03 on BOTH
+    # GLM-5.2 and deepseek-v4-flash -> unusable -> fail-closed ask).
+    if ($attributed -and $Llm1Config.PSObject.Properties['JsonMode'] -and $Llm1Config.JsonMode) {
+        $body['response_format'] = @{ type = 'json_object' }
+    }
+    $bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
+    $timeoutSec = [int][math]::Ceiling($Llm1Config.TimeoutMs / 1000.0)
+    return @{
+        Uri        = "$($EndpointConfig.BaseUri)/v1/chat/completions"
+        BodyJson   = $bodyJson
+        TimeoutSec = $timeoutSec
+        ApiKey     = "$($EndpointConfig.ApiKey)"
+    }
+}
+
+function Get-LlmMockResult {
+    <#
+    .SYNOPSIS
+        Mock short-circuit grammar (design 4.2 - extracted VERBATIM from
+        Get-LlmReviewVerdict, shared by both pair sides). $MockToken is the raw
+        env var value; $VarName names the var in the throw message (LLM1's
+        message stays byte-identical). Returns @{ Mocked=$true; Raw=<string> }
+        or @{ Mocked=$true; IsDown=$true; Error='mock: simulated unreachable LLM' }.
+        Grammar: 'modifying'|'read-only'|'garbage'|'down'|'idx:1,2'. Unknown
+        value -> throw.
+    #>
+    param([string]$MockToken, [int]$SubCommandCount, [string]$VarName)
+    if ($MockToken -like 'idx:*') {
+        $list = $MockToken.Substring(4)
+        if ($list.Trim() -eq '') { return @{ Mocked = $true; Raw = '{"modifying":[]}' } }
+        $items = @($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+        return @{ Mocked = $true; Raw = '{"modifying":[' + ($items -join ',') + ']}' }
+    }
+    switch ($MockToken) {
+        'modifying' { return @{ Mocked = $true; Raw = 'true' } }
+        'read-only' { return @{ Mocked = $true; Raw = 'false' } }
+        'garbage'   { return @{ Mocked = $true; Raw = "Let me analyze this command carefully.`nIt seems to read files, but I am not entirely sure about every part." } }
+        'down'      { return @{ Mocked = $true; IsDown = $true; Error = 'mock: simulated unreachable LLM' } }
+        default     { throw "Get-LlmReviewVerdict: unknown $VarName value '$MockToken' (expected modifying|read-only|garbage|down|idx:...)" }
+    }
+}
+
+function New-MockVerdict {
+    <#
+    .SYNOPSIS
+        Pair-mode mock verdict (design 4.5): wraps Get-LlmMockResult +
+        ConvertTo-LlmVerdict into the same result shape Get-LlmReviewVerdict
+        returns (Verdict/Raw/LatencyMs/Recovered/Error/Indices/Mocked), with
+        LatencyMs fixed at 0.
+    #>
+    param([string]$Token, [int]$SubCount, [string]$VarName)
+    $m = Get-LlmMockResult -MockToken $Token -SubCommandCount $SubCount -VarName $VarName
+    $v = [PSCustomObject]@{ Verdict = 'down'; Raw = ''; LatencyMs = 0; Recovered = $false; Error = $null; Indices = $null; Mocked = $true }
+    if ($m.IsDown) {
+        $v.Error = $m.Error
+    }
+    else {
+        $v.Raw = $m.Raw
+        $parsed = ConvertTo-LlmVerdict -RawContent $v.Raw -SubCommandCount $SubCount
+        $v.Verdict   = $parsed.Verdict
+        $v.Recovered = $parsed.Recovered
+        $v.Indices   = $parsed.Indices
+    }
+    return $v
+}
+
+function Start-LlmHttpCall {
+    <#
+    .SYNOPSIS
+        Kicks off ONE Invoke-RestMethod inside its own [powershell] runspace
+        (design 4.3 - the parallel mechanism, D10). $Payload comes from
+        New-LlmRequestBody (built on the MAIN thread - the worker script must
+        never reference $script: state). The worker always returns one JSON
+        string envelope {"raw":...,"error":...} so the contract is host-proof
+        and the error text stays byte-identical to the sync path's IRM
+        exception. [powershell]::Create() works identically on Windows
+        PowerShell 5.1 and pwsh 7 (why -Parallel/ThreadJob were rejected).
+        Returns @{ Ps; Handle; Sw }.
+    #>
+    param([hashtable]$Payload)
+    $workerScript = @'
+param([string]$Uri, [string]$BodyJson, [int]$TimeoutSec, [string]$ApiKey)
+try {
+    $irmParams = @{ Uri = $Uri; Method = 'Post'; Body = $BodyJson; ContentType = 'application/json'; TimeoutSec = $TimeoutSec; ErrorAction = 'Stop' }
+    if ($ApiKey) { $irmParams['Headers'] = @{ Authorization = "Bearer $ApiKey" } }
+    $response = Invoke-RestMethod @irmParams
+    $raw = ''
+    if ($response.choices -and $response.choices[0].message) { $raw = [string]$response.choices[0].message.content }
+    return @{ raw = $raw; error = $null } | ConvertTo-Json -Compress
+}
+catch {
+    return @{ raw = ''; error = $_.Exception.Message } | ConvertTo-Json -Compress
+}
+'@
+    $ps = [powershell]::Create()
+    $null = $ps.AddScript($workerScript)
+    $null = $ps.AddArgument($Payload.Uri); $null = $ps.AddArgument($Payload.BodyJson)
+    $null = $ps.AddArgument($Payload.TimeoutSec); $null = $ps.AddArgument($Payload.ApiKey)
+    return @{ Ps = $ps; Handle = $ps.BeginInvoke(); Sw = [System.Diagnostics.Stopwatch]::StartNew() }
+}
+
+function Complete-LlmHttpCall {
+    <#
+    .SYNOPSIS
+        Blocks until THAT call finishes (IRM's own TimeoutSec bounds the wait -
+        the main thread adds no timeout of its own; EndInvoke order LLM1 then
+        LLM2 makes the total wait max(t1,t2), bounded by LLM1's budget, D11),
+        parses the worker's JSON envelope, disposes the runspace.
+        Returns @{ Raw; Error }.
+    #>
+    param([hashtable]$Call)
+    $raw = ''; $err = $null
+    try {
+        $out = @($Call.Ps.EndInvoke($Call.Handle))
+        if ($out.Count -gt 0) {
+            try { $env2 = $out[0] | ConvertFrom-Json } catch { $env2 = $null }
+            if ($env2 -and $env2.PSObject.Properties['error'] -and $env2.error) { $err = "$($env2.error)" }
+            elseif ($env2 -and $env2.PSObject.Properties['raw']) { $raw = "$($env2.raw)" }
+            else { $raw = "$($out[0])" }
+        }
+    }
+    catch { $err = $_.Exception.Message }
+    finally { $Call.Ps.Dispose() }
+    # Belt-and-braces: a pipeline error that did not throw at EndInvoke
+    if (-not $err -and $Call.Ps.Streams.Error -and $Call.Ps.Streams.Error.Count -gt 0) {
+        $err = "$($Call.Ps.Streams.Error[0].Exception.Message)"
+    }
+    return @{ Raw = $raw; Error = $err }
+}
+
+function Test-LlmVerdictsAgree {
+    <#
+    .SYNOPSIS
+        Pair comparison (design 4.4, D4/D5). Returns $true / $false / $null
+        ($null = not comparable: either side down|unusable). Equality =
+        verdict token equal AND index SET equal (order-insensitive, deduped).
+        V1 mode: both Indices $null => equal. One-sided indices => NOT equal
+        (fail-closed: a lower-fidelity recovered answer must not count as
+        agreement - pinned by LT3-20).
+    #>
+    param($A, $B)
+    if ($A.Verdict -in @('down', 'unusable') -or $B.Verdict -in @('down', 'unusable')) { return $null }
+    if ("$($A.Verdict)" -ne "$($B.Verdict)") { return $false }
+    $ai = $null; $bi = $null
+    if ($null -ne $A.Indices) { $ai = @($A.Indices | Sort-Object -Unique) }
+    if ($null -ne $B.Indices) { $bi = @($B.Indices | Sort-Object -Unique) }
+    if (($null -eq $ai) -xor ($null -eq $bi)) { return $false }
+    if ($null -ne $ai) {
+        if ($ai.Count -ne $bi.Count) { return $false }
+        for ($i = 0; $i -lt $ai.Count; $i++) { if ("$($ai[$i])" -ne "$($bi[$i])") { return $false } }
+    }
+    return $true
+}
+
+function Get-LlmVerdictSummary {
+    <#
+    .SYNOPSIS
+        Human summary of a parsed verdict (design 4.4): "read-only" or
+        "modifying indices=[1,2,4]" (indices sorted-unique, joined by ',').
+    #>
+    param($V)
+    $s = "$($V.Verdict)"
+    if ("$($V.Verdict)" -eq 'modifying' -and $null -ne $V.Indices -and @($V.Indices).Count -gt 0) {
+        $s += " indices=[$(@($V.Indices | Sort-Object -Unique) -join ',')]"
+    }
+    return $s
+}
+
+function Get-Llm2FyiSummary {
+    <#
+    .SYNOPSIS
+        D8 FYI summary: Get-LlmVerdictSummary with the verdict token
+        uppercased (e.g. 'MODIFYING indices=[2]', 'READ-ONLY').
+    #>
+    param($V)
+    $tok = "$($V.Verdict)".ToUpperInvariant()
+    if ("$($V.Verdict)" -eq 'modifying' -and $null -ne $V.Indices -and @($V.Indices).Count -gt 0) {
+        $tok += " indices=[$(@($V.Indices | Sort-Object -Unique) -join ',')]"
+    }
+    return $tok
+}
+
+function New-Llm2SubLog {
+    <#
+    .SYNOPSIS
+        Factory for the llm2 sub-object embedded in the LLM log object
+        (design 4.5). Field set mirrors LLM1's log fields; compare defaults to
+        'out-of-scope' and every exit path stamps its final value
+        (agree|disagree|llm1-down|llm2-down|out-of-scope|
+        skipped-trusted-editable|skipped-primary-disabled).
+    #>
+    param([string]$Model, $EffectiveTimeoutMs, [string]$Compare = 'out-of-scope')
+    return [PSCustomObject]@{
+        model                = $Model
+        effective_timeout_ms = $EffectiveTimeoutMs
+        verdict              = $null
+        indices              = $null
+        latency_ms           = $null
+        recovered            = $false
+        mocked               = $false
+        error                = $null
+        raw_excerpt          = $null
+        raw_full             = $null
+        compare              = $Compare
+    }
+}
+
+function New-Llm2SkipLog {
+    <#
+    .SYNOPSIS
+        D3 skip log (design 6): llm_third_opinion is enabled but
+        llm_second_opinion is disabled/absent - the pair cannot fire without
+        its primary. NO LLM calls happen; this log object makes the skip
+        records-visible (D13) and renders the dedicated .log line.
+    #>
+    param([Parameter(Mandatory = $true)][PSCustomObject]$Config)
+    $l2 = $Config._compiled.llmThirdOpinion
+    return [PSCustomObject]@{
+        enabled           = $true
+        level             = $null
+        in_scope          = $false
+        scope_reason      = 'llm_third_opinion enabled but llm_second_opinion disabled - LLM2 skipped'
+        sub_command_count = 0
+        verdict           = 'not_called'
+        effect            = 'skipped-primary-disabled'
+        model             = $l2.Model
+        latency_ms        = $null
+        mocked            = $false
+        llm2              = [PSCustomObject]@{
+            model                = $l2.Model
+            effective_timeout_ms = $l2.EffectiveTimeoutMs
+            compare              = 'skipped-primary-disabled'
+        }
+    }
+}
+
+function Get-LlmRunspaceVerdict {
+    <#
+    .SYNOPSIS
+        Wraps a completed runspace HTTP result into the verdict shape
+        (design 4.5 wrap): an Error from the worker means Verdict='down'
+        (mirrors the sync path's catch); otherwise the layered parser decides.
+    #>
+    param([hashtable]$R, [System.Diagnostics.Stopwatch]$Sw, [int]$SubCount)
+    $v = [PSCustomObject]@{ Verdict = 'down'; Raw = "$($R.Raw)"; LatencyMs = $Sw.ElapsedMilliseconds; Recovered = $false; Error = $null; Indices = $null; Mocked = $false }
+    if ($R.Error) {
+        $v.Error = $R.Error
+    }
+    else {
+        $parsed = ConvertTo-LlmVerdict -RawContent $R.Raw -SubCommandCount $SubCount
+        $v.Verdict   = $parsed.Verdict
+        $v.Recovered = $parsed.Recovered
+        $v.Indices   = $parsed.Indices
+    }
+    return $v
+}
+
+function Get-LlmDisagreeReason {
+    <#
+    .SYNOPSIS
+        Builds the *** LLM-DISAGREE *** ask reason (design 4.5, D5/D16):
+        banner naming both models + their summaries, plus the contested part
+        ONLY when the tokens are equal (both 'modifying'): the symmetric-
+        difference index set, naming the FIRST contested index that actually
+        maps to a sub-command (index 0 is the "unlisted danger" sentinel with
+        NO SubCommands entry - PS negative indexing on SubCommands[0-1] would
+        silently grab the LAST sub-command; pinned by LT3-27).
+    #>
+    param($Verdict1, $Verdict2, [string]$Model1, [string]$Model2, $SubCommands)
+    $reason = "*** LLM-DISAGREE *** second-opinion LLMs disagree: LLM1 ($Model1) -> $(Get-LlmVerdictSummary $Verdict1) | LLM2 ($Model2) -> $(Get-LlmVerdictSummary $Verdict2) - forced to ask. Review carefully before approving."
+    if ("$($Verdict1.Verdict)" -eq "$($Verdict2.Verdict)" -and $null -ne $Verdict1.Indices -and $null -ne $Verdict2.Indices) {
+        $setA = @($Verdict1.Indices | Sort-Object -Unique); $setB = @($Verdict2.Indices | Sort-Object -Unique)
+        $diff = @(($setA + $setB) | Sort-Object -Unique | Where-Object { ($setA -notcontains $_) -or ($setB -notcontains $_) })
+        if ($diff.Count -gt 0) {
+            $subCount = @($SubCommands).Count
+            # Scalar (NOT @()) so "no valid index" is genuinely $null.
+            $firstIdx = $diff | Where-Object { $_ -ge 1 -and $_ -le $subCount } | Select-Object -First 1
+            if ($null -ne $firstIdx) {
+                $ft = "$($SubCommands[$firstIdx - 1].Command)"
+                if ($ft.Length -gt 120) { $ft = $ft.Substring(0, 120) }
+                $reason += " | contested: [$($diff -join ',')] '$ft'"
+            }
+            # A diff of {0} ONLY (e.g. [0,1] vs [1]) renders NO contested part
+            # at all - nothing valid to name (LT3-27 pins this).
+        }
+    }
+    return $reason
+}
+
+function Get-LlmBlindspotPairNote {
+    <#
+    .SYNOPSIS
+        D9 blindspot pair note (design 4.5 step 6): the blindspot decision
+        NEVER changes; the pair only appends an FYI fragment to the reason.
+        agree -> ' | LLM2 agrees'; disagree -> ' | LLM2 DISAGREES: <sum1> vs
+        <sum2>'; llm2 failed (agree $null) -> nothing.
+    #>
+    param($Agree, $Verdict1, $Verdict2)
+    if ($Agree -eq $true) { return " | LLM2 agrees" }
+    if ($Agree -eq $false) { return " | LLM2 DISAGREES: $(Get-LlmVerdictSummary $Verdict1) vs $(Get-LlmVerdictSummary $Verdict2)" }
+    return ''
+}
+
+function Get-LlmPairCompareState {
+    <#
+    .SYNOPSIS
+        Maps the tri-state comparison result to the llm2.compare value when
+        the pair falls through WITHOUT the disagree early return (design 4.5):
+        $true -> 'agree'; $false -> 'disagree' (blindspot-only path - every
+        non-blindspot disagreement returned above); $null -> 'llm1-down' when
+        LLM1 itself failed (its failure drives the decision; LLM2's state
+        stays visible in llm2.verdict/error) else 'llm2-down'.
+    #>
+    param($Agree, $Verdict1)
+    if ($Agree -eq $true) { return 'agree' }
+    if ($Agree -eq $false) { return 'disagree' }
+    if ($Verdict1.Verdict -in @('down', 'unusable')) { return 'llm1-down' }
+    return 'llm2-down'
+}
+
+function Get-Llm2SubLogFromVerdict {
+    <#
+    .SYNOPSIS
+        Stamps an llm2 sub-log from a completed LLM2 verdict (design 4.5):
+        same excerpting rules as LLM1 (ws-collapsed, raw_display_limit cap).
+    #>
+    param($Verdict2, [PSCustomObject]$SubLog, [int]$DisplayLimit)
+    $SubLog.verdict     = $Verdict2.Verdict
+    $SubLog.indices     = $Verdict2.Indices
+    $SubLog.latency_ms  = $Verdict2.LatencyMs
+    $SubLog.recovered   = $Verdict2.Recovered
+    $SubLog.mocked      = $Verdict2.Mocked
+    if ($Verdict2.Error) { $SubLog.error = $Verdict2.Error }
+    if ($Verdict2.Raw) {
+        $excerpt = ($Verdict2.Raw -replace '\s+', ' ').Trim()
+        if ($excerpt.Length -gt $DisplayLimit) { $excerpt = $excerpt.Substring(0, $DisplayLimit) }
+        $SubLog.raw_excerpt = $excerpt
+        $SubLog.raw_full = "$($Verdict2.Raw)"
+    }
+    elseif ($Verdict2.Error) {
+        $errExcerpt = ($Verdict2.Error -replace '\s+', ' ').Trim()
+        if ($errExcerpt.Length -gt $DisplayLimit) { $errExcerpt = $errExcerpt.Substring(0, $DisplayLimit) }
+        $SubLog.raw_excerpt = $errExcerpt
+    }
+    return $SubLog
+}
+
+function Get-LlmPairVerdicts {
+    <#
+    .SYNOPSIS
+        Pair verdict acquisition (design 4.5 step 4). Per-SIDE mock gate
+        (v3 borrow): each side is independently mock-or-HTTP; runspaces are
+        started ONLY for the HTTP sides, both BEFORE either completes
+        (parallelism preserved, wall-clock ~ max(t1,t2)). MOCK2 unset falls
+        back to MOCK (identical raw -> agree - the regression baseline, D12).
+        MOCK2 set while MOCK unset is legal: LLM1 does a REAL HTTP call while
+        LLM2 is mocked (pinned by LT3-22). LLM2's TimeoutSec is the D11 clamp
+        (EffectiveTimeoutMs). Returns @{ Verdict1; Verdict2 }.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][PSCustomObject]$Llm1,
+        [Parameter(Mandatory = $true)][PSCustomObject]$Llm2,
+        [Parameter(Mandatory = $true)][string]$Command,
+        [string[]]$SubCommands = @()
+    )
+    $subCount = @($SubCommands).Count
+    $mock1 = $env:PRETOOLHOOK_LLMREVIEW_MOCK
+    $mock2 = if ($env:PRETOOLHOOK_LLMREVIEW_MOCK2) { $env:PRETOOLHOOK_LLMREVIEW_MOCK2 } else { $mock1 }
+
+    $ep2 = [PSCustomObject]@{ BaseUri = $Llm2.BaseUri; Model = $Llm2.Model; ApiKey = $Llm2.ApiKey }
+    $p1 = $null; $p2 = $null
+    if (-not $mock1) { $p1 = New-LlmRequestBody -Command $Command -Llm1Config $Llm1 -EndpointConfig $Llm1 -SubCommands $SubCommands }
+    if (-not $mock2) {
+        $p2 = New-LlmRequestBody -Command $Command -Llm1Config $Llm1 -EndpointConfig $ep2 -SubCommands $SubCommands
+        $p2.TimeoutSec = [int][math]::Ceiling($Llm2.EffectiveTimeoutMs / 1000.0)   # D11 clamp
+    }
+    $c1 = if ($p1) { Start-LlmHttpCall -Payload $p1 } else { $null }
+    $c2 = if ($p2) { Start-LlmHttpCall -Payload $p2 } else { $null }
+
+    if ($mock1) { $verdict1 = New-MockVerdict -Token $mock1 -SubCount $subCount -VarName 'PRETOOLHOOK_LLMREVIEW_MOCK' }
+    else {
+        $r1 = Complete-LlmHttpCall -Call $c1; $c1.Sw.Stop()
+        $verdict1 = Get-LlmRunspaceVerdict -R $r1 -Sw $c1.Sw -SubCount $subCount
+    }
+    if ($mock2) { $verdict2 = New-MockVerdict -Token $mock2 -SubCount $subCount -VarName 'PRETOOLHOOK_LLMREVIEW_MOCK2' }
+    else {
+        $r2 = Complete-LlmHttpCall -Call $c2; $c2.Sw.Stop()
+        $verdict2 = Get-LlmRunspaceVerdict -R $r2 -Sw $c2.Sw -SubCount $subCount
+    }
+    return [PSCustomObject]@{ Verdict1 = $verdict1; Verdict2 = $verdict2 }
+}
+
 function Get-LlmReviewVerdict {
     <#
     .SYNOPSIS
@@ -475,27 +935,19 @@ function Get-LlmReviewVerdict {
     # Mock short-circuit (no network). The mock supplies the RAW content and the
     # REAL parser decides the verdict. 'idx:...' injects the attributed JSON
     # form; the 4 phase-I values inject bare/garbage/down as before.
+    # 2026-09-30 pair design 4.2: the grammar moved VERBATIM into the shared
+    # Get-LlmMockResult helper (both pair sides use it); the VarName passed
+    # here is the same env var name as before, so LLM1's throw message stays
+    # byte-identical.
     $mock = $env:PRETOOLHOOK_LLMREVIEW_MOCK
     if ($mock) {
         $result.Mocked = $true
-        if ($mock -like 'idx:*') {
-            $list = $mock.Substring(4)
-            if ($list.Trim() -eq '') { $result.Raw = '{"modifying":[]}' }
-            else {
-                $items = @($list -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
-                $result.Raw = '{"modifying":[' + ($items -join ',') + ']}'
-            }
+        $m = Get-LlmMockResult -MockToken $mock -SubCommandCount $subCount -VarName 'PRETOOLHOOK_LLMREVIEW_MOCK'
+        if ($m.IsDown) {
+            $result.Verdict = 'down'; $result.Error = $m.Error
         }
         else {
-            switch ($mock) {
-                'modifying' { $result.Raw = 'true' }
-                'read-only' { $result.Raw = 'false' }
-                'garbage'   { $result.Raw = "Let me analyze this command carefully.`nIt seems to read files, but I am not entirely sure about every part." }
-                'down'      { $result.Verdict = 'down'; $result.Error = 'mock: simulated unreachable LLM' }
-                default     { throw "Get-LlmReviewVerdict: unknown PRETOOLHOOK_LLMREVIEW_MOCK value '$mock' (expected modifying|read-only|garbage|down|idx:...)" }
-            }
-        }
-        if ($mock -ne 'down') {
+            $result.Raw = $m.Raw
             $parsed = ConvertTo-LlmVerdict -RawContent $result.Raw -SubCommandCount $subCount
             $result.Verdict   = $parsed.Verdict
             $result.Recovered = $parsed.Recovered
@@ -505,60 +957,20 @@ function Get-LlmReviewVerdict {
         return $result
     }
 
-    # Payload guard
-    $cmdText = $Command
-    if ($cmdText.Length -gt 8000) { $cmdText = $cmdText.Substring(0, 8000) }
-
-    # User message: raw block, plus the numbered sub-command list in V2 mode
-    $userPrompt = "<command_block>`n$cmdText`n</command_block>"
-    $sysPrompt = $script:LlmSystemPrompt
-    $attributed = $false
-    if ($LlmConfig.AttributedVerdicts) {
-        $sysPrompt = $script:LlmSystemPromptV2
-        $attributed = $true
-        if ($SubCommands.Count -gt 0) {
-            $numbered = @()
-            for ($i = 0; $i -lt $SubCommands.Count; $i++) { $numbered += "{0}. {1}" -f ($i + 1), $SubCommands[$i] }
-            $userPrompt += "`n<sub_commands>`n" + ($numbered -join "`n") + "`n</sub_commands>"
-        }
-        # First-character rule, repeated at the point of decision (recency):
-        # a response starting with '{' cannot ramble into analysis prose.
-        $userPrompt += "`nReply with the JSON object only. The first character of your response must be '{'."
-    }
-
-    $body = [ordered]@{
-        model       = $LlmConfig.Model
-        messages    = @(
-            @{ role = 'system'; content = $sysPrompt },
-            @{ role = 'user';   content = $userPrompt }
-        )
-        temperature = $LlmConfig.Temperature
-        max_tokens  = $LlmConfig.LlmResponseMaxTokens
-        seed        = 0
-    }
-    # JSON mode (config json_mode, default off): constrain the response to be
-    # valid JSON at the API level (response_format: json_object). Attributed
-    # calls only - the V1 contract is a bare token, which is not JSON. This is
-    # the hard fix for reasoning-leaning models that ignore the output
-    # contract and answer with analysis prose (observed 2026-08-03 on BOTH
-    # GLM-5.2 and deepseek-v4-flash -> unusable -> fail-closed ask).
-    if ($attributed -and $LlmConfig.PSObject.Properties['JsonMode'] -and $LlmConfig.JsonMode) {
-        $body['response_format'] = @{ type = 'json_object' }
-    }
-    $bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
-    $uri = "$($LlmConfig.BaseUri)/v1/chat/completions"
-    $timeoutSec = [int][math]::Ceiling($LlmConfig.TimeoutMs / 1000.0)
-
+    # 2026-09-30 pair design 4.1: request building extracted VERBATIM into
+    # New-LlmRequestBody (two-parameter form; here LLM1 supplies BOTH
+    # prompt/sampling and transport - byte-identical payload to before).
+    $payload = New-LlmRequestBody -Command $Command -Llm1Config $LlmConfig -EndpointConfig $LlmConfig -SubCommands $SubCommands
     try {
         $irmParams = @{
-            Uri         = $uri
+            Uri         = $payload.Uri
             Method      = 'Post'
-            Body        = $bodyJson
+            Body        = $payload.BodyJson
             ContentType = 'application/json'
-            TimeoutSec  = $timeoutSec
+            TimeoutSec  = $payload.TimeoutSec
             ErrorAction = 'Stop'
         }
-        if ($LlmConfig.ApiKey) { $irmParams['Headers'] = @{ Authorization = "Bearer $($LlmConfig.ApiKey)" } }
+        if ($payload.ApiKey) { $irmParams['Headers'] = @{ Authorization = "Bearer $($payload.ApiKey)" } }
         $response = Invoke-RestMethod @irmParams
 
         $raw = $null
@@ -597,26 +1009,10 @@ $script:LlmGuardWriterCommands = @(
     'ni', 'md', 'mkdir', 'ln', 'unzip'
 )
 
-# Split-GuardTokens: quote-aware whitespace tokenizer. Quoted spans keep their
-# content whole (quotes stripped), so "C:\Windows\my file.txt" survives as one
-# token and cannot smuggle a protected path past the path-shape scan.
-# Unbalanced quotes keep the remainder as one token (fail-safe direction).
-function Split-GuardTokens {
-    param([string]$Command)
-    $tokens = @()
-    $cur = ''
-    $inS = $false; $inD = $false
-    foreach ($ch in $Command.ToCharArray()) {
-        if ($inS) { if ($ch -eq "'") { $inS = $false } else { $cur += $ch }; continue }
-        if ($inD) { if ($ch -eq '"') { $inD = $false } else { $cur += $ch }; continue }
-        if ($ch -eq "'") { $inS = $true; continue }
-        if ($ch -eq '"') { $inD = $true; continue }
-        if ($ch -match '\s') { if ($cur) { $tokens += $cur; $cur = '' }; continue }
-        $cur += $ch
-    }
-    if ($cur) { $tokens += $cur }
-    return $tokens
-}
+# NOTE (2026-09-18, R2): Split-GuardTokens was relocated to Parser.ps1 so that
+# Resolver.ps1's Step 0g-delete can use it under the TestRunner load graph
+# (TestRunner dot-sources Parser but NOT LlmReview). It is defined there and
+# loaded before this file in every entry path, so the calls below still resolve.
 
 function Test-GatedInvocationSafe {
     <#
@@ -717,18 +1113,82 @@ function Invoke-LlmReview {
     $log.check_blindspot_triggered = ($scope.CheckBlindspotTier -ne $null)
     $isCheckBlindspot = $log.check_blindspot_triggered
 
+    # llm_third_opinion pair (design 4.5 step 1): armed when the third block
+    # exists AND is enabled. LLM2 fires iff LLM1 fires and is in scope (D1);
+    # when not armed every path below is byte-identical to before the feature.
+    $llm2 = $Config._compiled.llmThirdOpinion
+    $pairArmed = ($null -ne $llm2 -and $llm2.Enabled)
+
+    # ----------------------------------------------------------------
+    # R2 (2026-09-18, spec 4.6 / OQ-1): SKIP the LLM call entirely when EVERY
+    # in-scope sub-command tier is in {trusted_program, editable_path,
+    # editable_delete}. Those tiers are locally authoritative AND unconditionally
+    # veto-suppressed (spec 4.4), so the LLM's answer cannot change the decision
+    # either way — the call is pure latency plus an LLM-DOWN failure mode. Skipping
+    # makes fully trusted/editable blocks immune to gateway outages. The list is the
+    # SAME one the LLM would receive (post scope-filtering, redirection-target
+    # entries already excluded). Empty list -> no skip (out of scope anyway).
+    # check_blindspot blocks are NOT skipped: their trigger tiers (unclassified,
+    # unregistered_*, unknown_domain) are by construction absent from an all-
+    # trusted/editable block, so this cannot suppress a blindspot consult.
+    # ----------------------------------------------------------------
+    if ($scope.InScope -and -not $isCheckBlindspot -and $scope.SubCommands.Count -gt 0) {
+        $skipTiers = @('trusted_program', 'editable_path', 'editable_delete')
+        $allTrustedEditable = $true
+        foreach ($sub in $scope.SubCommands) {
+            if ("$($sub.Tier)" -notin $skipTiers) { $allTrustedEditable = $false; break }
+        }
+        if ($allTrustedEditable) {
+            $log.effect = 'llm-skipped-trusted-editable'
+            # D14: the pair is skipped too (LLM2 fires iff LLM1 fires) and the
+            # skip is SELF-DOCUMENTED in records - NOT encoded by llm2 absence.
+            if ($pairArmed) {
+                $log | Add-Member -MemberType NoteProperty -Name 'llm2' -Force -Value (
+                    New-Llm2SubLog -Model $llm2.Model -EffectiveTimeoutMs $llm2.EffectiveTimeoutMs -Compare 'skipped-trusted-editable')
+            }
+            return [PSCustomObject]@{ Result = $ClassifyResult; Log = $log }
+        }
+    }
+
     # Numbered list for the prompt AND the index lookup (spec P2: same list).
-    $subTexts = @($scope.SubCommands | ForEach-Object { "$($_.Command)" })
+    # script_drilldown DisplayText (2026-09-20, spec 8.5): render the
+    # '<script:basename> <stmt>' form when present so the LLM prompt + $log.sent
+    # carry the origin prefix; fall back to Command for non-drilldown entries.
+    $subTexts = @($scope.SubCommands | ForEach-Object {
+        if ($_.PSObject.Properties['DisplayText']) { "$($_.DisplayText)" } else { "$($_.Command)" }
+    })
     $log.sent  = $subTexts
     $log.tiers = @($scope.SubCommands | ForEach-Object { "$($_.Tier)" })
     $log.local_decision = $ClassifyResult.Decision
     $log.local_reason   = "$($ClassifyResult.Reason)"
 
     if (-not $scope.InScope) {
+        # D13: with the pair armed, out-of-scope still stamps the llm2 sub-log
+        # (compare='out-of-scope') so the state is records-visible.
+        # (check_blindspot consults ARE in scope - the scope function marks
+        # them - so they continue past this gate to the pair.)
+        if ($pairArmed) {
+            $log | Add-Member -MemberType NoteProperty -Name 'llm2' -Force -Value (
+                New-Llm2SubLog -Model $llm2.Model -EffectiveTimeoutMs $llm2.EffectiveTimeoutMs -Compare 'out-of-scope')
+        }
         return [PSCustomObject]@{ Result = $ClassifyResult; Log = $log }
     }
 
-    $verdict = Get-LlmReviewVerdict -Command $ClassifyResult.Command -LlmConfig $llm -SubCommands $subTexts
+    # ----------------------------------------------------------------
+    # Verdict acquisition (design 4.5 step 4). Not armed: today's SYNCHRONOUS
+    # LLM1 path, byte-identical. Armed: parallel PAIR - identical prompt +
+    # sampling for both endpoints (D2), transport per endpoint, LLM2's
+    # timeout clamped (D11).
+    # ----------------------------------------------------------------
+    if (-not $pairArmed) {
+        $verdict = Get-LlmReviewVerdict -Command $ClassifyResult.Command -LlmConfig $llm -SubCommands $subTexts
+        $verdict2 = $null
+    }
+    else {
+        $pair = Get-LlmPairVerdicts -Llm1 $llm -Llm2 $llm2 -Command $ClassifyResult.Command -SubCommands $subTexts
+        $verdict = $pair.Verdict1
+        $verdict2 = $pair.Verdict2
+    }
     $log.verdict   = $verdict.Verdict
     $log.recovered = $verdict.Recovered
     $log.latency_ms = $verdict.LatencyMs
@@ -749,6 +1209,45 @@ function Invoke-LlmReview {
 
     $localDecision = $ClassifyResult.Decision
     $localReason   = "$($ClassifyResult.Reason)"
+
+    # ----------------------------------------------------------------
+    # Pair stamping + comparison (design 4.5 step 4, D4/D5). COMPARE on the
+    # RAW parsed verdicts, BEFORE any policy suppression (D5): a disagreement
+    # is an unconditional forced ask even when the contested index sits in
+    # trusted/editable territory (pinned by LT3-19).
+    # ----------------------------------------------------------------
+    $agree = $null
+    if ($pairArmed) {
+        $log | Add-Member -MemberType NoteProperty -Name 'llm2' -Force -Value (
+            Get-Llm2SubLogFromVerdict -Verdict2 $verdict2 -SubLog (New-Llm2SubLog -Model $llm2.Model -EffectiveTimeoutMs $llm2.EffectiveTimeoutMs) -DisplayLimit $log.raw_display_limit)
+        # Tri-state: $true/$false/$null ($null = not comparable, either side
+        # down|unusable). Explicit $null -ne guard makes the tri-state intent
+        # refactor-proof (style, per design 10.2 - $null -eq $false is $false
+        # on both hosts, verified by debug/_probe_tristate_guard.ps1).
+        $agree = Test-LlmVerdictsAgree -A $verdict -B $verdict2
+        # D9 GUARD: the disagree early-return must NOT fire on check_blindspot
+        # consults - rewriting the reason would destroy the *** CHECK_BLINDSPOT
+        # *** headline and violate D9 (FYI only; effect stays
+        # check-blindspot-ask). Blindspot disagreements fall through; the
+        # blindspot branch renders the 'LLM2 DISAGREES' FYI. Pinned by LT3-12.
+        # enforce_disagree=false (2026-10-10 switch): the disagreement is still
+        # DETECTED and recorded (compare='disagree' below via
+        # Get-LlmPairCompareState) but the early-return is SKIPPED - the flow
+        # continues exactly as before llm_third_opinion existed, i.e. LLM1's
+        # verdict drives today's merge. Pinned by LT3-29/LT3-30/LT3-32/LT3-33.
+        $enforceDisagree = $llm2.EnforceDisagree
+        if ($null -ne $agree -and -not $agree -and -not $isCheckBlindspot -and $enforceDisagree) {
+            $log.llm2.compare = 'disagree'
+            $log.effect       = 'llm2-disagree'
+            $reason = Get-LlmDisagreeReason -Verdict1 $verdict -Verdict2 $verdict2 -Model1 $llm.Model -Model2 $llm2.Model -SubCommands $scope.SubCommands
+            $ClassifyResult.Decision = 'ask'
+            $ClassifyResult.Reason   = "$reason | local reason: $localReason"
+            return [PSCustomObject]@{ Result = $ClassifyResult; Log = $log }
+        }
+        # agree / not-comparable / blindspot-disagree -> fall through to
+        # today's flow with the compare state stamped.
+        $log.llm2.compare = Get-LlmPairCompareState -Agree $agree -Verdict1 $verdict
+    }
 
     # ----------------------------------------------------------------
     # CHECK_BLINDSPOT merge (out-of-scope rescue). When check_blindspot triggered,
@@ -803,6 +1302,13 @@ function Invoke-LlmReview {
         # human sees the LLM hint at a glance.
         $ClassifyResult.Decision = 'ask'
         $ClassifyResult.Reason = "*** CHECK_BLINDSPOT *** check_blindspot: local $tierLabel (local tiers: $tierSummary) | $llmHeadline | local reason: $localReason"
+        # D9 pair note (design 4.5 step 6): agree -> ' | LLM2 agrees';
+        # disagree -> ' | LLM2 DISAGREES: <sum1> vs <sum2>'; LLM2 failed ->
+        # nothing extra (the headline already says which LLM state). The
+        # decision NEVER changes; effect stays check-blindspot-ask.
+        if ($pairArmed) {
+            $ClassifyResult.Reason += (Get-LlmBlindspotPairNote -Agree $agree -Verdict1 $verdict -Verdict2 $verdict2)
+        }
         $log.effect = if ($verdict.Verdict -in @('down', 'unusable')) { 'forced-ask' } else { 'check-blindspot-ask' }
         return [PSCustomObject]@{ Result = $ClassifyResult; Log = $log }
     }
@@ -840,7 +1346,22 @@ function Invoke-LlmReview {
                     # LLM veto - no path guard is applied (the trust IS the safety
                     # decision; gating it would contradict the whitelist).
                     $isTrusted = ($sub -and $sub.Tier -eq 'trusted_program')
+                    # R2 (2026-09-18, spec 4.4): a path-policy allow tier (editable_path
+                    # from a redirect to an editable/CWD/temp target, or editable_delete
+                    # from Step 0g-delete) is UNCONDITIONALLY suppressible — the user's
+                    # editable_paths are trusted territory and the local engine already
+                    # validated every target via the path-policy ladder. INV-2: this
+                    # authority trumps a remote LLM veto.
+                    $isPathPolicyAllow = ($sub -and $sub.Tier -in @('editable_path', 'editable_delete'))
                     if ($isTrusted) {
+                        $suppIdx += $ix
+                    }
+                    elseif ($isPathPolicyAllow -and -not (Test-CommandTargetsSystemPaths -Command $sub.Command -Config $Config)) {
+                        # Belt-and-braces INV-3 guard: by construction the ladder can
+                        # never produce an allow tier for a system target, so this only
+                        # defends against future regressions. If ANY literal path token in
+                        # the sub-command text canonicalizes to a system path, DENY the
+                        # suppression (veto stands) and record why.
                         $suppIdx += $ix
                     }
                     elseif ($isGated -and $gateOverride) {
@@ -857,6 +1378,9 @@ function Invoke-LlmReview {
                         # (protected-path target / unproven variable) - recorded
                         # so the reconciliation log can say WHY.
                         if ($isGated) { $pgDenied += $ix }
+                        # R2: a path-policy tier the INV-3 system guard REFUSED to
+                        # suppress (a system path appears in the command text).
+                        if ($isPathPolicyAllow) { $pgDenied += $ix }
                     }
                 }
                 $log.suppressed = @($suppIdx)
@@ -899,11 +1423,20 @@ function Invoke-LlmReview {
         'down' {
             $ClassifyResult.Decision = 'ask'
             $ClassifyResult.Reason = "*** LLM-DOWN *** llm_second_opinion is ENABLED but the LLM is unreachable or timed out ($($llm.TimeoutMs)ms) - forced to ask. Set llm_second_opinion.enabled=false in config.json to disable. | local verdict: $localDecision | local reason: $localReason"
+            # D8 (design 4.5 step 5): with the pair armed and LLM2 holding a
+            # REAL verdict, append the non-authoritative FYI. If LLM2 also
+            # failed, append nothing (both errors are already in the log).
+            if ($pairArmed -and $verdict2.Verdict -in @('read-only', 'modifying')) {
+                $ClassifyResult.Reason += " | LLM2 second-opinion (no authority, FYI): $(Get-Llm2FyiSummary $verdict2)"
+            }
             $log.effect = 'forced-ask'
         }
         'unusable' {
             $ClassifyResult.Decision = 'ask'
             $ClassifyResult.Reason = "*** LLM-UNUSABLE *** LLM returned an unparseable response - forced to ask. Raw: '$($log.raw_excerpt)' | local verdict: $localDecision | local reason: $localReason"
+            if ($pairArmed -and $verdict2.Verdict -in @('read-only', 'modifying')) {
+                $ClassifyResult.Reason += " | LLM2 second-opinion (no authority, FYI): $(Get-Llm2FyiSummary $verdict2)"
+            }
             $log.effect = 'forced-ask'
         }
     }
