@@ -51,8 +51,8 @@
       <copilot-command><![CDATA[Get-ChildItem c:\temp | Select-Object -First 5]]></copilot-command>
     </test-case>
 
-    <test-case name="M-Temperature-Zero" server="true" expect-verdict="modifying" check="temp-0">
-      <description>body.temperature is 0 (deterministic)</description>
+    <test-case name="M-Temperature-Omitted" server="true" expect-verdict="modifying" check="temp-absent">
+      <description>body omits temperature for models that reject it</description>
       <copilot-command><![CDATA[Get-Date]]></copilot-command>
     </test-case>
 
