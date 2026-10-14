@@ -474,7 +474,7 @@ function New-LlmRequestBody {
         extracted VERBATIM from Get-LlmReviewVerdict so the pair path reuses
         it byte-for-byte). Two-parameter form enforces the D2 identical-prompt
         contract structurally: $Llm1Config supplies ALL prompt/sampling
-        parameters (Temperature, LlmResponseMaxTokens, AttributedVerdicts,
+        parameters (LlmResponseMaxTokens, AttributedVerdicts,
         JsonMode, TimeoutMs -> default TimeoutSec); $EndpointConfig supplies
         ONLY transport identity (BaseUri, Model, ApiKey).
         Returns @{ Uri; BodyJson; TimeoutSec; ApiKey }.
@@ -512,7 +512,6 @@ function New-LlmRequestBody {
             @{ role = 'system'; content = $sysPrompt },
             @{ role = 'user';   content = $userPrompt }
         )
-        temperature = $Llm1Config.Temperature
         max_tokens  = $Llm1Config.LlmResponseMaxTokens
         seed        = 0
     }

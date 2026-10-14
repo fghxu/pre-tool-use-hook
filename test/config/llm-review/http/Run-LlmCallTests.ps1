@@ -57,7 +57,7 @@
 #                       user-role        - messages[1].role == 'user'
 #                       cmdblock-tags    - user content has <command_block> wrapper
 #                       cmd-text         - user content carries the exact command
-#                       temp-0           - body.temperature == 0
+#                       temp-absent      - body has no temperature field
 #                       maxtok-16        - body.max_tokens == 16
 #                       seed-0           - body.seed == 0
 #                       auth-present     - Authorization: Bearer <api-key> arrived
@@ -206,7 +206,7 @@ function Invoke-RequestChecks {
             'user-role'        { $ok = ($bodyObj -and $bodyObj.messages[1].role -eq 'user');               $why = "messages[1].role=$($bodyObj.messages[1].role)" }
             'cmdblock-tags'    { $c = $bodyObj.messages[1].content; $ok = ($bodyObj -and $c.Contains('<command_block>') -and $c.Contains('</command_block>')); $why = "user content missing <command_block> wrapper" }
             'cmd-text'         { $ok = ($bodyObj -and ($bodyObj.messages[1].content).Contains($Command));  $why = "user content does not carry the command" }
-            'temp-0'           { $ok = ($bodyObj -and [double]$bodyObj.temperature -eq 0.0);               $why = "temperature=$($bodyObj.temperature)" }
+            'temp-absent'      { $ok = ($bodyObj -and -not $bodyObj.PSObject.Properties['temperature']);   $why = "body contains temperature=$($bodyObj.temperature)" }
             'maxtok-16'        { $ok = ($bodyObj -and [int]$bodyObj.max_tokens -eq 16);                    $why = "max_tokens=$($bodyObj.max_tokens)" }
             'seed-0'           { $ok = ($bodyObj -and [int]$bodyObj.seed -eq 0);                           $why = "seed=$($bodyObj.seed)" }
             'auth-present'     { $ok = ($State.LastAuth -eq "Bearer $ApiKey");                             $why = "Authorization=$($State.LastAuth)" }
