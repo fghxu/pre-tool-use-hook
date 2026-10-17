@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE (T33 twin, design 2026-10-16 D5): global normal_override_llm, tool_name_modifying_strictness ABSENT (=> 'normal'). The tool gate treats the new global value exactly like plain normal: system_paths ask (absolute), everything else allows.",
+
+  "global_modifying_strictness": "normal_override_llm",
+
+  "log_file_path": "c:\\temp\\pretoolhook-ovtools-testlogs\\",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "ignore_tool_name": [ "Read", "IgnorePathTool" ],
+
+  "strictness_gated_tool_name": [ "Write", "NoPathTool" ],
+
+  "tool_name_mapping": {
+    "Bash": "tool_input.command"
+  },
+
+  "path_tool_mapping": {
+    "Write": "tool_input.file_path",
+    "IgnorePathTool": "tool_input.file_path"
+  },
+
+  "editable_paths": {
+    "linux": [ "/tmp/" ],
+    "windows": [ "C:\\\\temp\\\\" ]
+  },
+  "system_paths": {
+    "linux": [ "/etc/" ],
+    "windows": [ "[A-Za-z]:\\\\Windows\\\\" ]
+  },
+
+  "commands": {
+    "Linux": {
+      "description": "Minimal Linux domain. NO modifying_strictness -> inherits the global normal_override_llm (normal family).",
+      "read_only": [
+        { "name": "ls", "patterns": ["ls *"], "description": "List files" }
+      ],
+      "strictness_gated": [],
+      "modifying": [
+        { "name": "rm", "patterns": ["rm *"], "risk": "high", "description": "Remove files" }
+      ]
+    }
+  }
+}

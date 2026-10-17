@@ -19,7 +19,7 @@ For anything touching patterns or prefixes, run the full differential (`src/Run-
 | `version` | Config schema version. | Informational. |
 | `description` | Human-readable summary. | Informational. |
 | `log_file_path` | Directory for per-day hook logs (`C:\temp\logs\prehook\`). | Must exist / be writable. These logs are the source for "unknown command" analysis. |
-| `global_modifying_strictness` | `normal` or `strict` (or `loose`). Global strictness — renamed from `modifying_strictness` 2026-07-28; the loader **rejects** the legacy key fail-closed. Governs redirect-write policy and some AWS/mixed cases. Per-domain `commands.<domain>.modifying_strictness` keeps the old name. | Test suites run both values (`-Strictness normal/strict`); changes here shift redirect-suite results. |
+| `global_modifying_strictness` | `normal` or `strict` (or `loose`, or `normal_override_llm` since 2026-10-16 — see §10). Global strictness — renamed from `modifying_strictness` 2026-07-28; the loader **rejects** the legacy key fail-closed. Governs redirect-write policy and some AWS/mixed cases. Per-domain `commands.<domain>.modifying_strictness` keeps the old name. | Test suites run both values (`-Strictness normal/strict`); changes here shift redirect-suite results. |
 | `risk_legend` | Text descriptions of low/medium/high. | Documentation only — not read by logic. |
 
 ## 2. `editable_paths` / `system_paths` — write + deletion path policy
@@ -131,6 +131,9 @@ by the global value. The effective gate mode is:
   is `strict`; otherwise the value of `tool_name_modifying_strictness`.
 - Global `loose` **never** loosens the tool gate (a loose global with the default tool value
   `normal` still behaves as `normal`).
+- Global `normal_override_llm` (2026-10-16) is a **normal-family** value: it never forces the
+  gate strict and never loosens it. The gate mode comes only from `tool_name_modifying_strictness`
+  (pinned by the `test/config/llm-override-tools/` T33 suites).
 
 | Effective mode | system_paths | foreign (not editable/CWD) | editable / CWD | path unextractable |
 |---|---|---|---|---|
@@ -230,19 +233,46 @@ auto-approve day-to-day (e.g. `git add`) while still prompting under strict.
 
 ### Per-domain `modifying_strictness` + the global guard
 
-Any domain may set its own `"modifying_strictness": "strict" | "normal" | "loose"`.
+Any domain may set its own `"modifying_strictness"` — legal values (2026-10-16):
+
+| value | family | effect |
+|---|---|---|
+| `strict` | forcing | Forces EVERY domain when global; gated tier asks; AWS flag-stripping off. |
+| `loose` | forcing | Forces EVERY domain when global; unrecognized parameter values auto-allow. |
+| `normal` | normal-family | Default. Per-domain values take effect; absent domain key inherits the global. |
+| `normal_override_llm` | normal-family | Same local decisions as `normal`, PLUS the LLM-merge override powers below (2026-10-16). |
+
 The global key is now **`global_modifying_strictness`** (top level); the per-domain
 key keeps the old name. The effective strictness for a domain is resolved by
 `Get-EffectiveStrictness`:
 
 1. Global `global_modifying_strictness` is `strict` or `loose` → that value **forces every domain**.
-2. Global is `normal` → the domain's own value (absent → `normal`).
+2. Global is normal-family (`normal` / `normal_override_llm`) → the domain's own value
+   (absent → **inherit the global normal-family value**, changed 2026-10-16 from the
+   old hardcoded `normal` fallback).
 
 Effective strictness drives three things: the `strictness_gated` tier, AWS CLI
-flag-stripping (active only when the AWS domain is effectively normal), and
+flag-stripping (active only when the AWS domain is effectively normal-family), and
 parameter_commands unrecognized-value handling (asks unless effectively loose).
 Path policy (`system_paths` / `editable_paths` / CWD) is cross-domain and always
 uses the **global** value.
+
+**What `normal_override_llm` adds** (design 2026-10-16; needs `llm_second_opinion.enabled`
+to matter): two new arms in the LLM merge, inserted after the trusted/editable
+suppression arms and before the legacy `strict_gate_override_llm` arm. (1) A
+sub-command whose local tier is `strictness_gated` and whose effective strictness is
+`normal_override_llm` (stamped `OverrideLlm` on the sub-result) has its LLM
+`modifying` flag **suppressed as policy** — unless the sub-command text contains a
+literal `system_paths` token, in which case the veto stands and is recorded in
+`path_guard_denied`. (2) An index-0 (whole-block) flag is attributed to a locally
+validated editable redirect when the block has one (`redirection-target` sub-result
+with tier `editable_path`, no system-path literal in the command); otherwise the
+P3 "unlisted part of the block" ask stands. Suppressed-by-override entries are marked
+`(override)` in the veto reason. Everything else is unchanged: `strict`/`loose`
+forcing, path policy, the tool gate (`tool_name_modifying_strictness` never sees the
+4th value), trusted/editable arms, and LLM-DOWN/UNUSABLE forced asks. Rollout
+recipe: keep the global at `normal` and flip one domain, e.g.
+`"commands": { "Linux": { "modifying_strictness": "normal_override_llm", ... } }`.
 
 Every shipped domain carries an explicit `"modifying_strictness": "normal"` (same
 effect as inheriting normal) so the knob is visible exactly where you would change

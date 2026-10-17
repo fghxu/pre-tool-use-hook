@@ -37,8 +37,11 @@ function Get-EffectiveStrictness {
         Resolve the effective modifying_strictness for a command domain.
     .DESCRIPTION
         Guard rule: a global 'strict' or 'loose' (global_modifying_strictness)
-        forces ALL domains. Only when the global value is 'normal' does a domain's
-        own modifying_strictness apply; domains without one inherit 'normal'.
+        forces ALL domains. The normal family ('normal' and 'normal_override_llm',
+        2026-10-16) defers: a domain's own modifying_strictness applies when
+        present; domains without one INHERIT the global normal-family value
+        (so a 'normal_override_llm' global turns the mode ON everywhere unless
+        a domain/entry opts out explicitly).
         Used by the strictness_gated tier, AWS flag-stripping, and
         parameter_commands unrecognized-value handling.
         Path policy (Parser.ps1) intentionally stays on the global value.
@@ -56,7 +59,10 @@ function Get-EffectiveStrictness {
         $Entry = $null
     )
 
-    if ($Config.global_modifying_strictness -ne 'normal') { return $Config.global_modifying_strictness }
+    # strict/loose still FORCE every domain (unchanged law); the normal family
+    # ('normal' | 'normal_override_llm') defers to entry -> domain -> global.
+    $g = if ($Config.global_modifying_strictness) { $Config.global_modifying_strictness } else { 'normal' }
+    if ($g -eq 'strict' -or $g -eq 'loose') { return $g }
 
     if ($Entry -and (Get-Member -InputObject $Entry -Name 'modifying_strictness' -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
         return $Entry.modifying_strictness
@@ -71,7 +77,9 @@ function Get-EffectiveStrictness {
             break
         }
     }
-    return 'normal'
+    # CHANGED (D4, 2026-10-16): absent domain key INHERITS the global normal-family
+    # value (was hardcoded 'normal'). Identical for legacy configs (global 'normal').
+    return $g
 }
 
 function Resolve-Command {
@@ -132,8 +140,8 @@ function Resolve-Command {
     # Helper: build the standard return object
     # -------------------------------------------------
     function New-ResolutionResult {
-        param([string]$Decision, [string]$Reason, [string]$MatchedPattern, [string]$Risk, [string]$Tier = '')
-        return [PSCustomObject]@{
+        param([string]$Decision, [string]$Reason, [string]$MatchedPattern, [string]$Risk, [string]$Tier = '', [switch]$OverrideLlm)
+        $obj = [PSCustomObject]@{
             Command        = $Command
             Decision       = $Decision
             Reason         = $Reason
@@ -141,6 +149,13 @@ function Resolve-Command {
             Risk           = $Risk
             Tier           = $Tier
         }
+        # normal_override_llm (2026-10-16, A4): stamped ONLY on gated allow results
+        # whose effective strictness is 'normal_override_llm'. Property ABSENT for
+        # every other caller (falsy downstream; objects byte-identical otherwise).
+        if ($OverrideLlm) {
+            $obj | Add-Member -MemberType NoteProperty -Name 'OverrideLlm' -Value $true
+        }
+        return $obj
     }
 
     # -------------------------------------------------
@@ -226,7 +241,7 @@ function Resolve-Command {
     #     → "aws ec2 describe-instances"
     #   In "strict" mode, current behavior is preserved (unknown flags → ask).
     # -------------------------------------------------
-    if ($domainLower -eq 'aws_cli' -and (Get-EffectiveStrictness -Config $Config -Domain $domainKey) -eq 'normal' -and $Command -match '^aws\s') {
+    if ($domainLower -eq 'aws_cli' -and (Get-EffectiveStrictness -Config $Config -Domain $domainKey) -in @('normal','normal_override_llm') -and $Command -match '^aws\s') {
         $awsTokens = @($Command.Trim() -split '\s+')
         $awsFiltered = [System.Collections.Generic.List[string]]::new()
         $i = 0
@@ -612,7 +627,7 @@ function Resolve-Command {
                             }
                             return New-ResolutionResult -Decision "ask" -Reason "$($entry.name)" -MatchedPattern $entry.name -Risk $risk -Tier "strictness_gated"
                         }
-                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (strictness-gated)" -MatchedPattern $entry.name -Risk "none" -Tier "strictness_gated"
+                        return New-ResolutionResult -Decision "allow" -Reason "$($entry.name) (strictness-gated)" -MatchedPattern $entry.name -Risk "none" -Tier "strictness_gated" -OverrideLlm:($effective -eq 'normal_override_llm')
                     }
                 }
             }
@@ -1413,10 +1428,16 @@ function Evaluate-ParameterRules {
                     Reason = "$DisplayName (parameter rule: strictness-gated, strict mode)"; MatchedPattern = $DisplayName; Risk = $risk; Tier = 'strictness_gated'
                 }
             }
-            return [PSCustomObject]@{
+            $paramGatedResult = [PSCustomObject]@{
                 Command = $Command; Decision = 'allow'
                 Reason = "$DisplayName (parameter rule: strictness-gated)"; MatchedPattern = $DisplayName; Risk = 'none'; Tier = 'strictness_gated'
             }
+            # normal_override_llm (2026-10-16, A4): stamp the per-sub override marker
+            # on gated allows under the new mode (property absent otherwise).
+            if ($effectiveStrict -eq 'normal_override_llm') {
+                $paramGatedResult | Add-Member -MemberType NoteProperty -Name 'OverrideLlm' -Value $true
+            }
+            return $paramGatedResult
         }
     }
 

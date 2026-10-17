@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  T33 suite (design 2026-10-16, D5): the strictness_gated_tool_name gate is
+  UNAFFECTED by the new global value normal_override_llm. The gate mode is
+  computed from global_modifying_strictness + tool_name_modifying_strictness
+  (strict wins; normal_override_llm behaves like plain normal - it is a
+  normal-FAMILY value, it never forces strict and never loosens).
+
+  Two configs, mirroring the existing test-strictness-gate/tool-gate layout:
+    config.ov-tools-strict.json  global normal_override_llm + tool STRICT
+                                 -> effective gate STRICT (full path policy)
+    config.ov-tools-normal.json  global normal_override_llm, tool value ABSENT
+                                 -> effective gate normal (system ask, rest skip)
+
+  Run from repo root:
+    powershell.exe -ExecutionPolicy Bypass -File src/TestRunner.ps1 `
+      -XmlPath test/config/llm-override-tools/test-cases.ov-tools.strict.xml `
+      -ConfigPath test/config/llm-override-tools/config.ov-tools-strict.json
+    powershell.exe -ExecutionPolicy Bypass -File src/TestRunner.ps1 `
+      -XmlPath test/config/llm-override-tools/test-cases.ov-tools.normal.xml `
+      -ConfigPath test/config/llm-override-tools/config.ov-tools-normal.json
+-->
+<commands>
+  <category-group name="OvTools-Strict">
+
+    <!-- THE T33 case: global normal_override_llm must NOT soften a strict tool gate. -->
+    <test-case expected="ask" reason-contains="non-editable path (strict mode)" reason="T33: foreign write path under global normal_override_llm + tool strict -> gate still strict, asks" category="OvTools-Strict-Foreign">
+      <description>Write D:\work\x.txt - foreign path asks (gate strict despite the override-ON global)</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"D:\\work\\x.txt","content":"x"}</tool-input-json>
+    </test-case>
+
+    <test-case expected="ask" reason="system path asks (absolute, every mode)" category="OvTools-Strict-System">
+      <description>Write C:\Windows\evil.dll - system path asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\evil.dll","content":"x"}</tool-input-json>
+    </test-case>
+
+    <test-case expected="allow" reason="editable path allows in strict" category="OvTools-Strict-Editable">
+      <description>Write C:\temp\notes.txt - editable root allows</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\temp\\notes.txt","content":"x"}</tool-input-json>
+    </test-case>
+
+    <test-case expected="ask" reason="unextractable path fails closed in strict" category="OvTools-Strict-Unextractable">
+      <description>NoPathTool (no path mapping) - strict gate asks fail-closed</description>
+      <tool-name>NoPathTool</tool-name>
+      <tool-input-json>{"foo":"bar"}</tool-input-json>
+    </test-case>
+
+    <test-case expected="allow" reason="read-only: ls" category="OvTools-Strict-Control">
+      <description>Bash ls /tmp - intercepted command classifies read-only under the override-ON global</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[ls /tmp]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

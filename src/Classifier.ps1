@@ -319,6 +319,27 @@ function Repair-ResultProperties {
     return $Result
 }
 
+# =============================================================================
+# Add-OverrideLlmActiveStamp (helper, 2026-10-16 A5)
+#
+# Stamps ClassifyResult.OverrideLlmActive for the LLM merge's index-0 carve-out
+# (design D3). Primary-domain approximation for whole-command (unlisted) flags;
+# per-sub gated flags carry their own OverrideLlm stamp (Resolver A4). Only the
+# full-pipeline return sites are stamped - the merge's scope gate already excludes
+# the fast paths (no sub-commands => out of scope).
+# =============================================================================
+
+function Add-OverrideLlmActiveStamp {
+    param(
+        [PSCustomObject]$Result,
+        [PSCustomObject]$Config,
+        [string]$Domain
+    )
+    $active = (Get-EffectiveStrictness -Config $Config -Domain $Domain) -eq 'normal_override_llm'
+    $Result | Add-Member -MemberType NoteProperty -Name 'OverrideLlmActive' -Value $active -Force
+    return $Result
+}
+
 function Invoke-Classify {
     param(
         [PSCustomObject]$RawInput,
@@ -911,7 +932,7 @@ function Invoke-Classify {
                     if ($sr.MatchedPattern -eq 'redirection-target') { continue }
                     if ($sr.Tier -eq 'unclassified') { $sr.Tier = 'read_only' }
                 }
-                return (Repair-ResultProperties ([PSCustomObject]@{
+                $r = Add-OverrideLlmActiveStamp (Repair-ResultProperties ([PSCustomObject]@{
                     Decision    = "allow"
                     Reason      = "read-only (PowerShell AST arbitration)"
                     ExitCode    = 0
@@ -921,7 +942,8 @@ function Invoke-Classify {
                     SubResults  = $subResults.ToArray()
                     IsSkipped   = $false
                     IsUnknown   = $false
-                }))
+                })) $Config $domain
+                return $r
             }
         }
 
@@ -978,7 +1000,7 @@ function Invoke-Classify {
             $reason += ". Pipeline: $pipelineChain"
         }
 
-        return (Repair-ResultProperties ([PSCustomObject]@{
+        $askResult = Add-OverrideLlmActiveStamp (Repair-ResultProperties ([PSCustomObject]@{
             Decision    = "ask"
             Reason      = $reason
             ExitCode    = 0
@@ -988,11 +1010,12 @@ function Invoke-Classify {
             SubResults  = $subResults.ToArray()
             IsSkipped   = $false
             IsUnknown   = $false
-        }))
+        })) $Config $domain
+        return $askResult
     }
 
     # All commands are read-only - allow
-    return (Repair-ResultProperties ([PSCustomObject]@{
+    $allowResult = Add-OverrideLlmActiveStamp (Repair-ResultProperties ([PSCustomObject]@{
         Decision    = "allow"
         Reason      = "read-only"
         ExitCode    = 0
@@ -1002,7 +1025,8 @@ function Invoke-Classify {
         SubResults  = $subResults.ToArray()
         IsSkipped   = $false
         IsUnknown   = $false
-    }))
+    })) $Config $domain
+    return $allowResult
 }
 
 # =============================================================================

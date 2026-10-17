@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ============================================================================
+     OVERRIDE-MODE SUITE (normal_override_llm, spec 2026-10-16 D1-D12)
+     RUN (repo root):
+       pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 `
+         -XmlPath test/config/llm-review/test-cases.override.xml `
+         -ConfigPath test/config/llm-review/config.ov.json
+
+     RED PHASE NOTE (verified 2026-10-16): the runner loads the BASE config
+     eagerly at startup, and today's validator REJECTS normal_override_llm ->
+     the suite throws at STARTUP (ConfigLoader.ps1:366) before any case runs.
+     That startup wall IS the red record; after design step A1 (validators)
+     re-run for the behavior red (T1-T9, T13-T16 still ask; T17/T20/T24/T25/
+     T31 allow-or-ask-for-the-wrong-reason), then green after A2-A6.
+     Preflight RED (Run-Ov-Preflights.ps1, same day): 6 total / 2 pass
+     (PF-2 bad-value + PF-3 tool-name rejection already throw today) /
+     4 fail (PF-1 load wall; PF-4/5/6 skipped).
+
+     RUNNER CAVEATS BAKED INTO THESE CASES:
+       - ALWAYS pass -ConfigPath config.ov.json: the runner resets every
+         no-strictness-attr case's global to the BASE config's value, so all
+         variant configs assume global = normal_override_llm unless a case
+         explicitly sets strictness="normal" / strictness="strict".
+       - level defaults to complex_remote in the runner; every case here
+         sets level="complex_commands" explicitly (git/terraform are local).
+       - mock grammar: modifying | read-only | garbage | down | idx:1,2 | idx:0
+         (idx:N -> raw {"modifying":[N]}).
+       - run from the REPO ROOT: redirect targets like .\o.txt / out.txt
+         classify as CWD ("under current directory") -> Tier editable_path.
+       - T33 (tool-gate unaffected, TestRunner harness) is NOT here; see the
+         design doc section 4.3 - it needs its own non-LLM fixture suite.
+     Counts here: 16 allow + 16 ask = 32 (T33 external -> 17th ask).
+     ============================================================================ -->
+<commands>
+  <category-group name="OvAllow">
+
+    <test-case expected="allow" category="OvAllow-T1-GatedGitOverride" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="D1: gated 'git add' (Linux inherits override-ON global), no path tokens -> LLM flag suppressed. NOTE: all-suppressed leaves the local reason 'read-only' (the 'suppressed as policy' text only appears on a surviving veto), so no reason-contains here">
+      <description>T1: gated sub overrides LLM veto (system-path-only exception), suppress via OverrideLlm stamp</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . && git status]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T2-GatedTerraform" level="complex_commands" min="2" mock="idx:2" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="2" suppressed="2" reason="D1: gated 'terraform plan' (sub 2) overridden">
+      <description>T2: second-position gated sub overridden</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[terraform validate; terraform plan]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T3-GatedKubectl" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="D1: gated 'kubectl config set-context' overridden (read-only sibling unflagged)">
+      <description>T3: gated kubectl sub overridden; note kubectl is also a default remote indicator - level pinned to complex_commands</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[kubectl config set-context ctx; kubectl get pods]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T4-EntryLevelMode" level="complex_commands" min="1" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="D5: parameter_commands ENTRY carrying normal_override_llm stamps the gated rule allow + OverrideLlm (no reason-contains: all-suppressed keeps the local 'read-only' reason)">
+      <description>T4: entry-level mode (curl -o rule -> strictness_gated) overridden; PS domain opted out is irrelevant (curl is Linux)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[curl -s -o page.html http://example.com]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T5-DomainOnGlobalNormal" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" config="config.ov-domainon.json" strictness="normal" reason="D4/r2: global normal (strictness attr) + Linux domain EXPLICIT normal_override_llm (config.ov-domainon.json) -> per-domain wins, override ON">
+      <description>T5: the live-rollout shape - global normal, one domain flipped on</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . && git status]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T6-InheritOverride" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" config="config.ov-inherit-ps.json" reason="D4 inherit: config.ov-inherit-ps.json PowerShell domain has NO modifying_strictness key -> inherits override-ON global; Set-Content gated + overridden">
+      <description>T6: absent domain key inherits the normal-family global (fallback change A2)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Set-Content .\log.txt hi; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T7-VarWriterOverridden" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason-not-contains="LLM-VETO" config="config.ov-inherit-ps.json" reason="D1(c): writer + unresolved $var target - legacy guard DENIES, override mode replaces the guard entirely -> allow (accepted (c) semantics; twin T22)">
+      <description>T7: Copy-Item with $var target overrides (Test-GatedInvocationSafe var-rule bypassed)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Copy-Item src.txt $dst; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T8-ForeignLiteralOverridden" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" config="config.ov-editable.json" reason="D1(c): foreign (non-system, non-editable) literal D:\elsewhere - legacy guard DENIES under editable-enabled normal, override allows (twin T23)">
+      <description>T8: foreign literal path overridden under override mode with editable_paths enabled</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Copy-Item a.txt D:\elsewhere\x.txt; Get-Date]]></copilot-command>
+    </test-case>
+
+    <!-- REWORKED from 'git status > out.txt': with a read_only sibling upgraded to
+         editable_path by the R2 redirect stamp, EVERY sub is editable -> the R2
+         llm-skipped-trusted-editable gate skips the LLM entirely (verdict=not_called),
+         so the idx:0 flag can never fire. 'git add . > out.txt' keeps the SAME D3
+         carve-out (gated sub + CWD redirect, index-0 flag attributed to the redirect). -->
+    <test-case expected="allow" category="OvAllow-T9-Index0EditableRedirect" level="complex_commands" min="1" mock="idx:0" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="0" suppressed="0" reason="D3(a1): whole-command redirect 'out.txt' -> CWD -> redirection-target SubResult Tier editable_path; index-0 flag attributed to it; no system path -> suppressed">
+      <description>T9: THE index-0 carve-out - whole-command editable redirect no longer forces ask (twin T20)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . > out.txt]]></copilot-command>
+    </test-case>
+
+    <!-- REWORKED: a lone trusted_program sub makes EVERY sub trusted -> the R2
+         llm-skipped-trusted-editable gate skips the LLM (verdict=not_called), so the
+         flagged/suppressed assertions were unsatisfiable. The 2-sub form keeps the
+         D2 Option-B pin (trusted sub flagged -> suppressed unconditionally). -->
+    <test-case expected="allow" category="OvAllow-T10-TrustedUnchanged" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="D2 pin: trusted_program suppresses unconditionally (Option B) - independent of the new mode">
+      <description>T10: Option-A collapsed trusted script (1 sub) flagged -> suppressed by the trusted arm</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[pwsh -NoProfile -File src\Run-AllTests.ps1; git status]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T11-EditableSegmentR2" level="complex_commands" min="2" mock="idx:2" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="2" suppressed="2" reason="D2 pin: per-segment redirect stamps editable_path on the pipe tail (R2) - suppressible independent of the new mode">
+      <description>T11: R2 pin - in-pipeline redirect to CWD flagged -> suppressed by the editable arm</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Get-ChildItem c:\temp | Where-Object Name -like '*a*' > .\o.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T12-ModeOffGuardPasses" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" strictness="normal" reason="status-quo pin: plain normal (strictness attr; Linux inherits normal) - no-path gated sub passes the LEGACY guard Test-GatedInvocationSafe -> suppressed">
+      <description>T12: without the new value anywhere, suppression works exactly as today (zero-flip guard)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . && git status]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T13-MixedDomains" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" reason="mixed pipeline: [1] linux gated (override ON via inherit) flagged+suppressed; [2] PS read_only unflagged">
+      <description>T13: per-sub stamp precision across domains in one command</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add .; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T14-NewItemCwd" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto-suppressed-policy" flagged="1" suppressed="1" config="config.ov-inherit-ps.json" reason="D4 inherit (ov-inherit-ps): gated writer New-Item with CWD-relative target overridden">
+      <description>T14: second gated-writer shape under inherited override</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[New-Item .\d1 -ItemType Directory; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T15-PathFallbackNormality" level="complex_commands" min="1" mock="read-only" in-scope="true" verdict="read-only" effect="agree" reason="D11 pin: base config has NO editable_paths; foreign redirect target falls to the strictness fallback which must treat normal_override_llm AS normal -> redirect allow (pre-fix: final ask branch)">
+      <description>T15: Parser.ps1 path-policy fallback normalization (the '-eq normal' consumer), observable via a foreign whole-command redirect allowing</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git status > D:\elsewhere\o.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="OvAllow-T16-PairDisagreeNotEnforced" level="complex_commands" min="2" mock="read-only" mock2="idx:1" in-scope="true" verdict="read-only" effect="agree" llm2-present="true" llm2-compare="disagree" config="config.ov-pair.json" reason="D10/D18: pair disagrees (LLM1 read-only vs LLM2 modifying[1]) but enforce_disagree=false -> fall through; LLM1 read-only + local allow -> agree allow">
+      <description>T16: pair disagreement recorded, not enforced; the gated local allow stands</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . && git status]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
+  <category-group name="OvAsk">
+
+    <test-case expected="ask" category="OvAsk-T17-SystemPathKeepsVeto" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto" flagged="1" reason-contains="*** LLM-VETO ***" config="config.ov-inherit-ps.json" reason="D1 denial: literal C:\Windows target -> Test-CommandTargetsSystemPaths trips -> veto stands (the ONLY surviving denial in override mode); twin of T1">
+      <description>T17: the system-path exception is real - Copy-Item into C:\Windows still asks</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Copy-Item a.txt C:\Windows\b.txt; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T18-ReadOnlyFlaggedModeOn" level="complex_commands" min="2" mock="idx:2" in-scope="true" verdict="modifying" effect="veto" reason-contains="*** LLM-VETO ***" reason="D8: read_only-tier sub (Get-Date) flagged -> ask EVEN in override mode (user's audit channel: maybe it belongs in strictness_gated)">
+      <description>T18: read_only flag keeps asking under the new mode - by design</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add .; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T19-ReadOnlyFlaggedModeOff" level="complex_commands" min="2" mock="idx:2" in-scope="true" verdict="modifying" effect="veto" reason-contains="*** LLM-VETO ***" strictness="normal" reason="D8 pin under plain normal: read_only-tier flag asks today and must keep asking">
+      <description>T19: status-quo twin of T18</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add .; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T20-Index0NoRedirect" level="complex_commands" min="2" mock="idx:0" in-scope="true" verdict="modifying" effect="veto" reason-contains="unlisted part of the block" reason="D3: index 0 with NO redirect anywhere -> P3 stands (unknown unknowns stay fail-closed); twin of T9">
+      <description>T20: index-0 carve-out requires an actual validated editable redirect</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git status && git diff --stat]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T21-Index0ForeignRedirect" level="complex_commands" min="1" mock="idx:0" in-scope="true" verdict="modifying" reason-contains="redirection-target" config="config.ov-editable.json" reason="editable_paths enabled (ov-editable): foreign redirect target fails path policy locally -> whole command ask before the merge; carve-out irrelevant. (Doc said redirect/high; the engine's foreign-redirect risk is medium, top reason 'redirection-target (medium)')">
+      <description>T21: foreign redirect under editable-enabled config asks locally (redirect policy)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git status > D:\elsewhere\o.txt]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T22-VarWriterModeOff" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto" reason-contains="*** LLM-VETO ***" config="config.ov-inherit-ps.json" strictness="normal" reason="status-quo pin: plain normal + writer $var target -> Test-GatedInvocationSafe fail-closed deny -> veto; twin of T7">
+      <description>T22: the legacy var-rule still bites without the new mode</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Copy-Item src.txt $dst; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T23-ForeignModeOff" level="complex_commands" min="2" mock="idx:1" in-scope="true" verdict="modifying" effect="veto" reason-contains="*** LLM-VETO ***" config="config.ov-editable.json" strictness="normal" reason="status-quo pin: plain normal + editable enabled + foreign literal -> guard deny -> veto; twin of T8">
+      <description>T23: the legacy foreign-path denial still bites without the new mode</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Copy-Item a.txt D:\elsewhere\x.txt; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T24-DomainStrictWins" level="complex_commands" min="2" mock="idx:1" in-scope="true" reason-contains="git-add" config="config.ov-strictdomain.json" reason="D4: ov-strictdomain (Linux modifying_strictness=strict) beats the override-ON global -> gated entry asks LOCALLY (LLM irrelevant; modifying verdict agrees)">
+      <description>T24: per-domain strict opts out of both the override AND the gated allow</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . && git status]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T25-GlobalStrictForces" level="complex_commands" min="2" mock="idx:1" in-scope="true" reason-contains="git-add" strictness="strict" reason="guard law pin: global strict (strictness attr) still FORCES every domain -> gated asks even though base Linux would inherit override; unchanged pre-existing behavior">
+      <description>T25: strict/loose forcing is untouched by the normal-family exception</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . && git status]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T26-ModifyingTierLocal" level="complex_commands" min="2" mock="read-only" in-scope="true" verdict="read-only" effect="disagree-kept-ask" reason-contains="rm" reason="D9-adjacent: locally modifying (rm) -> local ask stands; LLM read-only never downgrades. NOTE: /tmp/x was reworked to D:\elsewhere\x - Step 0g-delete treats /tmp/* as a temp path and ALLOWS (editable_delete) before the rm modifying pattern can fire">
+      <description>T26: modifying-tier entries ask regardless of any override mode</description>
+      <tool-name>Bash</tool-name>
+          <copilot-command><![CDATA[rm -rf D:\elsewhere\x; git status]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T27-UnregisteredVerb" level="complex_commands" min="2" mock="read-only" in-scope="true" verdict="read-only" effect="disagree-kept-ask" reason="D9: unregistered_verb tier -> local ask stands; the LLM never rescues an unknown local classification">
+      <description>T27: unknown tiers keep asking (user requirement: unrecognized/unregistered still ask)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Frobnicate-Thing -x; Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T28-LlmDown" level="complex_commands" min="2" mock="down" in-scope="true" verdict="down" effect="forced-ask" reason-contains="*** LLM-DOWN ***" reason="D6: LLM unreachable -> fail-closed ask EVEN in override mode (availability != authority)">
+      <description>T28: the override never weakens the down fail-closed path</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . && git status]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T29-LlmUnusable" level="complex_commands" min="2" mock="garbage" in-scope="true" verdict="unusable" effect="forced-ask" reason-contains="*** LLM-UNUSABLE ***" reason="D6: unparseable response -> fail-closed ask in every mode">
+      <description>T29: garbage response still asks</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git add . && git status]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T30-CheckBlindspotUnchanged" level="complex_commands" min="2" mock="modifying" check_blindspot="true" in-scope="true" reason-contains="*** CHECK_BLINDSPOT ***" reason="D10: check_blindspot NEVER changes the decision - local unregistered_verb ask stays ask; LLM verdict only enriches the reason. min=2 with a single sub => primary gate says OUT of scope => the blindspot rescue fires">
+      <description>T30: blindspot rescue consult is display-only, override mode irrelevant (min deliberately above the sub count)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[Frobnicate-Thing -x]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T31-EntryNormalBeatsDomain" level="complex_commands" min="1" mock="idx:1" in-scope="true" verdict="modifying" effect="veto" reason-contains="*** LLM-VETO ***" config="config.ov-entryflip.json" reason="D5 precedence: ov-entryflip = editable enabled + Linux domain EXPLICIT normal_override_llm + curl ENTRY flipped to normal -> entry wins -> no OverrideLlm stamp -> legacy guard denies the foreign -o literal -> veto">
+      <description>T31: entry-level value is consulted before the domain value - entry normal disables the override for that entry alone</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[curl -s -o D:\elsewhere\p.html http://example.com]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" category="OvAsk-T32-SystemPathRedirect" level="complex_commands" min="1" mock="read-only" in-scope="true" verdict="read-only" effect="disagree-kept-ask" reason-contains="redirection-target" reason="redirect into C:\Windows -> redirect policy ask locally (system_paths absolute); override never reaches path policy. (Top-level aggregated reason is MatchedPattern plus Risk = 'redirection-target (high)', no literal 'system path' text)">
+      <description>T32: system-path redirect asks before any LLM involvement</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[git status > C:\Windows\o.txt]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  T33 twin suite (design 2026-10-16, D5): global normal_override_llm with the
+  tool_name_modifying_strictness value ABSENT (defaults to 'normal'). Proves the
+  gate treats normal_override_llm as a normal-FAMILY value: identical behavior
+  to plain normal (system_paths ask absolutely; non-system gated tools skip).
+-->
+<commands>
+  <category-group name="OvTools-Normal">
+
+    <test-case expected="allow" reason="normal gate skips non-system targets" reason-contains="gated tool" category="OvTools-Normal-Foreign">
+      <description>Write D:\work\x.txt - foreign path skips (gate normal, exactly like plain normal global)</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"D:\\work\\x.txt","content":"x"}</tool-input-json>
+    </test-case>
+
+    <test-case expected="ask" reason="system path asks (absolute, every mode)" category="OvTools-Normal-System">
+      <description>Write C:\Windows\evil.dll - system path asks</description>
+      <tool-name>Write</tool-name>
+      <tool-input-json>{"file_path":"C:\\Windows\\evil.dll","content":"x"}</tool-input-json>
+    </test-case>
+
+    <test-case expected="allow" reason="no-path gated tool skips in normal mode" category="OvTools-Normal-NoPath">
+      <description>NoPathTool - normal gate skips (contrast: strict config asks fail-closed)</description>
+      <tool-name>NoPathTool</tool-name>
+      <tool-input-json>{"foo":"bar"}</tool-input-json>
+    </test-case>
+
+  </category-group>
+</commands>

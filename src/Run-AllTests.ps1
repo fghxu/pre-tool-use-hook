@@ -117,7 +117,14 @@ $extraSuites = @(
     # second endpoint in parallel, disagreement forces ask. PF-1..PF-8 config
     # preflights fire automatically (the runner detects the sibling
     # config.pair.json); mock2 env var drives LLM2's verdict, no network.
-    @{ Name = 'llm-third-opinion.llm';  File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\llm-third-opinion\test-cases.llm.xml'), '-ConfigPath', (Join-Path $repoRoot 'test\config\llm-third-opinion\config.pair.json'), '-Cwd', (Join-Path $repoRoot 'test\config\llm-third-opinion')) }
+    @{ Name = 'llm-third-opinion.llm';  File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\llm-third-opinion\test-cases.llm.xml'), '-ConfigPath', (Join-Path $repoRoot 'test\config\llm-third-opinion\config.pair.json'), '-Cwd', (Join-Path $repoRoot 'test\config\llm-third-opinion')) },
+    # normal_override_llm (2026-10-16): the 4th strictness value. ov-preflights =
+    # config/validator/guard preflights; llm-review.override = the 32-case decision
+    # suite (mock verdicts, no network); llm-override-tools = the T33 tool-gate
+    # suites proving strictness_gated_tool_name is UNAFFECTED by the new global.
+    @{ Name = 'ov-preflights';          File = (Join-Path $repoRoot 'test\config\llm-review\Run-Ov-Preflights.ps1'); Args = @() },
+    @{ Name = 'llm-review.override';    File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\llm-review\test-cases.override.xml'), '-ConfigPath', (Join-Path $repoRoot 'test\config\llm-review\config.ov.json')) },
+    @{ Name = 'llm-override-tools';     File = (Join-Path $repoRoot 'test\config\llm-override-tools\Run-Tests.ps1'); Args = @() }
 )
 if ($Filter) {
     $extraSuites = @($extraSuites | Where-Object { $_.Name -like "*$Filter*" })

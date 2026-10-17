@@ -1,0 +1,111 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE variant: base WITHOUT the PowerShell domain's modifying_strictness key -> PowerShell INHERITS the override-ON global (D4 inherit, A2 fallback change).",
+  "_comment_fixture": "Used by T6, T7, T14, T17, T22 (T22 adds strictness=normal so PS inherits plain normal).",
+
+  "global_modifying_strictness": "normal_override_llm",
+
+  "log_file_path": "c:\\temp\\pretoolhook-ov-testlogs\\",
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "trusted_programs": [
+    "src\\Run-AllTests.ps1"
+  ],
+
+  "system_paths": {
+    "linux": ["/etc", "/usr", "/bin", "/sbin"],
+    "windows": ["C:\\\\Windows", "C:\\\\Program Files"]
+  },
+
+  "intercept_tool_name": [ "Bash", "run_in_terminal" ],
+
+  "tool_name_mapping": {
+    "Bash": "tool_input.command",
+    "run_in_terminal": "tool_input.command"
+  },
+
+  "ignore_tool_name": [],
+
+  "llm_second_opinion": {
+    "enabled": true,
+    "level": "complex_commands",
+    "base_uri": "http://127.0.0.1:3030",
+    "model": "glm-5.2",
+    "api_key": "",
+    "timeout_ms": 12000,
+    "temperature": 0.0,
+    "llm_response_max_tokens": 64,
+    "complex_min_subcommands": 2,
+    "attributed_verdicts": true,
+    "json_mode": false,
+    "check_blindspot": {
+      "enabled": false,
+      "tiers": ["unclassified", "unregistered_verb", "unregistered_static", "unregistered", "unknown_domain"]
+    }
+  },
+
+  "commands": {
+    "Linux": {
+      "description": "Same as base: no modifying_strictness key.",
+      "read_only": [
+        { "name": "git-status",   "patterns": ["git status*"] },
+        { "name": "git-diff",     "patterns": ["git diff*"] },
+        { "name": "terraform-validate", "patterns": ["terraform validate*"] },
+        { "name": "kubectl-get",  "patterns": ["kubectl get*"] }
+      ],
+      "strictness_gated": [
+        { "name": "git-add",         "patterns": ["git add*"],        "risk": "low" },
+        { "name": "terraform-plan",  "patterns": ["terraform plan*"], "risk": "low" },
+        { "name": "kubectl-config",  "patterns": ["kubectl config *"], "risk": "low" }
+      ],
+      "modifying": [
+        { "name": "rm-rf", "patterns": ["rm *"], "risk": "high" }
+      ],
+      "parameter_commands": {
+        "curl": {
+          "rules": [
+            { "param": ["-X"], "match": "present", "decision": "modifying", "risk": "medium" },
+            { "param": ["-o"], "match": "present", "decision": "strictness_gated" }
+          ],
+          "default": "read-only",
+          "modifying_strictness": "normal_override_llm"
+        }
+      }
+    },
+    "Terraform": {
+      "description": "Terraform domain (parser routes 'terraform' here via KnownBinaryPrefixes). NO modifying_strictness -> inherits global.",
+      "read_only": [
+        { "name": "terraform-validate", "patterns": ["terraform validate*"] }
+      ],
+      "strictness_gated": [
+        { "name": "terraform-plan", "patterns": ["terraform plan*"], "risk": "low" }
+      ]
+    },
+    "Kubernetes": {
+      "description": "Kubernetes domain (parser routes 'kubectl' here via KnownBinaryPrefixes). NO modifying_strictness -> inherits global.",
+      "read_only": [
+        { "name": "kubectl-get", "patterns": ["kubectl get*"] }
+      ],
+      "strictness_gated": [
+        { "name": "kubectl-config", "patterns": ["kubectl config *"], "risk": "low" }
+      ]
+    },
+    "PowerShell": {
+      "description": "NO modifying_strictness key -> inherits the global (override ON here; plain normal when the case sets strictness=normal).",
+      "read_only_verbs": ["Get-*", "Test-*", "Select-*", "Where-*", "Sort-*", "Measure-*"],
+      "read_only": [
+        { "name": "get-date", "patterns": ["Get-Date"] }
+      ],
+      "strictness_gated": [
+        { "name": "ps-setcontent", "patterns": ["Set-Content*"], "risk": "low" },
+        { "name": "ps-copy-item",  "patterns": ["Copy-Item*"],  "risk": "low" },
+        { "name": "ps-new-item",   "patterns": ["New-Item*"],   "risk": "low" }
+      ],
+      "modifying": [
+        { "name": "ps-remove-item", "patterns": ["Remove-Item*"], "risk": "high" }
+      ]
+    }
+  }
+}

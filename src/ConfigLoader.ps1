@@ -362,8 +362,8 @@ function Test-ConfigSchema {
         $Config | Add-Member -MemberType NoteProperty -Name 'global_modifying_strictness' -Value 'normal' -Force
     }
     else {
-        if ($Config.global_modifying_strictness -notin @('normal', 'strict', 'loose')) {
-            throw "Configuration validation failed: 'global_modifying_strictness' must be 'normal', 'strict', or 'loose', got '$($Config.global_modifying_strictness)'"
+        if ($Config.global_modifying_strictness -notin @('normal', 'strict', 'loose', 'normal_override_llm')) {
+            throw "Configuration validation failed: 'global_modifying_strictness' must be 'normal', 'strict', 'loose', or 'normal_override_llm', got '$($Config.global_modifying_strictness)'"
         }
     }
 
@@ -600,8 +600,8 @@ function Test-ConfigSchema {
         # Validate optional per-domain modifying_strictness (guard: only consulted
         # when the global modifying_strictness is 'normal' — see Get-EffectiveStrictness)
         if (Get-Member -InputObject $domain -Name 'modifying_strictness' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
-            if ($domain.modifying_strictness -notin @('strict', 'normal', 'loose')) {
-                throw "Configuration validation failed: domain '$domainKey' modifying_strictness must be 'strict', 'normal', or 'loose', got '$($domain.modifying_strictness)'"
+            if ($domain.modifying_strictness -notin @('strict', 'normal', 'loose', 'normal_override_llm')) {
+                throw "Configuration validation failed: domain '$domainKey' modifying_strictness must be 'strict', 'normal', 'loose', or 'normal_override_llm', got '$($domain.modifying_strictness)'"
             }
         }
 
@@ -636,8 +636,8 @@ function Test-ConfigSchema {
                 # Entry-level modifying_strictness (optional): per-entry strictness
                 # mode, consulted only when the global is 'normal' (see Get-EffectiveStrictness).
                 if (Get-Member -InputObject $pEntry -Name 'modifying_strictness' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
-                    if ($pEntry.modifying_strictness -notin @('strict','normal','loose')) {
-                        throw "Configuration validation failed: parameter_commands entry '$cmdName' (domain '$domainKey') modifying_strictness must be 'strict', 'normal', or 'loose', got '$($pEntry.modifying_strictness)'"
+                    if ($pEntry.modifying_strictness -notin @('strict','normal','loose','normal_override_llm')) {
+                        throw "Configuration validation failed: parameter_commands entry '$cmdName' (domain '$domainKey') modifying_strictness must be 'strict', 'normal', 'loose', or 'normal_override_llm', got '$($pEntry.modifying_strictness)'"
                     }
                 }
                 # Entry-level global_value_flags (optional): dash-tokens that consume

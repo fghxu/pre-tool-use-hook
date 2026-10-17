@@ -1327,6 +1327,10 @@ function Invoke-LlmReview {
                 $vetoIdx = @()
                 $suppIdx = @()
                 $pgDenied = @()
+                # Indices suppressed by the NEW normal_override_llm arms (2026-10-16,
+                # A6c): marked '(override)' in the reason's suppressed list so
+                # records.jsonl miners can tell them from legacy suppressions.
+                $ovIdx = @()
                 # strict_gate_override_llm (2026-09-16, default false): when true, a
                 # local strictness_gated decision UNCONDITIONALLY overpowers an online
                 # LLM veto (trusted_program-style; path guard bypassed). When false/
@@ -1334,7 +1338,25 @@ function Invoke-LlmReview {
                 $gateOverride = ($Config._compiled.llmSecondOpinion -and
                     $Config._compiled.llmSecondOpinion.StrictGateOverrideLlm)
                 foreach ($ix in $verdict.Indices) {
-                    if ($ix -eq 0) { $vetoIdx += 0; continue }   # unlisted danger: never suppressible (P3)
+                    if ($ix -eq 0) {
+                        # D3 (2026-10-16): under normal_override_llm, an index-0 flag is
+                        # ATTRIBUTED to a locally-validated editable redirect when one
+                        # exists. Conditions: local decision allow (merge precondition
+                        # for suppressions anyway), >=1 redirection-target SubResult
+                        # carries Tier editable_path, and the full command has no
+                        # system-path literal. No redirects => P3 stands (ask).
+                        $attr = $false
+                        if ($localDecision -eq 'allow' -and $ClassifyResult.OverrideLlmActive) {
+                            $redirOk = @($ClassifyResult.SubResults | Where-Object {
+                                $_.MatchedPattern -eq 'redirection-target' -and "$($_.Tier)" -eq 'editable_path' })
+                            if ($redirOk.Count -gt 0 -and
+                                -not (Test-CommandTargetsSystemPaths -Command $ClassifyResult.Command -Config $Config)) {
+                                $attr = $true
+                            }
+                        }
+                        if ($attr) { $suppIdx += 0; $ovIdx += 0 } else { $vetoIdx += 0 }
+                        continue   # unlisted danger: never suppressible (P3) unless attributed above
+                    }
                     $sub = $scope.SubCommands[$ix - 1]
                     $isGated = ($sub -and $sub.Tier -eq 'strictness_gated')
                     # Option B: a trusted_program sub-command is UNCONDITIONALLY
@@ -1362,6 +1384,19 @@ function Invoke-LlmReview {
                         # the sub-command text canonicalizes to a system path, DENY the
                         # suppression (veto stands) and record why.
                         $suppIdx += $ix
+                    }
+                    elseif ($isGated -and $sub.PSObject.Properties['OverrideLlm'] -and $sub.OverrideLlm -and
+                            -not (Test-CommandTargetsSystemPaths -Command $sub.Command -Config $Config)) {
+                        # D1 (2026-10-16): strictness mode normal_override_llm — local gated
+                        # classification overpowers the LLM veto; ONLY a literal system-path
+                        # target keeps the veto (INV-3 family, mirrors the editable tiers).
+                        $suppIdx += $ix
+                        $ovIdx += $ix
+                    }
+                    elseif ($isGated -and $sub.PSObject.Properties['OverrideLlm'] -and $sub.OverrideLlm) {
+                        # override mode active but system path present: veto stands, record WHY
+                        $vetoIdx += $ix
+                        $pgDenied += $ix
                     }
                     elseif ($isGated -and $gateOverride) {
                         # Switch on: local gated decision overpowers the LLM, exactly
@@ -1402,9 +1437,18 @@ function Invoke-LlmReview {
                     if ($suppIdx.Count -gt 0) {
                         $suppTexts = @()
                         foreach ($sx in $suppIdx) {
-                            $st = "$($scope.SubCommands[$sx - 1].Command)"
-                            if ($st.Length -gt 60) { $st = $st.Substring(0, 60) }
-                            $suppTexts += "'$st' [$sx]"
+                            # Index 0 is suppressible only via the D3 attribution
+                            # (2026-10-16); SubCommands[-1] would be $null, so label it.
+                            if ($sx -eq 0) {
+                                $st = '(unlisted part of the block)'
+                            }
+                            else {
+                                $st = "$($scope.SubCommands[$sx - 1].Command)"
+                                if ($st.Length -gt 60) { $st = $st.Substring(0, 60) }
+                            }
+                            # (override) marker: suppressed by a normal_override_llm arm.
+                            $ovMark = if ($ovIdx -contains $sx) { ' (override)' } else { '' }
+                            $suppTexts += "'$st' [$sx]$ovMark"
                         }
                         $reason += " | suppressed as policy: " + ($suppTexts -join ', ')
                     }

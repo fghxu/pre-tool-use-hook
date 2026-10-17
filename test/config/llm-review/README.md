@@ -17,8 +17,17 @@ pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/
 
 - **Default (small)**: 26 checks — 10 phase-II cases (`test-cases.p2.small.xml`)
   plus 16 shared pre-flights (config rejection ×2, 12 `ConvertTo-LlmVerdict`
-  parser units, 2 `Format-LlmLogBlock` sub-command-count units).
-- **Large (opt-in)**: 80 checks — 64 cases (`test-cases.p2.large.xml`) in seven
+  parser units, 2 `Format-LlmLogBlock` sub-command-count units).- **Large (opt-in)**: 80 checks — 64 cases (`test-cases.p2.large.xml`) in seven
+- **Override suite (2026-10-16, `normal_override_llm`)**:
+  `pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.override.xml -ConfigPath test/config/llm-review/config.ov.json`
+  = 60 checks (32 cases, `OvAllow`/`OvAsk`). ALWAYS pass `-ConfigPath config.ov.json`
+  (the runner resets every no-`strictness`-attr case's global to the BASE config's
+  value) and run from the REPO ROOT (CWD-relative redirect targets must resolve as
+  CWD). Preflights: `Run-Ov-Preflights.ps1` (PF-1..PF-6). The `OverrideLlm` stamp
+  (A4 property flow) is copied at `Resolver.ps1` `New-ResolutionResult` (NoteProperty
+  only when `-OverrideLlm` is set) — set by the step 1a.5 gated-allow branch and the
+  parameter-rule gated-allow branch; consumed by the `LlmReview.ps1` merge arms.
+  Tool-gate pins (T33) live in `test/config/llm-override-tools/`.- **Large (opt-in)**: 80 checks — 64 cases (`test-cases.p2.large.xml`) in seven
   groups: suppression matrix, levels, fallback/malformed indices,
   effects/log/reason, scope numbering, `attributed_verdicts=false` regression,
   and the **stage-2 path-guard** (G7: system-path targets veto, temp/CWD/
