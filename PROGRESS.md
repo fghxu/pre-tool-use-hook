@@ -2,7 +2,30 @@
 Maintenance mode: the PreToolUse safety hook (local classifier + llm_second_opinion cross-check) is feature-complete. Current work = fixing production mis-classifications and extending config coverage for new tools.
 
 ## Current Step
-Maintenance mode steady-state. Latest feature **llm_third_opinion** (2026-09-30) is implemented and GREEN — see the section below. No open work. Open rulings for the user: gap **G-1** (`pwsh -f x.ps1` bypasses -File inspection under BOTH configs — fix = extend the production regex, which also tightens OFF behavior) and gap **G-2**'s OFF leg (non-cmdlet-headed `-Command` bodies hide their contents when drilldown is OFF).
+**normal_override_llm** strictness mode — SPECIFIED + DESIGNED (2026-10-16), implementation NOT started.
+Spec: `docs/Updates/Update-2026-10-16-strictness-normal-override-llm-spec.md` (interview record, D1–D12).
+Design: `docs/Updates/Update-2026-10-16-strictness-normal-override-llm-design.md` (HLD/LLD, edit anchors A1–A7,
+39-check TDD plan: 6 PF + 16 allow + 17 ask). Next: build the fixture suite first (RED), then A1→A6, then full
+regression (zero flips). Maintenance items below remain: open rulings G-1 (pwsh -f bypass) and G-2 OFF leg.
+
+## normal_override_llm strictness mode (2026-10-16, SPECIFIED)
+- Feature: 4th enum value on `global_modifying_strictness` / per-domain / `parameter_commands` entry
+  `modifying_strictness` (NOT `tool_name_modifying_strictness`). Normal-family semantics everywhere
+  (AWS flag-strip + path-policy fallback normalized, D11) + two new LLM-merge suppression arms:
+  (D1) gated tier overrides an LLM veto unless a literal system-path target (INV-3 style);
+  (D3) index-0 flags attributed to validated editable redirects (local allow + ≥1 redirection-target
+  SubResult Tier editable_path + no system-path literal). trusted/editable arms, LLM-down, read_only-flag
+  audit channel, unregistered tiers, check_blindspot, tool gate: all unchanged. Guard (D4): per-domain wins,
+  absent domain key INHERITS the normal-family global (fallback changed from hardcoded 'normal').
+- Grilling decisions: Q1(c) Q2(i) Q3(a1) Q4(g2 normal-family) Q5(e1 uniform) Q6(d1 keep down→ask) Q7(r2 rollout).
+- TEST ARTIFACTS MATERIALIZED (2026-10-16, RED captured): `test/config/llm-review/test-cases.override.xml`
+  (32 cases: 16 allow / 16 ask) + 7 fixtures (`config.ov.json` base + inherit-ps/domainon/strictdomain/
+  editable/entryflip/pair) + `Run-Ov-Preflights.ps1` (PF-1..6). RED: preflights 6/2 pass (PF-2, PF-3 throw
+  correctly today; PF-1 load wall at ConfigLoader.ps1:366, PF-4/5/6 skipped); decision suite = startup throw
+  (same validator wall) until A1 lands. Run: `pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1
+  -XmlPath test/config/llm-review/test-cases.override.xml -ConfigPath test/config/llm-review/config.ov.json`.
+  Only T33 (tool gate unaffected, TestRunner harness `test/config/llm-override-tools/`) still to author.
+- User will run `llm_third_opinion.enforce_disagree: false` in live config (existing D18 switch, config-only).
 
 ## llm_third_opinion: LLM2 third-opinion pair (2026-09-30, DONE, all suites green 1479/1479, +67 new)
 - Design: docs/superpowers/specs/2026-09-30-llm-third-opinion-design.md (17 decisions D1–D16 + sibling cross-reviews §10.1/§10.2). Feature: when `llm_third_opinion` is enabled AND `llm_second_opinion` is enabled+in-scope, the **identical prompt/sampling** is sent to a SECOND endpoint **in parallel** (`[powershell]::Create()` runspaces — host-proof on PS 5.1 + pwsh 7; request body built on the main thread, worker never touches `$script:` state). The two parsed verdicts are compared; **disagreement ⇒ unconditional forced ask** (`*** LLM-DISAGREE ***`, `effect=llm2-disagree`, also overrides a veto-suppression, D5/D7). Agree / LLM2-down ⇒ LLM1 drives today's merge unchanged. LLM1-down ⇒ today's fail-closed ask + LLM2 FYI note. check_blindspot consults get an FYI note only, never a decision change (D9). LLM1 disabled + LLM2 enabled ⇒ skip-note (D3/D13).

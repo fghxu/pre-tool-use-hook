@@ -32,7 +32,19 @@ function Detect-IDE {
     # (PascalCase hook_event_name, ISO timestamp, tool_use_id). The transcript_path
     # is the only field that reliably identifies the IDE.
     #
-    # Majority vote wins for signals 1-3. If signal 4 fires, it may override.
+    # Signal 7: "timestamp" present while "tool_use_id" is ABSENT (decisive)
+    #   -> Copilot. Needed because VS Code 1.141.x stopped sending BOTH
+    #   tool_use_id and transcript_path, which left signals 0b/4 dead and made
+    #   every VS Code payload fall through to the 1-1 majority tie (-> ClaudeCode).
+    #   Census of 17104 recorded payloads (c:\temp\logs\prehook):
+    #     Claude Code CLI: "timestamp" NEVER present (0/8236),
+    #                      "tool_use_id" ALWAYS present (8236/8236)
+    #     VS Code Copilot: "timestamp" ALWAYS present, "tool_use_id" absent (1.141+)
+    #   So the pair is a clean inverse. Codex (turn_id) and DSH (dsh) also carry a
+    #   timestamp, but both also carry tool_use_id AND are caught by their own
+    #   decisive signals before this point.
+    #
+    # Majority vote wins for signals 1-3. If signal 4 or 7 fires, it may override.
     # Default tie goes to "ClaudeCode".
 
     # Signal 0: dsh field — unique to the DeepSeek Harness bridge (decisive)
@@ -107,6 +119,20 @@ function Detect-IDE {
         elseif ($InputObject.transcript_path -match '\.claude') {
             return "ClaudeCode"
         }
+    }
+
+    # Signal 7: "timestamp" present AND "tool_use_id" absent -> Copilot (decisive)
+    # VS Code 1.141.x dropped both tool_use_id and transcript_path, so signals
+    # 0b and 4 are dead for it and the signals 1-3 vote lands 1-1 (-> ClaudeCode).
+    # Claude Code CLI never sends "timestamp" and always sends "tool_use_id", so
+    # this pair cleanly separates the two. Checked by property PRESENCE (not
+    # truthiness) because ConvertFrom-Json turns an ISO timestamp into a
+    # System.DateTime and an epoch 0 would be falsy.
+    $hasTimestamp = $InputObject.PSObject.Properties.Name -contains "timestamp"
+    $hasToolUseId = ($InputObject.PSObject.Properties.Name -contains "tool_use_id") -and
+                    -not [string]::IsNullOrWhiteSpace([string]$InputObject.tool_use_id)
+    if ($hasTimestamp -and -not $hasToolUseId) {
+        return "Copilot"
     }
 
     # Fallback: majority vote of signals 1-3 (used when transcript_path is absent)

@@ -223,7 +223,22 @@ Key differences from Claude Code CLI:
 - Contains `transcript_path` with `GitHub.copilot-chat` in the path
 - `tool_use_id` ends with `__vscode-...`
 
-The hook's `Detect-IDE` function uses `transcript_path` to identify VS Code Copilot payloads.
+> **VS Code 1.141.x changed this payload.** It now sends only
+> `hook_event_name`, `session_id`, `timestamp`, `cwd`, `tool_name` and `tool_input` —
+> both `tool_use_id` and `transcript_path` are gone, and the tool names changed to
+> Claude Code's (`Bash`, `Read`, `Grep`, `Glob`, `Write`). The shape above is the
+> pre-1.141 payload, still handled for older installs.
+
+The hook's `Detect-IDE` function identifies VS Code Copilot by, in order:
+1. `tool_use_id` containing `__vscode-` (pre-1.141),
+2. `transcript_path` containing `GitHub.copilot-chat` (pre-1.141),
+3. `timestamp` **present** while `tool_use_id` is **absent** (1.141+).
+
+Rule 3 is safe because the two CLIs are exact inverses on those fields: Claude Code
+CLI never sends `timestamp` (0 of 8236 recorded payloads) and always sends
+`tool_use_id` (8236 of 8236), while VS Code Copilot always sends `timestamp`. Codex
+(`turn_id`) and the DeepSeek Harness (`dsh`) carry a timestamp too, but both also
+carry `tool_use_id` and are caught earlier by their own decisive signals.
 
 ### Step 2: Configure the Hook
 
