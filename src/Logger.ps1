@@ -192,6 +192,37 @@ function Format-LlmLogBlock {
         return "  LLM: [ $($LlmLog.sub_command_count) subcommand ] | in_scope=$($LlmLog.in_scope) | level=$lvl | reason=$scopeReason | verdict=$($LlmLog.verdict) effect=$($LlmLog.effect) latency_ms=$($LlmLog.latency_ms)`n"
     }
 
+    # ----------------------------------------------------------------
+    # R2 trusted/editable PRE-SKIP (2026-10-20 production-log defect): the skip
+    # path never calls the LLM, so the generic SENT/RECV/LOCAL triple rendered an
+    # EMPTY exchange - "LLM-RECV: '' (ms, recovered=False)" plus a blank local
+    # decision - which reads like a failed/empty round-trip. Render ONE
+    # self-documenting line instead: the reason the call was skipped, the
+    # per-index tiers, and the local decision that stands on its own.
+    # ----------------------------------------------------------------
+    if ("$($LlmLog.effect)" -eq 'llm-skipped-trusted-editable') {
+        $sReason = ''
+        if (Get-Member -InputObject $LlmLog -Name scope_reason -MemberType Properties -ErrorAction SilentlyContinue) { $sReason = "$($LlmLog.scope_reason)" }
+        $skipLine = "  LLM           : skipped (all tiers trusted/editable) | [ $($LlmLog.sub_command_count) subcommand ] | level=$($LlmLog.level) | reason=$sReason"
+        $skipTiers = @()
+        if ($LlmLog.tiers -and $LlmLog.tiers.Count -gt 0) {
+            for ($i = 0; $i -lt $LlmLog.tiers.Count; $i++) {
+                $t = "$($LlmLog.tiers[$i])"; if (-not $t) { $t = 'unlabeled' }
+                $skipTiers += "[$($i + 1)]=$t"
+            }
+            $skipLine += " | tiers: " + ($skipTiers -join ' ')
+        }
+        $skipLocal = "$($LlmLog.local_decision)"
+        if (-not $skipLocal) { $skipLocal = 'n/a' }
+        $skipLine += " | local=$skipLocal"
+        # The armed pair is skipped too (D14) - name it only when it exists.
+        if ($null -ne (Get-Member -InputObject $LlmLog -Name llm2 -MemberType Properties -ErrorAction SilentlyContinue)) {
+            $skipLine += " | pair skipped (comparison not applicable)"
+        }
+        $skipLine += " -> FINAL: $($Result.Decision)`n"
+        return $skipLine
+    }
+
     $mockMark = if ($LlmLog.mocked) { ' (mock)' } else { '' }
 
     # Pair (llm_third_opinion) helpers: the llm2 sub-object exists whenever the

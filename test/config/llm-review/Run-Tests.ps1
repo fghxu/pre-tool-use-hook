@@ -20,14 +20,17 @@
 #   - At the end a summary prints:  Total / Passed / Failed  and the list of
 #     failed check names (empty list = everything green).
 # THE CHECKS, IN THREE GROUPS (totals vary by -XmlPath; pre-flights always run)
-#   1. Pre-flight (16 checks, no XML):
+#   1. Pre-flight (18 checks, no XML):
 #      - LlmConfig-BadLevel / LlmConfig-BadType (2): invalid level / attributed
 #        verdicts type MUST throw (proves config validation is fail-closed).
 #      - LlmParser-* (12)   : unit checks for ConvertTo-LlmVerdict, the layered
 #        parser that turns raw LLM text into modifying|read-only|unusable.
-#      - LlmLog-* (2)       : unit checks for Format-LlmLogBlock - the LLM-SENT
+#      - LlmLog-* (4)       : unit checks for Format-LlmLogBlock - the LLM-SENT
 #        line and the out-of-scope one-liner both carry the sub-command count
-#        ([ N subcommand ]) so threshold tuning is auditable from the log.
+#        ([ N subcommand ]) so threshold tuning is auditable from the log; the
+#        out-of-scope line must also carry level + scope reason; and the R2
+#        trusted/editable pre-skip must render ONE self-documenting line
+#        (tiers + local decision), never an empty SENT/RECV/LOCAL triple.
 #   2. XML classify cases (16 checks, mode=classify, the default):
 #      Each <test-case> in test-cases.xml is run IN-PROCESS: the command goes
 #      through Invoke-Classify (the real local engine) and then Invoke-LlmReview
@@ -409,6 +412,29 @@ else {
     # The out-of-scope line must state the level and the scope reason.
     $reasonOk = ($line.Contains('level=complex_remote') -and $line.Contains('reason=complex but local-only'))
     Record-Result -Ok $reasonOk -Name "LlmLog-OutScopeReason" -Detail "out-of-scope one-liner missing level/reason: $line"
+
+    # ---- Pre-flight: R2 trusted/editable PRE-SKIP renders ONE self-documenting line
+    # (2026-10-20 production-log defect). The skip path never calls the LLM, so the
+    # generic SENT/RECV/LOCAL triple rendered an EMPTY exchange ('' raw, blank latency,
+    # "LLM-LOCAL: decision= ()") that reads like a failed/empty LLM round-trip. The
+    # block must instead name the skip, the tiers, and the local decision.
+    $skipLog = [PSCustomObject]@{
+        in_scope = $true; sub_command_count = 2; model = 'm'; timeout_ms = 30000
+        sent = @(); verdict = 'not_called'; raw_excerpt = $null; raw_full = $null
+        latency_ms = $null; recovered = $false; mocked = $false; indices = $null
+        local_decision = 'allow'; local_reason = 'rm (editable_delete)'
+        tiers = @('editable_delete', 'editable_delete')
+        flagged = @(); suppressed = @(); path_guard_denied = @()
+        effect = 'llm-skipped-trusted-editable'; level = 'all'; scope_reason = 'level all'
+    }
+    $skipBlock = Format-LlmLogBlock -Result ([PSCustomObject]@{ Decision = 'allow' }) -LlmLog $skipLog
+    $skipOk = ($skipBlock.Contains('skipped (all tiers trusted/editable') -and
+               $skipBlock.Contains('[1]=editable_delete') -and
+               $skipBlock.Contains('local=allow') -and
+               $skipBlock.Contains('-> FINAL: allow'))
+    Record-Result -Ok $skipOk -Name "LlmLog-SkipCompact" -Detail "skip one-liner missing markers: $skipBlock"
+    $skipNoFake = (-not $skipBlock.Contains('LLM-RECV') -and -not $skipBlock.Contains('LLM-SENT'))
+    Record-Result -Ok $skipNoFake -Name "LlmLog-SkipNoFakeExchange" -Detail "skip path still renders the empty SENT/RECV triple: $skipBlock"
 }
 
 # =============================================================================
@@ -817,6 +843,24 @@ foreach ($tc in $testCases) {
         if (-not $sentOk) {
             $ok = $false
             $detail += " | sent list missing '$wantSent' (sent: $(($sentItems -join ' | ')))"
+        }
+    }
+    if ($ok -and $tc.HasAttribute('block-contains')) {
+        # 2026-10-20: assert markers in the human-readable reconciliation block that
+        # the run log AND the production .log would carry (Format-LlmLogBlock). A
+        # marker prefixed with '!' must be ABSENT (guards against rendering a fake
+        # empty LLM exchange for a path that never called the LLM).
+        $blockText = ''
+        if ($llmLog -and (Get-Command Format-LlmLogBlock -ErrorAction SilentlyContinue)) {
+            $blockText = Format-LlmLogBlock -Result $result -LlmLog $llmLog
+        }
+        foreach ($marker in ($tc.GetAttribute('block-contains') -split ';')) {
+            $m = $marker.Trim(); if (-not $m) { continue }
+            if ($m.StartsWith('!')) {
+                $bad = $m.Substring(1)
+                if ($blockText.Contains($bad)) { $ok = $false; $detail += " | block unexpectedly contains '$bad'" }
+            }
+            elseif (-not $blockText.Contains($m)) { $ok = $false; $detail += " | block missing '$m'" }
         }
     }
     # ------------------------------------------------------------------

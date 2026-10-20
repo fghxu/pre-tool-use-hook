@@ -281,6 +281,13 @@ veto-suppressed, so the LLM's answer cannot change the decision either way; skip
 blocks immune to gateway outages. Mixed blocks (any other tier present) keep today's behavior:
 the LLM is consulted and an LLM-DOWN still forces `ask`.
 
+**Log rendering of the skip (2026-10-20):** the skip path stamps `tiers` + the local decision
+into the log object (records-visible) but leaves `sent` empty (nothing was sent). The human
+`.log` renders ONE self-documenting line instead of the SENT/RECV/LOCAL triple — the triple
+would otherwise show an empty exchange (`LLM-RECV: '' ... verdict=not_called`, blank local
+decision) that reads like a failed call:
+`LLM           : skipped (all tiers trusted/editable) | [ N subcommand ] | level=... | reason=... | tiers: [1]=... [2]=... | local=<decision> [| pair skipped (comparison not applicable)] -> FINAL: <decision>`.
+
 Flags on sub-commands that are already `ask` locally (modifying, unregistered_verb, unregistered_static, unregistered, unclassified, unknown_domain) cannot cause a veto because `LLM never downgrades` — the local decision is already `ask`, so LLM agreement is moot.
 
 ## AST Arbiter Tier Stamp-Back

@@ -247,12 +247,16 @@
 
     <!-- R2 pre-skip: EVERY sub-command trusted (tool-a/tool-b in trusted_programs)
          => the PAIR is skipped too (LLM2 fires iff LLM1 fires) and the skip is
-         SELF-DOCUMENTED: compare='skipped-trusted-editable' (D14 - NOT ll2-absence). -->
+         SELF-DOCUMENTED: compare='skipped-trusted-editable' (D14 - NOT ll2-absence).
+         2026-10-20: the .log block must ALSO be the compact self-documenting skip
+         line (no fake empty SENT/RECV/LOCAL triple), and the armed pair's skip note
+         must still be visible in it. -->
     <test-case expected="allow" category="LT3-14-R2Skip-Note"
                level="complex_commands" min="2"
                in-scope="true" verdict="not_called" effect="llm-skipped-trusted-editable"
-               llm2-present="true" llm2-compare="skipped-trusted-editable">
-      <description>tool-a.exe ; tool-b.exe - all-trusted block: pair skipped, compare records it</description>
+               llm2-present="true" llm2-compare="skipped-trusted-editable"
+               block-contains="skipped (all tiers trusted/editable);[1]=trusted_program;[2]=trusted_program;local=allow;-> FINAL: allow;pair skipped;!LLM-RECV">
+      <description>tool-a.exe ; tool-b.exe - all-trusted block: pair skipped, compare records it, log line self-documents</description>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[tool-a.exe ; tool-b.exe]]></copilot-command>
     </test-case>

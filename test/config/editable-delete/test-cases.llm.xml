@@ -81,9 +81,15 @@
     <!-- L6: section 4.6 skip - an ALL-editable block (every sub-command tier in the
          trusted/editable set) skips the LLM call entirely: no HTTP call, verdict
          not_called, effect llm-skipped-trusted-editable. RED today (the LLM is consulted
-         and the merge runs instead of skipping). -->
-    <test-case expected="allow" category="LlmED-L6-SkipAllEditable" level="all" mock="read-only" verdict="not_called" effect="llm-skipped-trusted-editable" reason="section 4.6: every sub-command is editable_delete, so the LLM call is skipped entirely (immune to gateway outages)">
-      <description>L6: rm /tmp/a ; rm /tmp/b - all-editable block; LLM skipped</description>
+         and the merge runs instead of skipping).
+         2026-10-20 follow-up (production-log defect): the skip path returned before
+         stamping sent/tiers/local_decision, so the .log rendered an EMPTY LLM exchange
+         ("LLM-RECV: '' ... verdict=not_called" + "LLM-LOCAL: decision= ()") that reads
+         like a failed call. The block must instead be ONE self-documenting line naming
+         the skip, the per-index tiers, and the local decision - and must NOT render the
+         fake SENT/RECV/LOCAL triple. -->
+    <test-case expected="allow" category="LlmED-L6-SkipAllEditable" level="all" mock="read-only" verdict="not_called" effect="llm-skipped-trusted-editable" reason="section 4.6: every sub-command is editable_delete, so the LLM call is skipped entirely (immune to gateway outages)" block-contains="skipped (all tiers trusted/editable);[1]=editable_delete;[2]=editable_delete;local=allow;-> FINAL: allow;!LLM-RECV;!LLM-SENT">
+      <description>L6: rm /tmp/a ; rm /tmp/b - all-editable block; LLM skipped, log self-documents the skip</description>
       <tool-name>Bash</tool-name>
       <copilot-command><![CDATA[rm /tmp/a ; rm /tmp/b]]></copilot-command>
     </test-case>

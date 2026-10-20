@@ -1139,6 +1139,13 @@ function Invoke-LlmReview {
         }
         if ($allTrustedEditable) {
             $log.effect = 'llm-skipped-trusted-editable'
+            # 2026-10-20: stamp the tiers + the local decision even though nothing
+            # is sent. Without them the records/human log showed a blank local
+            # decision on the skip path, which reads like a failed LLM round-trip.
+            # $log.sent stays EMPTY - nothing was sent to the LLM.
+            $log.tiers          = @($scope.SubCommands | ForEach-Object { "$($_.Tier)" })
+            $log.local_decision = $ClassifyResult.Decision
+            $log.local_reason   = "$($ClassifyResult.Reason)"
             # D14: the pair is skipped too (LLM2 fires iff LLM1 fires) and the
             # skip is SELF-DOCUMENTED in records - NOT encoded by llm2 absence.
             if ($pairArmed) {

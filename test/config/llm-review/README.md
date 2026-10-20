@@ -15,10 +15,12 @@ pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/
 pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.xml            # phase-I file (regression)
 ```
 
-- **Default (small)**: 50 checks — 22 phase-II cases (`test-cases.p2.small.xml`:
-  21 classify + 1 fullpipe) plus 16 shared pre-flights (config rejection ×2,
-  12 `ConvertTo-LlmVerdict` parser units, 2 `Format-LlmLogBlock` sub-command-
-  count units). Wrapper-inner dedup cases (2026-10-19):
+- **Default (small)**: 52 checks — 22 phase-II cases (`test-cases.p2.small.xml`:
+  21 classify + 1 fullpipe) plus 18 shared pre-flights (config rejection ×2,
+  12 `ConvertTo-LlmVerdict` parser units, 4 `Format-LlmLogBlock` units:
+  sub-command-count ×2, out-of-scope level/reason, and the 2026-10-20
+  trusted/editable pre-skip compact-line pair — the skip must render ONE
+  self-documenting line, never an empty SENT/RECV/LOCAL triple). Wrapper-inner dedup cases (2026-10-19):
   `P2-WrapperSimpleInnerSingleSub-*` pin that a wrapper whose inner cannot be
   split further counts as ONE sub-command (no LLM consult below `min`), and
   `P2-WrapperCompoundInnerKeepsUnitAndParts` pins that compound inners keep
@@ -51,8 +53,10 @@ network. These suites are deliberately **separate** from the main suites
 
 Per-case XML attributes: `level`, `min`, `enabled`, `mock`, `in-scope`,
 `verdict`, `effect`, `strictness`, `attributed`, `flagged`, `suppressed`,
-`reason-contains`, `reason-not-contains`, `log-contains`, `mode` (see the
-header comment in `Run-Tests.ps1`).
+`reason-contains`, `reason-not-contains`, `log-contains`, `block-contains`
+(classify mode: markers — `!`-prefixed = must be ABSENT — asserted against the
+`Format-LlmLogBlock` output for the case), `mode` (see the header comment in
+`Run-Tests.ps1`).
 
 **Per-run reconciliation logs**: every run writes
 `c:\temp\pretoolhook-llm-review-testlogs\llm-review-run-<timestamp>.log` with
