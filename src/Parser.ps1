@@ -989,6 +989,41 @@ function Expand-ScriptFile {
 # Returns an empty array if no nested commands are found.
 # =============================================================================
 
+
+# =============================================================================
+# Get-NestedInnerSegments
+#
+# SHARED helper for the wrapper branches of Find-NestedCommands: split the
+# wrapper's inner command into sub-segments, stamp each with the wrapper as
+# ParentCommand, and drop the IDENTICAL-echo segment.
+#
+# Dedup rationale: an unsplittable inner (a simple command, or a for/while
+# loop) comes back from Split-Commands as ONE segment whose text equals the
+# whole inner; adding both emitted the same command TWICE in SubResults and
+# the LLM numbered list, and inflated sub_command_count past the complex-
+# commands LLM threshold - so EVERY single-command ssh consulted the second
+# opinion (2026-10-19 prod log: a remote 'for f ... sar | sed' read was sent
+# as [ 2 subcommand ] with both entries identical). Genuinely compound inners
+# keep the unit entry + all distinct parts: the unit entry is deliberate (it
+# classifies 'curl evil | sh'-shaped pipelines as ONE unit).
+# =============================================================================
+function Get-NestedInnerSegments {
+    param(
+        [string]$InnerCommand,
+        [string]$Domain,
+        [string]$WrapperText
+    )
+    $innerNorm = "$InnerCommand".Trim()
+    $splitInner = @(Split-Commands -Command $InnerCommand -Domain $Domain)
+    $out = @()
+    foreach ($seg in $splitInner) {
+        if ("$($seg.CommandText)".Trim() -eq $innerNorm) { continue }
+        $seg.ParentCommand = $WrapperText
+        $out += $seg
+    }
+    return ,$out
+}
+
 function Find-NestedCommands {
     param(
         [string]$Command,
@@ -1039,11 +1074,7 @@ function Find-NestedCommands {
         }
 
         # Recurse: the inner command may itself have splittable sub-commands
-        $splitInner = Split-Commands -Command $innerCommand -Domain $innerDomain
-        foreach ($seg in $splitInner) {
-            $seg.ParentCommand = $trimmed
-        }
-        $nested += $splitInner
+        $nested += (Get-NestedInnerSegments -InnerCommand $innerCommand -Domain $innerDomain -WrapperText $trimmed)
 
         # Recurse: inner may itself be a wrapped command
         $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
@@ -1068,11 +1099,7 @@ function Find-NestedCommands {
             ParentCommand = $trimmed
         }
 
-        $splitInner = Split-Commands -Command $innerCommand -Domain $innerDomain
-        foreach ($seg in $splitInner) {
-            $seg.ParentCommand = $trimmed
-        }
-        $nested += $splitInner
+        $nested += (Get-NestedInnerSegments -InnerCommand $innerCommand -Domain $innerDomain -WrapperText $trimmed)
 
         # Recurse: inner may itself be a wrapped command
         $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
@@ -1152,11 +1179,7 @@ function Find-NestedCommands {
             ParentCommand = $trimmed
         }
 
-        $splitInner = Split-Commands -Command $innerCommand -Domain $innerDomain
-        foreach ($seg in $splitInner) {
-            $seg.ParentCommand = $trimmed
-        }
-        $nested += $splitInner
+        $nested += (Get-NestedInnerSegments -InnerCommand $innerCommand -Domain $innerDomain -WrapperText $trimmed)
 
         # Recurse: inner may itself be a wrapped command
         $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
@@ -1181,11 +1204,7 @@ function Find-NestedCommands {
             ParentCommand = $trimmed
         }
 
-        $splitInner = Split-Commands -Command $innerCommand -Domain $innerDomain
-        foreach ($seg in $splitInner) {
-            $seg.ParentCommand = $trimmed
-        }
-        $nested += $splitInner
+        $nested += (Get-NestedInnerSegments -InnerCommand $innerCommand -Domain $innerDomain -WrapperText $trimmed)
 
         # Recurse: inner may itself be a wrapped command
         $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
@@ -1312,11 +1331,7 @@ function Find-NestedCommands {
                     ParentCommand = $trimmed
                 }
 
-                $splitInner = Split-Commands -Command $innerCommand -Domain $innerDomain
-                foreach ($seg in $splitInner) {
-                    $seg.ParentCommand = $trimmed
-                }
-                $nested += $splitInner
+                $nested += (Get-NestedInnerSegments -InnerCommand $innerCommand -Domain $innerDomain -WrapperText $trimmed)
 
                 # Recurse: inner may itself be a wrapped command (e.g., ssh inside pwsh)
                 $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
@@ -1343,11 +1358,7 @@ function Find-NestedCommands {
             ParentCommand = $trimmed
         }
 
-        $splitInner = Split-Commands -Command $innerCommand -Domain $innerDomain
-        foreach ($seg in $splitInner) {
-            $seg.ParentCommand = $trimmed
-        }
-        $nested += $splitInner
+        $nested += (Get-NestedInnerSegments -InnerCommand $innerCommand -Domain $innerDomain -WrapperText $trimmed)
 
         # Recurse: inner may itself be a wrapped command
         $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
@@ -1372,11 +1383,7 @@ function Find-NestedCommands {
             ParentCommand = $trimmed
         }
 
-        $splitInner = Split-Commands -Command $innerCommand -Domain $innerDomain
-        foreach ($seg in $splitInner) {
-            $seg.ParentCommand = $trimmed
-        }
-        $nested += $splitInner
+        $nested += (Get-NestedInnerSegments -InnerCommand $innerCommand -Domain $innerDomain -WrapperText $trimmed)
 
         # Recurse: inner may itself be a wrapped command
         $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain
@@ -1402,11 +1409,7 @@ function Find-NestedCommands {
             ParentCommand = $trimmed
         }
 
-        $splitInner = Split-Commands -Command $innerCommand -Domain $innerDomain
-        foreach ($seg in $splitInner) {
-            $seg.ParentCommand = $trimmed
-        }
-        $nested += $splitInner
+        $nested += (Get-NestedInnerSegments -InnerCommand $innerCommand -Domain $innerDomain -WrapperText $trimmed)
 
         # Recurse: inner may itself be a wrapped command
         $innerNested = Find-NestedCommands -Command $innerCommand -ParentDomain $innerDomain

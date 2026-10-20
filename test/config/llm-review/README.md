@@ -15,9 +15,14 @@ pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/
 pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.xml            # phase-I file (regression)
 ```
 
-- **Default (small)**: 26 checks — 10 phase-II cases (`test-cases.p2.small.xml`)
-  plus 16 shared pre-flights (config rejection ×2, 12 `ConvertTo-LlmVerdict`
-  parser units, 2 `Format-LlmLogBlock` sub-command-count units).- **Large (opt-in)**: 80 checks — 64 cases (`test-cases.p2.large.xml`) in seven
+- **Default (small)**: 50 checks — 22 phase-II cases (`test-cases.p2.small.xml`:
+  21 classify + 1 fullpipe) plus 16 shared pre-flights (config rejection ×2,
+  12 `ConvertTo-LlmVerdict` parser units, 2 `Format-LlmLogBlock` sub-command-
+  count units). Wrapper-inner dedup cases (2026-10-19):
+  `P2-WrapperSimpleInnerSingleSub-*` pin that a wrapper whose inner cannot be
+  split further counts as ONE sub-command (no LLM consult below `min`), and
+  `P2-WrapperCompoundInnerKeepsUnitAndParts` pins that compound inners keep
+  the unit entry + parts.- **Large (opt-in)**: 80 checks — 64 cases (`test-cases.p2.large.xml`) in seven
 - **Override suite (2026-10-16, `normal_override_llm`)**:
   `pwsh -NoProfile -File test/config/llm-review/Run-Tests.ps1 -XmlPath test/config/llm-review/test-cases.override.xml -ConfigPath test/config/llm-review/config.ov.json`
   = 60 checks (32 cases, `OvAllow`/`OvAsk`). ALWAYS pass `-ConfigPath config.ov.json`

@@ -112,4 +112,105 @@
 
   </category-group>
 
+  <!-- =================================================================== -->
+  <!-- ShellLoopBodyFailClosed (2026-10-19 production incident).            -->
+  <!--                                                                      -->
+  <!-- Bug: Resolver.ps1 Step 2.5c blanket-allowed any linux/dos statement  -->
+  <!-- whose FIRST WORD is a shell flow-control keyword ('for', 'while',    -->
+  <!-- 'until', 'if', 'case', 'select', then', 'else', 'elif') WITHOUT      -->
+  <!-- resolving the body. Multi-line scripts were safe (Split-Commands     -->
+  <!-- classifies per line) and well-formed one-liners were safe ('; do X'  -->
+  <!-- splits into a 'do X' fragment the existing do-handler recurses into) -->
+  <!-- but a loop written WITHOUT ';' separators stays ONE unit, reached     -->
+  <!-- Resolve-Command whole, and was allowed as 'for (shell flow-control   -->
+  <!-- keyword)' with the body commands never classified.                   -->
+  <!-- Source: production log 2026-10-19 21:07 - ssh-wrapped mangled loop   -->
+  <!-- 'for f in /var/log do getover -u -f "$f | seedy -n "1p:$p"; done'    -->
+  <!-- allowed locally as read-only although getover/seedy are unknown.     -->
+  <!-- Fix: 2.5c unwraps the body of compound openers and re-resolves every  -->
+  <!-- body statement; then/else/elif fragments get the do-style body check.-->
+  <!-- =================================================================== -->
+  <category-group name="ShellLoopBodyFailClosed">
+
+    <!-- Test 1: Exact production repro (2026-10-19 21:07 log). Unknown body
+         commands inside a whole-unit for loop must fail closed to ask. -->
+    <test-case expected="ask" reason="unknown body commands inside a whole-unit for loop fail closed" category="ShellLoopBodyFailClosed" reason-contains="unknown command">
+      <description>ssh-wrapped mangled for-loop with unknown body commands getover/seedy (exact log repro; pre-fix allowed as 'for (shell flow-control keyword)')</description>
+      <copilot-command><![CDATA[ssh -i "c:\temp.a.pem" -o batchmode=yes -o connectiontimeout=10 user@server 'for f in /var/log do getover -u -f "$f | seedy -n "1p:$p"; done"']]></copilot-command>
+    </test-case>
+
+    <!-- Test 2: Modifying body (rm) inside a no-semicolon while loop. -->
+    <test-case expected="ask" reason="modifying body inside a no-semicolon while loop fails closed" category="ShellLoopBodyFailClosed" reason-contains="rm">
+      <description>while loop without ';' separators whose body runs rm -f (pre-fix allowed)</description>
+      <copilot-command><![CDATA[while read f do rm -f "$f" done]]></copilot-command>
+    </test-case>
+
+    <!-- Test 3: Unknown body inside a no-semicolon for loop (local, no ssh wrapper). -->
+    <test-case expected="ask" reason="unknown body inside a no-semicolon for loop fails closed" category="ShellLoopBodyFailClosed" reason-contains="unknown command">
+      <description>for loop without ';' separators whose body runs an unknown command (pre-fix allowed)</description>
+      <copilot-command><![CDATA[for f in /etc/* do weirdcmd $f done]]></copilot-command>
+    </test-case>
+
+    <!-- Test 4: One-line if/else split into 'then cat ...' / 'else getover ...'
+         fragments - the else arm body was blanket-allowed (do-style check was
+         missing for then/else/elif). -->
+    <test-case expected="ask" reason="unknown command in the else arm of a one-line if fails closed" category="ShellLoopBodyFailClosed" reason-contains="unknown command">
+      <description>if/then/else one-liner with an unknown command in the else arm (pre-fix allowed via 'else' keyword)</description>
+      <copilot-command><![CDATA[if [ -f /tmp/x ]; then cat /tmp/x; else getover /tmp/x; fi]]></copilot-command>
+    </test-case>
+
+    <!-- Test 5: Guard - a whole-unit loop whose body is ALL read-only still
+         allows, and the sub-result reason names the checked body. -->
+    <test-case expected="allow" reason="read-only body inside a whole-unit loop still allows" category="ShellLoopBodyFailClosed" subresult-reason-contains="safe body">
+      <description>for loop without ';' separators, body sar -u -f (read-only) => allow with 'safe body' sub-result reason</description>
+      <copilot-command><![CDATA[for f in /var/log/sa do sar -u -f "$f" done]]></copilot-command>
+    </test-case>
+
+    <!-- Test 6: Guard - the well-formed one-liner path ('; do X' fragment via
+         the existing do-handler) is unaffected. Passes pre AND post fix. -->
+    <test-case expected="allow" reason="read-only body via the do-fragment path still allows" category="ShellLoopBodyFailClosed">
+      <description>well-formed one-line for loop with read-only body cat (do-fragment path unchanged)</description>
+      <copilot-command><![CDATA[for f in /etc/*; do cat "$f"; done]]></copilot-command>
+    </test-case>
+
+    <!-- Test 7: POSIX subshell '(CMD)' - a fragment starting with '(' was
+         blanket-allowed as a 'case pattern arm' (2.5b), but a subshell
+         EXECUTES its contents. Same class as the loop-body fix.
+         NOTE: target is /opt/app, NOT /tmp - a literal temp path would hit
+         the intended Step 0g editable-delete allow (see T26) and mask 2.5b. -->
+    <test-case expected="ask" reason="modifying command inside a POSIX subshell fails closed" category="ShellLoopBodyFailClosed" reason-contains="rm">
+      <description>(rm -rf /opt/app) subshell with modifying content (pre-fix allowed as case pattern arm)</description>
+      <copilot-command><![CDATA[(rm -rf /opt/app)]]></copilot-command>
+    </test-case>
+
+    <!-- Test 8: Subshell as a later segment of a compound statement. -->
+    <test-case expected="ask" reason="modifying subshell segment of a compound statement fails closed" category="ShellLoopBodyFailClosed" reason-contains="rm">
+      <description>echo hi; (rm -rf /opt/app) - subshell second segment (pre-fix allowed)</description>
+      <copilot-command><![CDATA[echo hi; (rm -rf /opt/app)]]></copilot-command>
+    </test-case>
+
+    <!-- Test 9: Subshell with unknown command inside. -->
+    <test-case expected="ask" reason="unknown command inside a subshell fails closed" category="ShellLoopBodyFailClosed" reason-contains="unknown command">
+      <description>( getover x ) subshell with unknown command (pre-fix allowed)</description>
+      <copilot-command><![CDATA[( getover x )]]></copilot-command>
+    </test-case>
+
+    <!-- Test 10: Guard - subshell with all-read-only content still allows,
+         and names the checked body in the sub-result reason. -->
+    <test-case expected="allow" reason="read-only subshell content still allows" category="ShellLoopBodyFailClosed" subresult-reason-contains="safe body">
+      <description>(cat /etc/hosts; uname -a) subshell with read-only content => allow with 'safe body' sub-result reason</description>
+      <copilot-command><![CDATA[(cat /etc/hosts; uname -a)]]></copilot-command>
+    </test-case>
+
+    <!-- Test 11: Guard - genuine case-pattern arms (no interior whitespace)
+         keep the 2.5b allow. Passes pre AND post fix. -->
+    <test-case expected="allow" reason="case pattern arm without interior whitespace still allows" category="ShellLoopBodyFailClosed">
+      <description>(*) and ("error") fragments stay case-pattern-arm allows (multi-line case split)</description>
+      <copilot-command><![CDATA[case "$x" in
+    (*) echo hi ;;
+esac]]></copilot-command>
+    </test-case>
+
+  </category-group>
+
 </commands>

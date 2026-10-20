@@ -82,6 +82,45 @@ function Get-EffectiveStrictness {
     return $g
 }
 
+# =============================================================================
+# Resolve-ShellBody
+#
+# Shared fail-closed body classifier for shell structural fragments
+# (Resolver steps 2.5b/2.5c). A fragment keyword/prefix can carry REAL
+# commands ('for ... do BODY done', 'then BODY', '( BODY )' subshells);
+# this splits the body text into segments, resolves each, and returns:
+#   - an ASK result naming the first offender ('... (inside LABEL)')
+#     when any body segment asks;
+#   - an ALLOW result ('LABEL (shell fragment with safe body)') when
+#     every segment allows;
+#   - $null when the body is empty (caller keeps its structural allow).
+# Nested loops/conditionals stay whole and re-enter 2.5c, so the unwrap
+# recurses; the text strictly shrinks per level, guaranteeing termination.
+# =============================================================================
+function Resolve-ShellBody {
+    param(
+        [string]$Body,
+        [string]$Domain,
+        [string]$Label,
+        [Parameter(Mandatory = $true)][PSCustomObject]$Config
+    )
+    $trim = "$Body".Trim()
+    if ($trim -eq '') { return $null }
+    $segs = @(Split-Commands -Command $trim -Domain $Domain)
+    foreach ($seg in $segs) {
+        $segText = "$($seg.CommandText)".Trim()
+        if (-not $segText) { continue }
+        # A structural fragment left over by the split (done/fi/then/else)
+        # is inert and resolves to its own allow; a nested loop or
+        # conditional chunk re-enters step 2.5c.
+        $r = Resolve-Command -Command $segText -Domain $seg.Domain -Config $Config
+        if ($r.Decision -eq 'ask') {
+            return New-ResolutionResult -Decision "ask" -Reason "$($r.Reason) (inside $Label)" -MatchedPattern $r.MatchedPattern -Risk $r.Risk
+        }
+    }
+    return New-ResolutionResult -Decision "allow" -Reason "$Label (shell fragment with safe body)" -MatchedPattern $Label -Risk "none"
+}
+
 function Resolve-Command {
     <#
     .SYNOPSIS
@@ -840,23 +879,82 @@ function Resolve-Command {
 
         # 2.5b: Case pattern arms (e.g., *"error"*), "pattern"), *) etc.)
         if ($firstWord -match '^(\*|"|\()') {
+            # '('-leading fragments are usually POSIX SUBSHELLS, not case
+            # arms: '(rm -rf x)' EXECUTES rm. A genuine pattern arm carries
+            # no interior whitespace ('(*)', '("error")'); anything else is
+            # subshell-shaped and gets its contents classified fail-closed
+            # (2026-10-19 fix, same incident class as 2.5c below).
+            if ($firstWord.StartsWith('(')) {
+                $subInner = (($Command.Trim() -replace '^\(', '') -replace '\)$', '')
+                if ($subInner -match '\s') {
+                    $subResult = Resolve-ShellBody -Body $subInner -Domain $Domain -Label '(...)' -Config $Config
+                    if ($null -ne $subResult) { return $subResult }
+                }
+            }
             return New-ResolutionResult -Decision "allow" -Reason "$firstWord (case pattern arm)" -MatchedPattern $firstWord -Risk "none"
         }
 
         # 2.5c: Shell flow-control keywords
         if ($firstWord -in $shellFlowKeywords) {
-            # For 'do', check if a modifier command follows
-            if ($firstWord -eq 'do') {
-                $afterDo = $Command.Trim() -replace '^do\s+', ''
-                if ($afterDo -and $afterDo -ne $Command.Trim() -and $afterDo -ne 'do') {
-                    # Recurse: re-classify the command after 'do'
-                    $innerResult = Resolve-Command -Command $afterDo -Domain $Domain -Config $Config
-                    if ($innerResult.Decision -eq 'ask') {
-                        return New-ResolutionResult -Decision "ask" -Reason "$($innerResult.Reason) (inside do block)" -MatchedPattern $innerResult.MatchedPattern -Risk $innerResult.Risk
-                    }
-                    return New-ResolutionResult -Decision "allow" -Reason "$firstWord/$($innerResult.Reason) (shell keyword with safe body)" -MatchedPattern $firstWord -Risk "none"
+            # BODY EXTRACTION (2026-10-19 fix). Several of these keywords can
+            # carry REAL commands on the same fragment. The blanket allow at
+            # the bottom must only fire for the structural fragment itself
+            # (bare 'do', 'done', 'then', 'fi' ... left over after line/';'
+            # splitting), never for an unchecked body.
+            #
+            # Production incident 2026-10-19 21:07: a loop written WITHOUT
+            # ';' separators ('for f in /var/log do getover -u -f "$f | seedy
+            # -n "1p:$p"; done' inside an ssh wrapper) is kept as ONE unit by
+            # Split-Commands, reached this resolution whole, and was allowed
+            # as 'for (shell flow-control keyword)' - the unknown body
+            # commands were never classified. Well-formed one-liners were
+            # already safe ('; do X' splits into a 'do X' fragment the old
+            # do-handler recursed into); the whole-unit shape bypassed it.
+            $bodyText = ''
+
+            if ($firstWord -in @('do', 'then', 'else')) {
+                # do BODY / then BODY / else BODY - strip the keyword.
+                $bodyText = ($Command.Trim() -replace ("^$firstWord\s+"), '')
+            }
+            elseif ($firstWord -eq 'elif') {
+                # elif COND; then BODY - the body follows 'then' (the
+                # condition is a test; the arm is what executes).
+                if ($Command -match '(?s)\bthen\s+(.+)$') { $bodyText = $Matches[1] }
+            }
+            elseif ($firstWord -in @('for', 'while', 'until', 'select')) {
+                # for V in LIST do BODY done - body between the first 'do'
+                # and the trailing 'done'. A nested loop inside the body
+                # stays whole and re-enters this branch; the text shrinks
+                # every level, so the recursion terminates.
+                if ($Command -match '(?s)\bdo\s+(.+)$') {
+                    $bodyText = ($Matches[1] -replace '(?s)\s*;?\s*done["'']?\s*$', '')
                 }
             }
+            elseif ($firstWord -eq 'if') {
+                # if COND; then BODY (else BODY | elif C; then BODY)* fi -
+                # arm keywords become statement separators so every arm
+                # gets classified.
+                if ($Command -match '(?s)\bthen\s+(.+)$') {
+                    $bodyText = ($Matches[1] -replace '(?s)\s*;?\s*fi["'']?\s*$', '')
+                    $bodyText = ($bodyText -replace '\belif\b[^;]*;\s*then\b', ';')
+                    $bodyText = ($bodyText -replace '\belse\b', ';')
+                }
+            }
+            elseif ($firstWord -eq 'case') {
+                # case SUBJ in PAT) BODY;; ... esac - body after the first
+                # ')' (the first pattern arm); ';;' becomes a separator.
+                if ($Command -match '(?s)^[^)]*\)\s*(.+)$') {
+                    $bodyText = ($Matches[1] -replace '(?s)\s*;?\s*esac["'']?\s*$', '')
+                    $bodyText = ($bodyText -replace ';;', ';')
+                }
+            }
+
+            $bodyTrim = "$bodyText".Trim()
+            if ($bodyTrim -ne '' -and $bodyTrim -ne $firstWord -and $bodyTrim -ne $Command.Trim()) {
+                $bodyResult = Resolve-ShellBody -Body $bodyTrim -Domain $Domain -Label $firstWord -Config $Config
+                if ($null -ne $bodyResult) { return $bodyResult }
+            }
+
             return New-ResolutionResult -Decision "allow" -Reason "$firstWord (shell flow-control keyword)" -MatchedPattern $firstWord -Risk "none"
         }
 

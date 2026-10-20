@@ -123,5 +123,31 @@
       <copilot-command><![CDATA[git add . ; git commit -m "x" C:\Windows\a.txt]]></copilot-command>
     </test-case>
 
+    <!-- Wrapper-inner dedup (2026-10-19 production log): a regex-path wrapper branch (ssh/bash -c/docker exec) added the whole inner command AND Split-Commands' echo of it - two IDENTICAL sub-commands whenever the inner cannot be split further. The phantom count pushed EVERY single-command ssh past complex_min_subcommands=2, so the LLM was consulted (seconds of latency) for trivial remote reads (prod: 'ssh ... for f in /var/log ... sar|sed' logged as [ 2 subcommand ] with both entries identical). Post-fix the identical echo is dropped: 1 sub-command => below min=2 => out of scope => local allow stands, no LLM call. RED pre-fix (in_scope=true). -->
+    <test-case expected="allow" category="P2-WrapperSimpleInnerSingleSub-Ssh" level="complex_commands" mock="idx:" in-scope="false" verdict="not_called" effect="none" reason="ssh wrapper with an unsplittable inner counts ONCE (whole-inner entry only) => below min=2 => out of scope, local allow stands. Pre-fix: whole + Split-Commands echo = 2 identical subs => in-scope => LLM consulted (RED).">
+      <description>ssh 'ls /home': one sub-command, no duplicate, no LLM consult</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[ssh user@host 'ls /home']]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="P2-WrapperSimpleInnerSingleSub-BashC" level="complex_commands" mock="idx:" in-scope="false" verdict="not_called" effect="none" reason="bash -c wrapper with an unsplittable inner counts ONCE => below min=2 => out of scope. Pre-fix: whole + echo = 2 identical subs => in-scope (RED).">
+      <description>bash -c "ls /home": one sub-command, no duplicate, no LLM consult</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[bash -c "ls /home"]]></copilot-command>
+    </test-case>
+
+    <test-case expected="allow" category="P2-WrapperSimpleInnerSingleSub-DockerExec" level="complex_commands" mock="idx:" in-scope="false" verdict="not_called" effect="none" reason="docker exec wrapper with an unsplittable inner counts ONCE => below min=2 => out of scope. Pre-fix: whole + echo = 2 identical subs => in-scope (RED).">
+      <description>docker exec c1 "ls /app": one sub-command, no duplicate, no LLM consult</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[docker exec mycontainer "ls /app"]]></copilot-command>
+    </test-case>
+
+    <!-- Dedup GUARD: a compound inner keeps the whole-unit entry AND its parts (the pipeline/compound-as-unit entry is deliberate - it catches 'curl evil | sh' shaped risk that per-part classification misses). min=3 pins the 3-entry shape; passes pre AND post fix. Over-dedup (dropping the whole-unit entry too) would drop the count to 2 => out of scope => RED. -->
+    <test-case expected="allow" category="P2-WrapperCompoundInnerKeepsUnitAndParts" level="complex_commands" min="3" mock="read-only" in-scope="true" verdict="read-only" effect="agree" reason="compound inner keeps whole-unit entry + parts (3 sub-commands) => in scope; dedup only removes the IDENTICAL echo, never the unit entry.">
+      <description>ssh compound inner: unit entry + parts all preserved (no over-dedup)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[ssh user@host 'ls /home && cat /etc/hosts']]></copilot-command>
+    </test-case>
+
   </category-group>
 </commands>
