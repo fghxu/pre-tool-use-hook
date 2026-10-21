@@ -1,0 +1,64 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for workspace_roots (2026-10-21). Proves that a second folder opened in a VS Code multi-root workspace is treated EXACTLY like the CWD by the path policy: file writes / redirects / the strictness-gated path guard allow under it instead of asking. Only the VS Code (Copilot) IDE may use it. Roots are declared explicitly here (discover is [] to keep runs hermetic and filesystem independent).",
+
+  "global_modifying_strictness": "normal",
+
+  "_comment_log_file_path": "Keep hook records from the e2e spawn out of the real ~/.pretoolhook logs.",
+  "log_file_path": "c:\\temp\\pretoolhook-workspace-roots-testlogs\\",
+
+  "_comment_ask_notification": "Off: the e2e case intentionally produces an ask decision and must not toast.",
+  "ask_notification": { "enabled": false },
+
+  "_comment_workspace_roots": "CWD for every case is d:\\work. d:\\other-repo plays the role of the second VS Code workspace folder. discover is empty so no real %APPDATA% scan happens in tests - discovery is exercised against a fake storage root by Run-Tests.ps1.",
+  "workspace_roots": {
+    "enabled": true,
+    "discover": [],
+    "paths": [ "d:\\other-repo" ]
+  },
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash", "run_in_terminal", "Write" ],
+  "tool_name_mapping": {
+    "Bash": "tool_input.command",
+    "run_in_terminal": "tool_input.command"
+  },
+  "path_tool_mapping": { "Write": "tool_input.file_path" },
+  "ignore_tool_name": [],
+
+  "_comment_editable_paths": "Enabled (non-empty) on purpose: with editable_paths declared, Resolve-PathPolicy loses the 'normal mode without editable_paths' fallback allow, so a foreign absolute path really does ask. That is the exact production shape that made the reported 'path-guard denied' fire.",
+  "editable_paths": {
+    "linux": [ "/tmp/" ],
+    "windows": [ "C:\\\\temp\\\\" ]
+  },
+
+  "system_paths": {
+    "linux": [ "/etc", "/usr", "/bin", "/sbin" ],
+    "windows": [ "[A-Za-z]:\\\\Windows\\\\", "[A-Za-z]:\\\\Program Files\\\\" ]
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": [ "Get-*" ],
+      "modifying_verbs": { "high": [ "Remove-*" ], "medium": [], "low": [] },
+      "read_only": [
+        { "name": "Get-ChildItem", "patterns": [ "Get-ChildItem *" ], "description": "List directory contents" }
+      ],
+      "modifying": [
+        { "name": "Remove-Item", "patterns": [ "Remove-Item *" ], "risk": "high", "description": "Remove files/directories" }
+      ]
+    },
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": [ "ls *" ], "description": "List directory contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": [ "rm *" ], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

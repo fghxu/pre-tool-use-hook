@@ -110,8 +110,19 @@
       "D:\\\\temp\\\\"
     ]
   },
-  
-  
+
+
+  "workspace_roots": {
+    "description": "VS Code only. Extra folders treated exactly like the current working directory by the path policy, so every folder of a multi-root workspace can be used as the CWD (git -C <folder>, redirect targets, file tools). Claude Code / Codex / DSH ignore this block.",
+    "enabled": true,
+    "_comment_discover": "Sources auto-discovered per hook call. [\"vscode\"] scans %APPDATA%\\Code\\User\\workspaceStorage (+ Code - Insiders) and adopts the folders of the FIRST stored workspace that contains the payload CWD; an empty array disables discovery.",
+    "discover": [
+      "vscode"
+    ],
+    "paths": []
+  },
+
+
   "system_paths": {
     "description": "Parent directories where file writes (redirects and file tools) always require approval, in every strictness mode including loose. All subdirectories under these paths are also blocked.",
     "linux": [

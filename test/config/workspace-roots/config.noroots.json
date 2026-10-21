@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE (negative control) for workspace_roots. Identical to config.json except workspace_roots.enabled is false, so d:\\other-repo is a FOREIGN path again and every root-dependent decision goes back to ask. Proves the roots - not something else - are what flips the decision.",
+
+  "global_modifying_strictness": "normal",
+
+  "log_file_path": "c:\\temp\\pretoolhook-workspace-roots-testlogs\\",
+  "ask_notification": { "enabled": false },
+
+  "workspace_roots": {
+    "enabled": false,
+    "discover": [],
+    "paths": [ "d:\\other-repo" ]
+  },
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash", "run_in_terminal", "Write" ],
+  "tool_name_mapping": {
+    "Bash": "tool_input.command",
+    "run_in_terminal": "tool_input.command"
+  },
+  "path_tool_mapping": { "Write": "tool_input.file_path" },
+  "ignore_tool_name": [],
+
+  "editable_paths": {
+    "linux": [ "/tmp/" ],
+    "windows": [ "C:\\\\temp\\\\" ]
+  },
+
+  "system_paths": {
+    "linux": [ "/etc", "/usr", "/bin", "/sbin" ],
+    "windows": [ "[A-Za-z]:\\\\Windows\\\\", "[A-Za-z]:\\\\Program Files\\\\" ]
+  },
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": [ "Get-*" ],
+      "modifying_verbs": { "high": [ "Remove-*" ], "medium": [], "low": [] },
+      "read_only": [
+        { "name": "Get-ChildItem", "patterns": [ "Get-ChildItem *" ], "description": "List directory contents" }
+      ],
+      "modifying": [
+        { "name": "Remove-Item", "patterns": [ "Remove-Item *" ], "risk": "high", "description": "Remove files/directories" }
+      ]
+    },
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "ls", "patterns": [ "ls *" ], "description": "List directory contents" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": [ "rm *" ], "risk": "high", "description": "Remove files/directories" }
+      ]
+    }
+  }
+}

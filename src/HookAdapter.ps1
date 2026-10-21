@@ -1,10 +1,10 @@
-# HookAdapter.ps1 — IDE detection, I/O formatting, output shaping
+# HookAdapter.ps1 ? IDE detection, I/O formatting, output shaping
 # Dot-sourced by Hook.ps1
 
 function Detect-IDE {
     param([PSCustomObject]$InputObject)
 
-    # Edge case: null input object → default to "ClaudeCode"
+    # Edge case: null input object ? default to "ClaudeCode"
     if ($null -eq $InputObject) {
         [Console]::Error.WriteLine("HookAdapter: Warning: Detect-IDE received null InputObject, defaulting to ClaudeCode")
         return "ClaudeCode"
@@ -24,7 +24,7 @@ function Detect-IDE {
     #   Matches ISO 8601 with ms: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z?$' -> ClaudeCode
     #   Matches Unix epoch (10-13 digits): '^\d{10,13}$' -> Copilot
     #
-    # Signal 4: transcript_path (decisive when present — the KEY differentiator)
+    # Signal 4: transcript_path (decisive when present ? the KEY differentiator)
     #   Contains "GitHub.copilot-chat" -> Copilot (VS Code Copilot)
     #   Contains ".claude" -> ClaudeCode
     #
@@ -47,7 +47,7 @@ function Detect-IDE {
     # Majority vote wins for signals 1-3. If signal 4 or 7 fires, it may override.
     # Default tie goes to "ClaudeCode".
 
-    # Signal 0: dsh field — unique to the DeepSeek Harness bridge (decisive)
+    # Signal 0: dsh field ? unique to the DeepSeek Harness bridge (decisive)
     # The dsh-plugin-pretoolhook bridge wraps every intercepted tool call in a
     # Claude Code PreToolUse-shaped payload and stamps it with a `dsh` object
     # whose `harness` is exactly "DeepSeek Harness". No other IDE sends this
@@ -61,7 +61,7 @@ function Detect-IDE {
         }
     }
 
-    # Signal 0b: tool_use_id contains "__vscode-" → VS Code Copilot (decisive)
+    # Signal 0b: tool_use_id contains "__vscode-" ? VS Code Copilot (decisive)
     # VS Code Copilot shares Claude Code's protocol (PascalCase, ISO timestamp,
     # tool_use_id present) but its tool_use_id always ends with __vscode-<uuid>.
     # This must fire BEFORE the Codex signals to avoid misdetection.
@@ -70,12 +70,12 @@ function Detect-IDE {
         return "Copilot"
     }
 
-    # Signal 5: turn_id field — unique to Codex CLI (decisive)
+    # Signal 5: turn_id field ? unique to Codex CLI (decisive)
     if ($InputObject.PSObject.Properties.Name -contains "turn_id" -and $InputObject.turn_id) {
         return "Codex"
     }
 
-    # Signal 6: model field — unique to Codex CLI (decisive)
+    # Signal 6: model field ? unique to Codex CLI (decisive)
     if ($InputObject.PSObject.Properties.Name -contains "model" -and $InputObject.model) {
         return "Codex"
     }
@@ -109,7 +109,7 @@ function Detect-IDE {
         $signals.Copilot++
     }
 
-    # Signal 4: transcript_path — decisive when present
+    # Signal 4: transcript_path ? decisive when present
     # VS Code Copilot sets transcript_path to ...\GitHub.copilot-chat\transcripts\...
     # Claude Code sets it to ...\.claude\projects\...
     if ($InputObject.transcript_path) {
@@ -206,7 +206,7 @@ function Resolve-FieldPathLeaves {
 function Get-CommandFromInput {
     param([PSCustomObject]$RawInput, [PSCustomObject]$Config)
 
-    # Edge case: null RawInput → return null immediately
+    # Edge case: null RawInput ? return null immediately
     if ($null -eq $RawInput) {
         return $null
     }
@@ -214,7 +214,7 @@ function Get-CommandFromInput {
     $toolName = $RawInput.tool_name
     $mapping = $Config.tool_name_mapping
 
-    # Edge case: null/empty tool_name_mapping → skip mapping lookup
+    # Edge case: null/empty tool_name_mapping ? skip mapping lookup
     $mappingKeys = @()
     if ($mapping) {
         try {
@@ -245,7 +245,7 @@ function Get-CommandFromInput {
                 if ($trimmed.Length -gt 0) { return $trimmed }
             }
         }
-        # Fall through to heuristic — mapping path didn't yield a usable string
+        # Fall through to heuristic ? mapping path didn't yield a usable string
     }
 
     # Heuristic: walk the RawInput for any string field that looks like a command
@@ -316,10 +316,10 @@ function Format-Output {
     # The DeepSeek Harness bridge (dsh-plugin-pretoolhook) consumes the SAME
     # wrapper: it parses permissionDecision (allow|ask|deny) and the reason and
     # maps them onto DSH's tools/pre-execute decision. DSH supports ask natively
-    # (the approval seam routes it to the user), so ask stays ask — only Codex
-    # maps ask→deny.
+    # (the approval seam routes it to the user), so ask stays ask ? only Codex
+    # maps ask?deny.
     #
-    # Return PSCustomObject (NOT JSON string — caller will ConvertTo-Json)
+    # Return PSCustomObject (NOT JSON string ? caller will ConvertTo-Json)
 
     # Map internal "ask" to "deny" for Codex (Codex parses "ask" but errors on it)
     $decision = $ClassifyResult.Decision
@@ -334,4 +334,278 @@ function Format-Output {
             permissionDecisionReason = $ClassifyResult.Reason
         }
     }
+}
+
+# -----------------------------------------------------------------------------
+# VS Code multi-root workspace folders (the "workspace_roots" feature)
+#
+# VS Code hands the hook a single cwd, but one window can open several folders.
+# The folders of the workspace the cwd belongs to are treated exactly like the
+# cwd by the path policy. No other IDE has this concept, so every entry point
+# below is gated on $IDE -eq 'Copilot'.
+# -----------------------------------------------------------------------------
+
+function ConvertFrom-VsCodeUri {
+    <#
+    Converts a VS Code path string into a plain filesystem path:
+      file:///c%3A/git/cc/kimi -> c:\git\cc\kimi
+      file://server/share/x    -> \\server\share\x
+    A value without the file: scheme is passed through as a plain path.
+    Separators are unified and no trailing separator is added. Returns $null
+    for empty input.
+    #>
+    param([string]$Uri)
+
+    if ([string]::IsNullOrWhiteSpace($Uri)) { return $null }
+    $sep  = [System.IO.Path]::DirectorySeparatorChar
+    $text = $Uri.Trim()
+
+    if ($text -notmatch '^(?i)file:') {
+        return ($text -replace '[/\\]', $sep)
+    }
+
+    $rest = $text.Substring(5)
+    $rest = $rest -replace '^//', ''
+    try { $rest = [System.Uri]::UnescapeDataString($rest) } catch { }
+    $rest = $rest -replace '[/\\]', $sep
+
+    $esc = [regex]::Escape($sep)
+    if ($rest -match ('^' + $esc + '([A-Za-z]):(?:' + $esc + ')?(.*)$')) {
+        $drive = $Matches[1]
+        $tail  = $Matches[2]
+        if ($tail) { return ($drive + ':' + $sep + $tail) }
+        return ($drive + ':' + $sep)
+    }
+    if ($rest.StartsWith($sep)) { return $rest }
+    if (-not $rest) { return $null }
+    # file://server/share/x -> \\server\share\x
+    return ($sep + $sep + $rest)
+}
+
+function Get-VsCodeStorageEntryRoots {
+    <#
+    Reads ONE workspaceStorage entry and returns the folders it declares.
+    workspace.json holds either {"folder": <uri>} (single-folder window) or
+    {"workspace": <uri of a .code-workspace file>} (multi-root window). The
+    .code-workspace "folders" entries may be plain paths, file URIs, or objects
+    with a path/uri property; relative paths resolve against the workspace file.
+    Returns @() for empty/corrupt entries.
+    #>
+    param([string]$EntryDir)
+
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $none = @()
+    $roots = New-Object System.Collections.ArrayList
+
+    $metaFile = [System.IO.Path]::Combine($EntryDir, 'workspace.json')
+    if (-not [System.IO.File]::Exists($metaFile)) { return $none }
+
+    $meta = $null
+    try { $meta = ([System.IO.File]::ReadAllText($metaFile) | ConvertFrom-Json -ErrorAction Stop) }
+    catch { return $none }
+    if ($null -eq $meta) { return $none }
+
+    # PSObject.Properties lookups instead of Get-Member: this runs once per
+    # workspaceStorage entry on every hook call, and Get-Member is ~100x slower.
+    $props = $meta.PSObject.Properties
+    if ($props['folder']) {
+        $folder = $props['folder'].Value
+        if ($folder -isnot [string] -or -not $folder) { return $none }
+        $p = ConvertFrom-VsCodeUri -Uri $folder
+        if (-not $p) { return $none }
+        $null = $roots.Add($p)
+        return @($roots)
+    }
+
+    if (-not $props['workspace']) { return $none }
+    $wsUri = $props['workspace'].Value
+    if ($wsUri -isnot [string] -or -not $wsUri) { return $none }
+
+    $wsFile = ConvertFrom-VsCodeUri -Uri $wsUri
+    if (-not $wsFile -or -not [System.IO.File]::Exists($wsFile)) { return $none }
+
+    $doc = $null
+    try { $doc = ([System.IO.File]::ReadAllText($wsFile) | ConvertFrom-Json -ErrorAction Stop) }
+    catch { return $none }
+    if ($null -eq $doc) { return $none }
+    $folders = $doc.PSObject.Properties['folders']
+    if (-not $folders) { return $none }
+
+    $wsDir = [System.IO.Path]::GetDirectoryName($wsFile)
+    foreach ($f in @($folders.Value)) {
+        if ($null -eq $f) { continue }
+        $raw = $null
+        if ($f -is [string]) {
+            $raw = $f
+        }
+        else {
+            $fp = $f.PSObject.Properties
+            if ($fp['uri']) { $raw = $fp['uri'].Value }
+            elseif ($fp['path']) { $raw = $fp['path'].Value }
+        }
+        if ($raw -isnot [string] -or [string]::IsNullOrWhiteSpace($raw)) { continue }
+
+        $p = ConvertFrom-VsCodeUri -Uri $raw
+        if (-not $p) { continue }
+        if (-not [System.IO.Path]::IsPathRooted($p)) { $p = [System.IO.Path]::Combine($wsDir, $p) }
+        try { $p = [System.IO.Path]::GetFullPath($p) } catch { }
+        $null = $roots.Add(($p -replace '[/\\]', $sep))
+    }
+    return @($roots)
+}
+
+function Get-VsCodeWorkspaceRoots {
+    <#
+    Returns the folders of the VS Code workspace that CONTAINS $AnchorPath (or
+    the current location). Entries are scanned newest-first and the first
+    workspace that contains the anchor wins; unrelated workspaces are never
+    adopted, so an untracked folder yields @().
+    #>
+    param(
+        [string]$AnchorPath,
+        [string[]]$StorageRoots
+    )
+
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+
+    if (-not $StorageRoots -or @($StorageRoots).Count -eq 0) {
+        $StorageRoots = @()
+        if ($env:APPDATA) {
+            $StorageRoots += (Join-Path $env:APPDATA 'Code\User\workspaceStorage')
+            $StorageRoots += (Join-Path $env:APPDATA 'Code - Insiders\User\workspaceStorage')
+        }
+    }
+
+    $anchor = $AnchorPath
+    if (-not $anchor) { $anchor = (Get-Location).Path }
+    try { $anchor = [System.IO.Path]::GetFullPath($anchor) } catch { }
+    $anchor = $anchor -replace '[/\\]', $sep
+    if (-not $anchor.EndsWith($sep)) { $anchor += $sep }
+    $anchorNorm = $anchor.ToLowerInvariant()
+
+    # Recency keys are built as fixed-width-ticks + path strings so a plain
+    # [Array]::Sort (ordinal) orders them newest-first. DirectoryInfo is used
+    # because its LastWriteTimeUtc comes free with the enumeration buffer, and
+    # GetFiles('workspace.json') replaces a File.Exists + GetLastWriteTimeUtc
+    # pair - together they remove ~3 syscalls per entry, which is the bulk of
+    # the per-call cost on a machine with ~80 stored workspaces.
+    $keys = New-Object System.Collections.Generic.List[string]
+    foreach ($store in @($StorageRoots)) {
+        if (-not $store) { continue }
+        $children = $null
+        try { $children = (New-Object System.IO.DirectoryInfo($store)).GetDirectories() }
+        catch { continue }
+        foreach ($child in $children) {
+            # A window's recency is the newer of its folder and its
+            # workspace.json (rewriting that file may not bump the folder).
+            $stamp = $child.LastWriteTimeUtc
+            $metaFile = $null
+            try { $metaFile = $child.GetFiles('workspace.json') } catch { $metaFile = $null }
+            if ($metaFile -and $metaFile.Length -gt 0) {
+                $mt = $metaFile[0].LastWriteTimeUtc
+                if ($mt -gt $stamp) { $stamp = $mt }
+            }
+            $keys.Add($stamp.Ticks.ToString('D19') + '|' + $child.FullName)
+        }
+    }
+    if ($keys.Count -eq 0) { return @() }
+
+    $ordered = $keys.ToArray()
+    [System.Array]::Sort($ordered, [System.StringComparer]::Ordinal)
+
+    # Newest first: the window we are running in is almost always at the top, so
+    # the scan normally stops after one or two entries.
+    for ($i = $ordered.Length - 1; $i -ge 0; $i--) {
+        $roots = @(Get-VsCodeStorageEntryRoots -EntryDir $ordered[$i].Substring(20))
+        if ($roots.Count -eq 0) { continue }
+        foreach ($r in $roots) {
+            if (-not $r) { continue }
+            $rn = $r -replace '[/\\]', $sep
+            if (-not $rn.EndsWith($sep)) { $rn += $sep }
+            if ($anchorNorm.StartsWith($rn.ToLowerInvariant())) { return $roots }
+        }
+    }
+    return @()
+}
+
+function Add-WorkspaceRoots {
+    <#
+    Fills in $Config._workspaceRoots / _workspaceRootsNorm: the extra folders
+    that must be treated exactly like the cwd. Sources are the explicit
+    workspace_roots.paths list plus VS Code auto-discovery of the folders of the
+    workspace the cwd belongs to (workspace_roots.discover, default ["vscode"]).
+    Everything is opt-in (workspace_roots.enabled) and VS Code only. Returns the
+    normalized roots that were adopted.
+    #>
+    param(
+        $Config,
+        [string]$IDE,
+        [string[]]$ExtraRoots,
+        [string[]]$StorageRoots,
+        [string]$AnchorPath
+    )
+
+    if (-not $Config) { return @() }
+
+    if ($IDE -ne 'Copilot') { return @() }
+
+    $props = $Config.PSObject.Properties
+    $block = $null
+    if ($props['workspace_roots']) { $block = $props['workspace_roots'].Value }
+    if (-not $block) { return @() }
+
+    $blockProps = $block.PSObject.Properties
+    $enabled = $false
+    if ($blockProps['enabled']) { $enabled = [bool]$blockProps['enabled'].Value }
+    if (-not $enabled) { return @() }
+
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    $cwd = $null
+    if ($props['_cwd']) { $cwd = $props['_cwd'].Value }
+    $anchor = $AnchorPath
+    if (-not $anchor) { $anchor = $cwd }
+
+    $candidates = New-Object System.Collections.ArrayList
+    if ($blockProps['paths']) {
+        foreach ($p in @($blockProps['paths'].Value)) { $null = $candidates.Add($p) }
+    }
+    foreach ($p in @($ExtraRoots)) {
+        if ($p) { $null = $candidates.Add($p) }
+    }
+
+    $discover = @('vscode')
+    if ($blockProps['discover']) { $discover = @($blockProps['discover'].Value) }
+    foreach ($src in @($discover)) {
+        if ($src -isnot [string]) { continue }
+        if ($src -match '^(?i)vscode$') {
+            foreach ($r in @(Get-VsCodeWorkspaceRoots -AnchorPath $anchor -StorageRoots $StorageRoots)) {
+                $null = $candidates.Add($r)
+            }
+        }
+    }
+
+    $roots = New-Object System.Collections.ArrayList
+    $seen  = New-Object System.Collections.ArrayList
+    foreach ($c in @($candidates)) {
+        if ($c -isnot [string] -or [string]::IsNullOrWhiteSpace($c)) { continue }
+
+        $p = ConvertFrom-VsCodeUri -Uri $c
+        if (-not $p) { continue }
+        if (-not [System.IO.Path]::IsPathRooted($p)) {
+            if (-not $cwd) { continue }
+            $p = Join-Path $cwd $p
+        }
+        try { $p = [System.IO.Path]::GetFullPath($p) } catch { }
+        $p = $p -replace '[/\\]', $sep
+        if (-not $p.EndsWith($sep)) { $p += $sep }
+
+        $norm = $p.ToLowerInvariant()
+        if ($seen -contains $norm) { continue }
+        $null = $seen.Add($norm)
+        $null = $roots.Add($p)
+    }
+
+    $Config | Add-Member -MemberType NoteProperty -Name '_workspaceRoots' -Value @($roots) -Force
+    $Config | Add-Member -MemberType NoteProperty -Name '_workspaceRootsNorm' -Value @($seen) -Force
+    return @($roots)
 }

@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE (schema negative) for workspace_roots: 'paths' must be an array of non-empty strings. Here it is a bare string - a common typo that must throw instead of being treated as one root (which would silently widen the policy by one path).",
+
+  "global_modifying_strictness": "normal",
+  "ask_notification": { "enabled": false },
+
+  "workspace_roots": {
+    "enabled": true,
+    "discover": [],
+    "paths": "d:\\\\other-repo"
+  },
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "commands": {
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [ { "name": "ls", "patterns": [ "ls *" ], "description": "List directory contents" } ],
+      "modifying": [ { "name": "rm", "patterns": [ "rm *" ], "risk": "high", "description": "Remove files/directories" } ]
+    }
+  }
+}

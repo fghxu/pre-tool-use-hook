@@ -84,6 +84,18 @@ catch {
 $ide = Detect-IDE -InputObject $parsedInput
 
 # ----------------------------------------------------
+# Step 7b: Adopt the other folders of the VS Code workspace
+# (no-op unless workspace_roots.enabled; VS Code / Copilot only).
+# They are treated exactly like the cwd by the path policy.
+# ----------------------------------------------------
+try {
+    $null = Add-WorkspaceRoots -Config $config -IDE $ide
+}
+catch {
+    [Console]::Error.WriteLine("Hook: workspace_roots skipped: $($_.Exception.Message)")
+}
+
+# ----------------------------------------------------
 # Step 8: Classify the command through the full pipeline
 # ----------------------------------------------------
 $classifyResult = Invoke-Classify -RawInput $parsedInput -IDE $ide -Config $config

@@ -269,6 +269,41 @@ function Test-ConfigSchema {
         }
     }
 
+    # Validate optional "workspace_roots" block (VS Code multi-root workspace
+    # folders treated like the CWD). OPTIONAL: absent = feature off. When present
+    # it is validated even with enabled=false so bad values surface at load time.
+    $hasWorkRoots = Get-Member -InputObject $Config -Name 'workspace_roots' -MemberType NoteProperty -ErrorAction SilentlyContinue
+    if ($hasWorkRoots) {
+        $wr = $Config.workspace_roots
+        if ($wr -isnot [PSCustomObject] -and $wr -isnot [hashtable]) {
+            throw "Configuration validation failed: 'workspace_roots' must be an object"
+        }
+        if ((Get-Member -InputObject $wr -Name 'enabled' -MemberType NoteProperty -ErrorAction SilentlyContinue) -and
+            $wr.enabled -isnot [bool]) {
+            throw "Configuration validation failed: 'workspace_roots.enabled' must be a boolean"
+        }
+        if (Get-Member -InputObject $wr -Name 'discover' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            if ($wr.discover -isnot [array]) {
+                throw "Configuration validation failed: 'workspace_roots.discover' must be an array"
+            }
+            foreach ($src in $wr.discover) {
+                if ($src -isnot [string] -or $src -notmatch '^(?i)vscode$') {
+                    throw "Configuration validation failed: 'workspace_roots.discover' contains an unsupported source '$src' (supported: vscode)"
+                }
+            }
+        }
+        if (Get-Member -InputObject $wr -Name 'paths' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+            if ($wr.paths -isnot [array]) {
+                throw "Configuration validation failed: 'workspace_roots.paths' must be an array"
+            }
+            foreach ($p in $wr.paths) {
+                if ($p -isnot [string] -or [string]::IsNullOrWhiteSpace($p)) {
+                    throw "Configuration validation failed: 'workspace_roots.paths' entries must be non-empty strings"
+                }
+            }
+        }
+    }
+
     # Normalize ignore_tool_name (handle typo "ingore_tool_name")
     $hasIgnore = Get-Member -InputObject $Config -Name 'ignore_tool_name' -MemberType NoteProperty
     $hasIgnoreTypo = Get-Member -InputObject $Config -Name 'ingore_tool_name' -MemberType NoteProperty
@@ -397,6 +432,12 @@ function Test-ConfigSchema {
     if (-not $script:_cwdUnified.EndsWith($script:_cwdSep)) { $script:_cwdUnified += $script:_cwdSep }
     $Config | Add-Member -MemberType NoteProperty -Name '_cwd' -Value $script:_cwdUnified -Force
     $Config | Add-Member -MemberType NoteProperty -Name '_cwdNorm' -Value $script:_cwdUnified.ToLowerInvariant() -Force
+
+    # Extra workspace folders (VS Code multi-root) that must be treated exactly
+    # like the CWD. Always present and empty here: the hook fills them in at
+    # runtime via Add-WorkspaceRoots, so config loading never invents roots.
+    $Config | Add-Member -MemberType NoteProperty -Name '_workspaceRoots' -Value @() -Force
+    $Config | Add-Member -MemberType NoteProperty -Name '_workspaceRootsNorm' -Value @() -Force
 
     # Default system_paths if missing, compile into _systemPathRegex
     if (-not (Get-Member -InputObject $Config -Name 'system_paths' -MemberType NoteProperty)) {

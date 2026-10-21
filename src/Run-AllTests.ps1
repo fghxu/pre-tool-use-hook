@@ -125,7 +125,11 @@ $extraSuites = @(
     # suites proving strictness_gated_tool_name is UNAFFECTED by the new global.
     @{ Name = 'ov-preflights';          File = (Join-Path $repoRoot 'test\config\llm-review\Run-Ov-Preflights.ps1'); Args = @() },
     @{ Name = 'llm-review.override';    File = (Join-Path $repoRoot 'test\config\llm-review\Run-Tests.ps1'); Args = @('-XmlPath', (Join-Path $repoRoot 'test\config\llm-review\test-cases.override.xml'), '-ConfigPath', (Join-Path $repoRoot 'test\config\llm-review\config.ov.json')) },
-    @{ Name = 'llm-override-tools';     File = (Join-Path $repoRoot 'test\config\llm-override-tools\Run-Tests.ps1'); Args = @() }
+    @{ Name = 'llm-override-tools';     File = (Join-Path $repoRoot 'test\config\llm-override-tools\Run-Tests.ps1'); Args = @() },
+    # workspace_roots (2026-10-21): VS Code multi-root workspace folders are
+    # treated exactly like the CWD by the path policy (opt-in, Copilot only).
+    # Self-contained runner (fixture configs + a fake workspaceStorage tree).
+    @{ Name = 'workspace-roots';        File = (Join-Path $repoRoot 'test\config\workspace-roots\Run-Tests.ps1'); Args = @() }
 )
 if ($Filter) {
     $extraSuites = @($extraSuites | Where-Object { $_.Name -like "*$Filter*" })

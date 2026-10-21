@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for workspace_roots: 'discover' key ABSENT. The documented default is ['vscode'], so discovery must still happen. Guards against the default silently becoming 'nothing'.",
+
+  "global_modifying_strictness": "normal",
+  "log_file_path": "c:\\temp\\pretoolhook-workspace-roots-testlogs\\",
+  "ask_notification": { "enabled": false },
+
+  "workspace_roots": {
+    "enabled": true,
+    "paths": []
+  },
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "editable_paths": {
+    "linux": [ "/tmp/" ],
+    "windows": [ "C:\\\\temp\\\\" ]
+  },
+
+  "commands": {
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [ { "name": "ls", "patterns": [ "ls *" ], "description": "List directory contents" } ],
+      "modifying": [ { "name": "rm", "patterns": [ "rm *" ], "risk": "high", "description": "Remove files/directories" } ]
+    }
+  }
+}

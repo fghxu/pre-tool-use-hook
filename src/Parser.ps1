@@ -1674,7 +1674,8 @@ function Test-CommandTargetsSystemPaths {
 function Test-EditableOrCwd {
     <#
     Returns a reason string if the target write-path is auto-writable — either
-    under the current working directory (always editable, every strictness mode)
+    under the current working directory (always editable, every strictness mode),
+    under an extra workspace folder ($Config._workspaceRoots, VS Code multi-root),
     or matching an editable_paths pattern — or $null otherwise. Used by
     Test-RedirectionTarget for '>' and '>>' targets.
     #>
@@ -1707,10 +1708,21 @@ function Test-EditableOrCwd {
         }
     }
     $resolvedLower = $resolved.ToLowerInvariant()
+    # Prefix comparisons need a trailing separator so that the root itself
+    # ("d:\repo", e.g. a 'git -C' argument) matches the same way as its children.
+    $resolvedPrefix = if ($resolvedLower.EndsWith($sep)) { $resolvedLower } else { $resolvedLower + $sep }
 
     # Under CWD? (always editable)
-    if ($Config._cwdNorm -and $resolvedLower.StartsWith($Config._cwdNorm)) {
+    if ($Config._cwdNorm -and $resolvedPrefix.StartsWith($Config._cwdNorm)) {
         return 'under current directory'
+    }
+    # Under an extra workspace folder? (treated exactly like the CWD)
+    if (Get-Member -InputObject $Config -Name '_workspaceRootsNorm' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        foreach ($root in @($Config._workspaceRootsNorm)) {
+            if ($root -and $resolvedPrefix.StartsWith($root)) {
+                return 'under workspace folder'
+            }
+        }
     }
     # Matches editable_paths?
     $editableEnabled = $false

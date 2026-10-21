@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE (schema negative) for workspace_roots: an unsupported discover source must throw at load time (fail-closed), NOT be silently ignored - a typo would otherwise look like the feature is on while nothing is discovered.",
+
+  "global_modifying_strictness": "normal",
+  "ask_notification": { "enabled": false },
+
+  "workspace_roots": {
+    "enabled": true,
+    "discover": [ "intellij" ],
+    "paths": []
+  },
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "ignore_tool_name": [],
+
+  "commands": {
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [ { "name": "ls", "patterns": [ "ls *" ], "description": "List directory contents" } ],
+      "modifying": [ { "name": "rm", "patterns": [ "rm *" ], "risk": "high", "description": "Remove files/directories" } ]
+    }
+  }
+}

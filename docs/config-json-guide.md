@@ -50,6 +50,37 @@ If NO filesystem target can be extracted (e.g. `Remove-Item -Filter *.tmp`, or a
 - Entries are regex, not plain prefixes — escape `(` `)` etc. (see the `Program Files \(x86\)` entry).
 - Overlap between the two lists: system_paths wins (checked first in both the redirect analysis and the deletion ladder).
 
+## 2.5 `workspace_roots` — VS Code multi-root folders treated as the CWD
+
+**What it does:** VS Code hands the hook exactly one `cwd`, but a window can open several folders ("Add Folder to Workspace" / a `.code-workspace` file). With this block enabled, every folder of the VS Code workspace that contains the CWD is treated **exactly** like the CWD by the path policy — same `'under workspace folder'` reason, same rungs of the ladder (redirect target, deletion, file-tool write, and the Stage-2 `path_guard_denied` veto in `LlmReview`). This is what stops `git -C 'C:\git\cc\kimi' commit -m "test"` from being escalated to `ask` just because `kimi` is a *second* folder of the same window.
+
+```json
+"workspace_roots": {
+  "enabled": true,
+  "discover": ["vscode"],
+  "paths": ["d:\\scratch\\shared-lib"]
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `enabled` | bool | `false` | Master switch. `false` (or an absent block) = byte-identical to before this feature. |
+| `discover` | string[] | `["vscode"]` | Workspace sources to auto-discover. Implemented set is `{ "vscode" }`; an unknown name throws fail-closed. `[]` disables discovery (explicit `paths` only). `vscode` also covers VS Code Insiders. |
+| `paths` | string[] | `[]` | Extra folders to adopt unconditionally (plain paths or `file:///…` URIs; relative entries resolve against the CWD). |
+
+- **VS Code only.** The whole feature is gated on `IDE = Copilot`. Claude Code, Codex, and DSH have no multi-folder workspace, so their CWD stays the single source of truth — the block is ignored for them (no error).
+- **How discovery works:** `Add-WorkspaceRoots` reads `%APPDATA%\Code\User\workspaceStorage\*\workspace.json` (+ `Code - Insiders`), newest entry first, and stops at the first entry whose folders contain the CWD. Single-folder windows expose `{"folder": <uri>}`; multi-root windows point at a `.code-workspace` file whose `folders[].path` (or `uri`) entries are read — mixed plain paths and `file:///…` URIs are both handled, and relative entries resolve against the workspace file.
+- **Never adopts an unrelated workspace.** If the CWD is not inside any stored workspace, nothing is added (it does not fall back to "the most recently used window"). Folders are de-duplicated case-insensitively and normalized to a trailing separator.
+- **Fail-open on the source data, fail-closed on the schema.** Missing/corrupt `workspace.json`, an unreadable `.code-workspace`, or a missing storage dir simply contribute nothing (the hook prints a note to stderr only if the function itself throws). Bad config types (`enabled: "yes"`, `paths: "d:\\x"`, `discover: ["intellij"]`) throw at load time like every other block.
+- **Cost (measured, 2026-10-21, 78 stored workspaces):** the scan is live on every hook call.
+  - ~12 ms of real work: enumerate `workspaceStorage` (~11 ms, irreducible) + one `workspace.json` read when the CWD is a workspace folder.
+  - ~5 ms observed when the function is already warm in-process.
+  - ~60 ms for the *first* call in a fresh process — and every hook call is a fresh process. Most of that is PowerShell's per-function first-invocation cost (any function costs 13-26 ms on its first call, e.g. `Detect-IDE`), not I/O.
+  - **End-to-end:** ~880-905 ms per hook call with the feature on vs ~847-874 ms with it off = **~30-45 ms added**, in a hook whose soft budget is 500 ms and whose LLM path takes 6-7 s. There is deliberately no cache file: a stale cache would widen the path policy in the *unsafe* direction.
+  - Implementation notes: `DirectoryInfo` enumeration (its `LastWriteTimeUtc` comes free from the enumeration buffer) + `GetFiles('workspace.json')` instead of `File.Exists` + `GetLastWriteTimeUtc`, and fixed-width-tick keys sorted with `[Array]::Sort` instead of `PSCustomObject` + `Sort-Object` — together they halved the warm cost (9.5 ms -> 5 ms).
+- Not a security boundary change you get for free — it only ever widens "writable" to the folders you already opened in the same VS Code window.
+- Testing: `test/config/workspace-roots/Run-Tests.ps1` (schema, URI forms, IDE gate, discovery against a fake `workspaceStorage` tree, path-policy rungs, and two end-to-end `Hook.ps1` spawns; no network, no live config).
+
 ## 3. `safe_expressions`
 
 **What it does:** the AST arbiter's .NET method allowlist. A PowerShell expression that the AST certifier (`Test-SafeAst`) proves contains no commands may still call .NET methods; only methods listed here are permitted (matched case-insensitively). Anything else → ask.
