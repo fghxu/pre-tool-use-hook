@@ -726,6 +726,7 @@
         },
         "git": {
           "modifying_strictness": "normal",
+          "_comment_subcommands": "2026-10-23: comprehensive subcommand classification (researched against the installed git's `git help -a` surface). Because this entry declares subcommand rules, `default: read-only` is BYPASSED and any unlisted positional fails closed as 'unregistered' (ask). So every known subcommand is now listed explicitly. Flag/subcommand-dependent commands (config, reflog, notes, bisect, replace, sparse-checkout, submodule, stash, bundle, credential, rerere, symbolic-ref, fsck, merge-tree) are split: read form read-only, mutating form modifying. Known gaps (documented, low risk): `git config KEY VALUE` (no write flag) and `git symbolic-ref REF TARGET` (bare set) classify read-only; exotic plumbing not enumerated still fails closed.",
           "global_value_flags": ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"],
           "rules": [
             { "subcommand": ["branch"], "param": ["-d","--delete","-D","-m","--move"], "match": "present", "decision": "modifying", "risk": "medium" },
@@ -750,7 +751,26 @@
             { "subcommand": ["tag"], "decision": "read-only" },
             { "subcommand": ["remote"], "decision": "read-only" },
             { "subcommand": ["worktree list"], "decision": "read-only" },
-            { "param": ["--version","-v"], "match": "present", "decision": "read-only" }
+            { "param": ["--version","-v"], "match": "present", "decision": "read-only" },
+            { "_comment": "=== 2026-08-11: full git surface. Because ANY subcommand rule bypasses default:read-only, every known subcommand is registered explicitly (else it fails closed as 'unregistered'). Eval order: modifying -> strictness_gated -> read-only. ===", "subcommand": ["__never__"], "decision": "read-only" },
+
+            { "subcommand": ["filter-branch"], "decision": "modifying", "risk": "high" },
+            { "subcommand": ["am","apply","applypatch","cherry-pick","revert","rm","mv","stage","replay","replace","symbolic-ref","update-ref","update-index","commit-tree","write-tree","mktree","mktag","hash-object","read-tree","checkout-index","unpack-file","unpack-objects","index-pack","pack-objects","fast-import","send-pack","http-push","init-db","merge-file","merge-index","filter-branch","split-index","multi-pack-index","commit-graph","mailsplit","bundle","format-patch","strip-blobs-before-version","strip-blobs-after-version"], "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["bisect start","bisect good","bisect bad","bisect next","bisect skip","bisect reset","bisect term","bisect visualize"], "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["notes add","notes append","notes edit","notes remove","notes prune","notes merge","notes copy","notes annotate"], "decision": "modifying", "risk": "low" },
+            { "subcommand": ["sparse-checkout init","sparse-checkout set","sparse-checkout add","sparse-checkout disable","submodule update","submodule init","submodule add","submodule deinit","rerere diff","rerere remaining","rerere clean","rerere forget"], "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["hash-object"], "param": ["-w","--write"], "match": "present", "decision": "modifying", "risk": "medium" },
+            { "subcommand": ["merge-file"], "param": ["-p","--stdout"], "match": "present", "decision": "read-only" },
+
+            { "subcommand": ["gc","prune","pack-refs","repack","maintenance","fsck"], "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["remote prune","remote update","remote set-head","remote set-tags","worktree prune"], "decision": "strictness_gated", "risk": "low" },
+            { "subcommand": ["reflog delete","reflog add","reflog exists","reflog expire"], "decision": "strictness_gated", "risk": "low" },
+
+            { "subcommand": ["reflog","grep","merge-base","rev-list","cat-file","describe","shortlog","whatchanged","show-branch","cherry","for-each-ref","for-each-repo","name-rev","show-ref","var","count-objects","check-attr","check-mailmap","check-ref-format","annotate","difftool","range-diff","help","version","logs","diff-files","diff-index","diff-tree","fmt-merge-msg","merge-tree","pack-redundant","path-utils","prereq","stripspace","interpret-trailers","gitignore","list-hooks","list-worktrees","mailinfo","verify-commit","verify-pack","verify-tag","http-fetch","http-backend","fetch-pack","json","repo-config","config","mergetool","instaweb","gui","tool"], "decision": "read-only" },
+            { "subcommand": ["bisect"], "decision": "read-only" },
+            { "subcommand": ["notes"], "decision": "read-only" },
+            { "subcommand": ["rerere"], "decision": "read-only" },
+            { "subcommand": ["sparse-checkout list","submodule status","submodule summary","submodule foreach","stash list","stash show","bundle verify","bundle list","bundle headers","multi-pack-index verify","fsck"], "decision": "read-only" }
           ],
           "default": "read-only"
         }
