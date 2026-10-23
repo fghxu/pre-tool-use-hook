@@ -100,13 +100,13 @@ try {
     else {
         $staticRe = @($cfg._dotnetStaticMethodAllowlistRegex)[0]
         $instanceRe = @($cfg._dotnetMethodAllowlistRegex)[0]
-        # Spot-checks: static regex must hit both spellings and miss Compile;
-        # instance regex must hit tochararray and miss mutate. (2026-09-19: the
-        # R3 row now includes replace/split/escape/unescape, so Replace is no
-        # longer a valid miss probe - Compile is.)
+        # Spot-checks: static regex must hit both spellings and miss an unknown
+        # type; instance regex must hit tochararray and miss mutate. (2026-10-23:
+        # row 1 is a whole-type wildcard, so regex::compile is no longer a miss -
+        # Assembly::LoadFrom is the miss probe now.)
         $m1 = [bool]("regex::ismatch" -match $staticRe)
         $m2 = [bool]("system.text.regularexpressions.regex::matches" -match $staticRe)
-        $m3 = [bool]("regex::compile" -match $staticRe)
+        $m3 = [bool]("system.reflection.assembly::loadfrom" -match $staticRe)
         $m4 = [bool]("tochararray" -match $instanceRe)
         $m5 = [bool]("mutate" -match $instanceRe)
         if ($m1 -and $m2 -and (-not $m3) -and $m4 -and (-not $m5)) {
@@ -137,7 +137,7 @@ try {
         'printqueue::foo',                  # contains 'int::' - primitive row hazard
         'profile::read',                    # contains 'file::read' - file Class-B row hazard
         'notmath::abs',                     # contains 'math::abs' tail - math row hazard
-        'myregex::compile'                  # contains 'regex::' but Compile is not in the R3 alternation
+        'myregex::compile'                  # contains 'regex::' but not at the anchor start (R3 row is ^-anchored)
     )
     $violations = @()
     foreach ($row in $rows) {

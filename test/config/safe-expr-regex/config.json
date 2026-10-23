@@ -17,9 +17,9 @@
     "dotnet_static_method_allowlist": [
       "System.IO.Path::GetTempFileName"
     ],
-    "_comment_static_regex": "Broad-patterns rows per design 2026-09-19 section 4. Every row anchored ^...$ (D1). Case-insensitive.",
+    "_comment_static_regex": "Broad-patterns rows per design 2026-09-19 section 4. Every row anchored ^...$ (D1). Case-insensitive. Row 1 is a whole-type wildcard (2026-10-23, mirrors the live config) - Regex is NOT provably all-pure: Regex::CompileToAssembly EMITS an assembly file on .NET Framework, so it is pinned by the bare-name deny entry 'compiletoassembly' instead of by omitting it from this row.",
     "dotnet_static_method_allowlist_regex": [
-      "^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch|replace|split|escape|unescape)$",
+      "^(regex|system\\.text\\.regularexpressions\\.regex)::\\w+$",
       "^(system\\.)?(math|convert|bitconverter|string)::\\w+$",
       "^(system\\.io\\.)?path::\\w+$",
       "^system\\.(uri|datetime|datetimeoffset|timespan|version|guid|enum|net\\.ipaddress)::\\w+$",
@@ -36,11 +36,12 @@
       "^\\w[\\w.]*::to\\w*$",
       "^\\w[\\w.]*::from\\w*$"
     ],
-    "_comment_denylist": "STATIC denylist (NEW, 2026-09-19): checked FIRST in Test-SafeAst, outranks every allow path. Exact entries may be Type::Method or bare Method (any type). 'intern' pins Q4: string::Intern stays ask despite the whole-type string row.",
+    "_comment_denylist": "STATIC denylist (NEW, 2026-09-19): checked FIRST in Test-SafeAst, outranks every allow path. Exact entries may be Type::Method or bare Method (any type). 'intern' pins Q4: string::Intern stays ask despite the whole-type string row. 'compiletoassembly' (2026-10-23) pins the same rule for the now-wildcarded Regex row: Regex::CompileToAssembly emits an assembly FILE on .NET Framework, so the whole-type row can only stay safe while this bare-name deny exists.",
     "dotnet_static_method_denylist": [
       "gettempfilename",
       "getobject",
-      "intern"
+      "intern",
+      "compiletoassembly"
     ],
     "_comment_denylist_regex": "TAIL-anchored so they catch BOTH reflected full names AND non-canonical written spellings (alias forms with no reflected key). Leading segment is OPTIONAL ([\\w.]* not \\w[\\w.]*) so a bare [Marshal] / [IsolatedStorageFile] spelling (written key only, no reflected key) is still denied - TDD fix 2026-09-19.",
     "dotnet_static_method_denylist_regex": [

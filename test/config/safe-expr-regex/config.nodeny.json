@@ -18,7 +18,7 @@
       "System.IO.Path::GetTempFileName"
     ],
     "dotnet_static_method_allowlist_regex": [
-      "^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch|replace|split|escape|unescape)$",
+      "^(regex|system\\.text\\.regularexpressions\\.regex)::\\w+$",
       "^(system\\.)?(math|convert|bitconverter|string)::\\w+$",
       "^(system\\.io\\.)?path::\\w+$",
       "^system\\.(uri|datetime|datetimeoffset|timespan|version|guid|enum|net\\.ipaddress)::\\w+$",

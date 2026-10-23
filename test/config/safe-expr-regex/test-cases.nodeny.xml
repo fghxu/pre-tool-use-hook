@@ -37,6 +37,13 @@
       <copilot-command><![CDATA[$z = @(); $s=[string]::Intern("abc")]]></copilot-command>
     </test-case>
 
+    <!-- Same command as SDeny-CompileToAssemblyAlias - the whole-type Regex row allows it when the bare deny entry is absent -->
+    <test-case expected="allow" reason="no deny keys: whole-type regex row allows CompileToAssembly (parity)" category="SParity-NoDenyCompileToAssembly">
+      <description>$z = @(); [regex]::CompileToAssembly($infos, $name) - allowed when the deny entry is absent</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); [regex]::CompileToAssembly($infos, $name)]]></copilot-command>
+    </test-case>
+
     <!-- CONTROL: a writer that must ask in BOTH configs - parity means identical decisions, not a looser config -->
     <test-case expected="ask" reason="control: OpenWrite asks with or without deny keys (parity is not looseness)" category="SParity-ControlWriter">
       <description>$z = @(); [void][System.IO.File]::OpenWrite('c:\temp\x') - writer, fail-closed in both configs</description>

@@ -360,9 +360,9 @@
     "dotnet_static_method_allowlist": [
       "guid::NewGuid"
     ],
-    "_comment_dotnet_static_method_allowlist_regex": "Broad-patterns rows (2026-09-19 consolidation; supersedes the R3 single-row form, which is retained as row 1). Every row anchored ^...$ (D1: an unanchored 'int::' would substring-match point::/printqueue::). Class A = whole-type wildcard (provably all-pure statics); Class B = type + pure method prefixes (mixed types); Class C = cross-type method-name families (the never-enumerate net). Tried AFTER the exact set; the denylist below is checked FIRST and outranks everything.",
+    "_comment_dotnet_static_method_allowlist_regex": "Broad-patterns rows (2026-09-19 consolidation; supersedes the R3 single-row form, which is retained as row 1). Every row anchored ^...$ (D1: an unanchored 'int::' would substring-match point::/printqueue::). Class A = whole-type wildcard (all-pure statics, with the Regex exception noted below); Class B = type + pure method prefixes (mixed types); Class C = cross-type method-name families (the never-enumerate net). Tried AFTER the exact set; the denylist below is checked FIRST and outranks everything. Class A EXCEPTION (2026-10-23): row 1 is now a whole-type wildcard, but Regex is NOT provably all-pure - Regex::CompileToAssembly EMITS an assembly file on .NET Framework - so it is pinned by the bare-name DENY entry 'compiletoassembly' instead of by an allow-side alternation.",
     "dotnet_static_method_allowlist_regex": [
-      "^(regex|system\\.text\\.regularexpressions\\.regex)::(match(es)?|ismatch|replace|split|escape|unescape)$",
+      "^(regex|system\\.text\\.regularexpressions\\.regex)::\\w+$",
       "^(system\\.)?(math|convert|bitconverter|string)::\\w+$",
       "^(system\\.io\\.)?path::\\w+$",
       "^system\\.(uri|datetime|datetimeoffset|timespan|version|guid|enum|net\\.ipaddress)::\\w+$",
@@ -379,11 +379,12 @@
       "^\\w[\\w.]*::to\\w*$",
       "^\\w[\\w.]*::from\\w*$"
     ],
-    "_comment_dotnet_static_method_denylist": "STATIC denylist (2026-09-19): checked FIRST in Test-SafeAst, outranks every allow path (exact + regex). Exact entries may be 'Type::Method' OR bare 'Method' (matches the method on ANY type - closes the alias-spelling gap where a type cannot be reflection-resolved and only the written key exists). gettempfilename: Path::GetTempFileName creates a zero-byte file. getobject: Microsoft.VisualBasic.Interaction::GetObject launches COM via moniker. intern: Q4 explicit decision - string::Intern stays ask despite the whole-type string row.",
+    "_comment_dotnet_static_method_denylist": "STATIC denylist (2026-09-19): checked FIRST in Test-SafeAst, outranks every allow path (exact + regex). Exact entries may be 'Type::Method' OR bare 'Method' (matches the method on ANY type - closes the alias-spelling gap where a type cannot be reflection-resolved and only the written key exists). gettempfilename: Path::GetTempFileName creates a zero-byte file. getobject: Microsoft.VisualBasic.Interaction::GetObject launches COM via moniker. intern: Q4 explicit decision - string::Intern stays ask despite the whole-type string row. compiletoassembly (2026-10-23): Regex::CompileToAssembly writes an assembly to disk (.NET Framework), so it must stay denied now that the regex row allows every Regex method name.",
     "dotnet_static_method_denylist": [
       "gettempfilename",
       "getobject",
-      "intern"
+      "intern",
+      "compiletoassembly"
     ],
     "_comment_dotnet_static_method_denylist_regex": "Tail-anchored deny regexes (2026-09-19): catch BOTH reflected full names AND non-canonical written spellings. Leading segment optional ([\\w.]*) so a bare [Marshal]/[IsolatedStorageFile] spelling (written key only, no reflected key) is still denied - TDD fix 2026-09-19.",
     "dotnet_static_method_denylist_regex": [

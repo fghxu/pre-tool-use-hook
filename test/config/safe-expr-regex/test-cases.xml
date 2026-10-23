@@ -23,12 +23,36 @@
       <copilot-command><![CDATA[$null = [System.Text.RegularExpressions.Regex]::Matches("abc","a"); Get-ChildItem c:\temp]]></copilot-command>
     </test-case>
 
-    <!-- Regex miss fail-closed: Compile is not in the alternation. (Retargeted 2026-09-19:
-         Replace became ALLOWED by the broadened R3 row - intended flip, same procedure as R1.) -->
+    <!-- Regex miss fail-closed: Assembly::LoadFrom is matched by no allow row. (Retargeted
+         2026-10-23: the old [regex]::Compile probe now ALLOWS because row 1 became a whole-type
+         wildcard - intended flip, same procedure as the 2026-09-19 Replace retargeting.) -->
     <test-case expected="ask" reason="static regex miss => ask (fail-closed)" category="SER-Ask-StaticMiss">
-      <description>$z = @(); $null = [regex]::Compile("abc") - Compile not matched by any allow row</description>
+      <description>$z = @(); $null = [System.Reflection.Assembly]::LoadFrom("c:\temp\x.dll") - no allow row matches</description>
       <tool-name>Bash</tool-name>
-      <copilot-command><![CDATA[$z = @(); $null = [regex]::Compile("abc")]]></copilot-command>
+      <copilot-command><![CDATA[$z = @(); $null = [System.Reflection.Assembly]::LoadFrom("c:\temp\x.dll")]]></copilot-command>
+    </test-case>
+
+    <!-- Deny guard for the wildcarded Regex row (2026-10-23): Regex::CompileToAssembly writes an
+         assembly to disk on .NET Framework. The whole-type row allows every method name, so only
+         the FIRST-checked deny list can stop it. Both the short alias and the reflected full name. -->
+    <test-case expected="ask" reason="deny (bare compilestoassembly) beats the whole-type regex row - short alias" category="SDeny-CompileToAssemblyAlias">
+      <description>$z = @(); [regex]::CompileToAssembly($infos, $name) - emits an assembly file</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); [regex]::CompileToAssembly($infos, $name)]]></copilot-command>
+    </test-case>
+
+    <test-case expected="ask" reason="deny (bare compilestoassembly) beats the whole-type regex row - reflected full name" category="SDeny-CompileToAssemblyReflected">
+      <description>$z = @(); [System.Text.RegularExpressions.Regex]::CompileToAssembly($infos, $name)</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); [System.Text.RegularExpressions.Regex]::CompileToAssembly($infos, $name)]]></copilot-command>
+    </test-case>
+
+    <!-- Positive guards: the wildcard row must still allow pure Regex statics (Count / Enumerate* are
+         .NET 7+ pure readers that the old curated alternation did not list). -->
+    <test-case expected="allow" reason="whole-type regex row allows pure Regex::Count" category="SER-Allow-StaticWildcardCount" subresult-tier="safe_expr">
+      <description>$z = @(); $null = [regex]::Count("abc","b")</description>
+      <tool-name>Bash</tool-name>
+      <copilot-command><![CDATA[$z = @(); $null = [regex]::Count("abc","b")]]></copilot-command>
     </test-case>
 
     <!-- Instance regex: ToCharArray is NOT in the built-in default instance list, so an allow can only come from the regex key -->
