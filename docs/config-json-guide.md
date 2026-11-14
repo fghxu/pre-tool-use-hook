@@ -533,6 +533,33 @@ this block's `enabled: true` + `base_uri`/`model`, run an in-scope command, and
 check the newest record's `llm.llm2.compare` — mine `disagree` rates before
 relying on the forced asks.
 
+## 10.5.2 `answer_deadline_ms` — per-harness answer deadline (2026-11-14)
+
+**What it does:** caps the total time the hook may take before it must emit a
+Decision, per harness. Kept strictly **below** each harness's bare-default
+kill timer (Copilot and Local kill a registration with no timeout key at
+**30 s** and treat a timeout as fail-open — verdict discarded, normal
+permissions apply). When the deadline fires before the LLM verdict arrives,
+the LLM runspace is abandoned and the Decision degrades **fail-closed** to
+`ask` ("LLM assessment incomplete (<N> ms <Harness> deadline) — fail-closed").
+
+```json
+"answer_deadline_ms": { "Copilot": 28000, "Local": 28000 }
+```
+
+| Rule | Detail |
+|---|---|
+| Keys | Harness labels as detected (`Copilot`, `Local`; `ClaudeCode`/`Codex`/`DSH` allowed but pointless — their bare defaults are 600 s). |
+| Absent key / absent block | No per-harness cap: the LLM `timeout_ms` budget governs, exactly as before this feature. |
+| Validation | Load-time throw on non-int values; Copilot/Local entries must be `< 30000` (bare-default headroom). |
+| Interplay | The existing hard cap (`timeout_ms + 2000`) still applies; the **effective** answer budget is `min(deadline, timeout_ms + 2000)`. The `llm_third_opinion` pair's effective timeout is likewise bounded by the deadline. |
+| Registrations | Hook files/settings carry **no timeout keys** — single source of truth is this file. (The old `7200000` entries in registration files are obsolete and removed.) |
+
+Rationale: harness timeouts are fail-open by contract on **all four**
+harnesses, so the only fail-closed lever the hook owns is "always answer
+before the timer". See ADR `docs/adr/0001-quad-contract-harness-adapter.md`
+and `docs/Updates/Update-2026-11-14-copilot-harness-migration.md`.
+
 ## 10.6 `ask_notification` — toast + sound on ask decisions
 
 **What it does:** pops a Windows toast notification and plays a sound whenever the hook decides `ask` (approval needed). Useful when the IDE is in the background or on another monitor — you hear/see the alert instead of wondering why the agent went quiet.
