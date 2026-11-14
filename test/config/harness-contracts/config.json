@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE for the quad-contract harness migration (2026-11-14). Drives the RED suite in Run-Tests.ps1: detection of the four harness payload shapes, camelCase boundary normalization, the dual output envelope + exit-0 policy, the widened workspace_roots IDE gate, and the four-payload fullpipe spawns. answer_deadline_ms lives in config.deadline*.json variants, NOT here.",
+
+  "global_modifying_strictness": "normal",
+
+  "_comment_log_file_path": "Keep hook records from the e2e spawns out of the real c:\\temp\\logs\\prehook logs. Fullpipe cases assert the per-harness log SUFFIX (copilot/local/claude/codex) by reading this directory.",
+  "log_file_path": "c:\\temp\\pretoolhook-harness-contracts-testlogs\\",
+
+  "_comment_ask_notification": "Off: e2e cases must not toast.",
+  "ask_notification": { "enabled": false },
+
+  "_comment_llm": "Off: these are local-contract tests; no network, no mock needed.",
+  "llm_second_opinion": { "enabled": false },
+
+  "_comment_workspace_roots": "Enabled with discover [] (hermetic - no %APPDATA% scan). HC-10 passes -ExtraRoots directly to exercise the widened Copilot|Local gate.",
+  "workspace_roots": {
+    "enabled": true,
+    "discover": [],
+    "paths": []
+  },
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+
+  "intercept_tool_name": [ "Bash", "run_in_terminal", "PowerShell" ],
+  "ignore_tool_name": [ "Read" ],
+  "tool_name_mapping": {
+    "Bash": "tool_input.command",
+    "run_in_terminal": "tool_input.command",
+    "PowerShell": "tool_input.command"
+  },
+  "path_tool_mapping": {},
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": [ "Get-*" ],
+      "modifying_verbs": { "high": [ "Remove-*" ], "medium": [], "low": [] },
+      "read_only": [
+        { "name": "Get-Date", "patterns": [ "Get-Date" ], "description": "Read-only date" }
+      ],
+      "modifying": [
+        { "name": "Remove-Item", "patterns": [ "Remove-Item *" ], "risk": "high", "description": "Remove files" }
+      ]
+    },
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "echo", "patterns": [ "echo *", "echo" ], "description": "Print text" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": [ "rm *" ], "risk": "high", "description": "Remove files" }
+      ]
+    }
+  }
+}

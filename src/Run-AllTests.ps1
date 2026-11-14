@@ -95,6 +95,10 @@ $extraSuites = @(
     @{ Name = 'llm-review.http-mock'; File = (Join-Path $repoRoot 'test\config\llm-review\http\Run-LlmCallTests.ps1'); Args = @() },
     @{ Name = 'dsh-hook.unit';       File = (Join-Path $repoRoot 'test\config\live\test-cases.dsh.ps1'); Args = @() },
     @{ Name = 'ide-detect.unit';     File = (Join-Path $repoRoot 'test\config\live\test-cases.ide-detect.ps1'); Args = @() },
+    # Quad-contract harness migration (2026-11-14): committed RED on purpose -
+    # 39 checks, 24 fail until slices F1-F4 land. See
+    # docs/Updates/Update-2026-11-14-copilot-harness-migration.md (section 7).
+    @{ Name = 'harness-contracts';   File = (Join-Path $repoRoot 'test\config\harness-contracts\Run-Tests.ps1'); Args = @() },
     @{ Name = 'dsh-plugin.node';     File = (Join-Path $repoRoot 'dsh-plugin\test\Run-NodeTests.ps1'); Args = @() },
     @{ Name = 'tool-gate';           File = (Join-Path $repoRoot 'test\config\tool-gate\Run-Tests.ps1'); Args = @() },
     @{ Name = 'tool-gate.strictness'; File = (Join-Path $repoRoot 'test\config\test-strictness-gate\tool-gate\Run-Tests.ps1'); Args = @() },

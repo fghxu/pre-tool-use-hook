@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "description": "NEGATIVE fixture: answer_deadline_ms.Copilot = 40000 is NOT below the 30s bare-default kill timer of Copilot/Local. HC-19 expects Load-Config to throw.",
+
+  "global_modifying_strictness": "normal",
+  "log_file_path": "c:\\temp\\pretoolhook-harness-contracts-testlogs\\",
+  "ask_notification": { "enabled": false },
+  "llm_second_opinion": { "enabled": false },
+
+  "answer_deadline_ms": { "Copilot": 40000, "Local": 28000 },
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+  "intercept_tool_name": [ "Bash" ],
+  "ignore_tool_name": [ "Read" ],
+  "tool_name_mapping": { "Bash": "tool_input.command" },
+  "path_tool_mapping": {},
+
+  "commands": {
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "echo", "patterns": [ "echo *", "echo" ], "description": "Print text" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": [ "rm *" ], "risk": "high", "description": "Remove files" }
+      ]
+    }
+  }
+}

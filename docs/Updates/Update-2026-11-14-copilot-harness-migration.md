@@ -145,6 +145,23 @@ and do NOT delete `.github/hooks/pre-cli-hook.json` or the repo
 `.claude/settings.local.json` hooks block during coding — those deletions are
 checklist items gated on green suites.
 
+**RED suite (committed, run it first):**
+`test/config/harness-contracts/Run-Tests.ps1` (+ 4 fixture configs in the
+same dir). **RED record at commit time: 39 checks / 15 pass / 24 fail** —
+every failure maps to an F1–F4 requirement; the 15 passing cases are pins
+that must stay green. Pinned names the suite asserts (implement to these):
+`ConvertTo-CanonicalPayload` (boundary normalizer),
+`ConvertTo-ToolNameLookupKey` (camel→snake kebabing, lookup only),
+compiled config property **`_answerDeadlines`** (from `answer_deadline_ms`).
+One design-relevant finding from the RED run: a camel payload without
+`tool_use_id` is *accidentally* labelled Copilot today (Signal 2's else
+branch votes Copilot on absence) — HC-01b proves the real rule by sending
+camel fields **with** `tool_use_id` + ISO timestamp (the PascalCase-alias
+shape), which currently masquerades as ClaudeCode; the decisive
+`toolName`-present signal must outrank the snake_case vote. The suite is
+registered in `src/Run-AllTests.ps1` (`harness-contracts`), so the grand
+total is red until F1–F4 land — by design.
+
 **Ambiguity rule:** if anything else is unclear, choose the fail-closed
 option, pin it with a test, and record the choice in `PROGRESS.md` — do not
 block on questions.
