@@ -304,6 +304,49 @@ function Test-ConfigSchema {
         }
     }
 
+    # Validate optional "answer_deadline_ms" block (F3, quad-contract migration
+    # 2026-11-14): hook-enforced per-harness answer deadlines, kept BELOW the
+    # harness's own kill timer so a verdict is never discarded. OPTIONAL:
+    # absent = no hook-side deadline (harness timer governs). When present it
+    # is validated even if every value is generous. Fail-closed rules:
+    #   - the block must be an object of harness -> integer ms
+    #   - keys must be known harness names (a typo would silently disable the
+    #     deadline, which is fail-open -> rejected)
+    #   - values must be integers >= 1 (a string/bool/float is a config error)
+    #   - Copilot/Local entries must be < 30000 (both bare registrations die at
+    #     the 30 s default kill timer; a >= 30000 deadline can never answer in
+    #     time -> rejected)
+    # Compiled to $Config._answerDeadlines (PSCustomObject harness -> int ms).
+    if (Get-Member -InputObject $Config -Name 'answer_deadline_ms' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
+        $ad = $Config.answer_deadline_ms
+        if ($ad -isnot [PSCustomObject] -and $ad -isnot [hashtable]) {
+            throw "Configuration validation failed: 'answer_deadline_ms' must be an object of harness -> integer ms"
+        }
+        $knownHarnesses = @('Copilot', 'Local', 'ClaudeCode', 'Codex', 'DSH')
+        $deadlinePairs = @{}
+        foreach ($prop in $ad.PSObject.Properties) {
+            if ($prop.Name -notin $knownHarnesses) {
+                throw "Configuration validation failed: 'answer_deadline_ms' has unknown harness key '$($prop.Name)' (supported: $($knownHarnesses -join ', '))"
+            }
+            $v = $prop.Value
+            if ($v -is [bool] -or ($v -isnot [int] -and $v -isnot [long])) {
+                throw "Configuration validation failed: 'answer_deadline_ms.$($prop.Name)' must be an integer number of milliseconds, got '$v'"
+            }
+            if ($v -lt 1) {
+                throw "Configuration validation failed: 'answer_deadline_ms.$($prop.Name)' must be >= 1 ms, got $v"
+            }
+            if (($prop.Name -eq 'Copilot' -or $prop.Name -eq 'Local') -and $v -ge 30000) {
+                throw "Configuration validation failed: 'answer_deadline_ms.$($prop.Name)' must be < 30000 ms (the bare-registration kill timer) so the verdict is never discarded, got $v"
+            }
+            $deadlinePairs[$prop.Name] = [long]$v
+        }
+        $adCompiled = [PSCustomObject]@{}
+        foreach ($k in $deadlinePairs.Keys) {
+            $adCompiled | Add-Member -MemberType NoteProperty -Name $k -Value $deadlinePairs[$k]
+        }
+        $Config | Add-Member -MemberType NoteProperty -Name '_answerDeadlines' -Value $adCompiled -Force
+    }
+
     # Normalize ignore_tool_name (handle typo "ingore_tool_name")
     $hasIgnore = Get-Member -InputObject $Config -Name 'ignore_tool_name' -MemberType NoteProperty
     $hasIgnoreTypo = Get-Member -InputObject $Config -Name 'ingore_tool_name' -MemberType NoteProperty

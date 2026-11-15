@@ -1,10 +1,10 @@
-# HookAdapter.ps1 ? IDE detection, I/O formatting, output shaping
+# HookAdapter.ps1 - IDE detection, I/O formatting, output shaping
 # Dot-sourced by Hook.ps1
 
 function Detect-IDE {
     param([PSCustomObject]$InputObject)
 
-    # Edge case: null input object ? default to "ClaudeCode"
+    # Edge case: null input object - default to "ClaudeCode"
     if ($null -eq $InputObject) {
         [Console]::Error.WriteLine("HookAdapter: Warning: Detect-IDE received null InputObject, defaulting to ClaudeCode")
         return "ClaudeCode"
@@ -46,8 +46,29 @@ function Detect-IDE {
     #
     # Majority vote wins for signals 1-3. If signal 4 or 7 fires, it may override.
     # Default tie goes to "ClaudeCode".
+    #
+    # Signal -1 (decisive, quad-contract migration F1 2026-11-14): camelCase
+    #   "toolName" property present -> Copilot. The Copilot harness (shared
+    #   runtime with the Copilot CLI) is the only one that sends camelCase
+    #   payload fields. This must outrank the Signal 2 snake_case vote: the
+    #   PascalCase-alias shape carries tool_use_id + ISO timestamp alongside
+    #   toolName and otherwise masquerades as ClaudeCode (HC-01b, the
+    #   2026-11-13 incident). Checked by property PRESENCE, before every
+    #   other signal.
+    #
+    # Signal 0b now returns "Local" (F1): the deprecated VS Code Local agent
+    #   sends the Claude-protocol shape with tool_use_id ending __vscode-.
+    #   It was labelled "Copilot" before the 1.146 harness split; the label
+    #   moves to "Local" so its logs get the ".local" suffix and the
+    #   workspace_roots gate keeps covering it (amendment 7.3.1).
 
-    # Signal 0: dsh field ? unique to the DeepSeek Harness bridge (decisive)
+    # Signal -1 (decisive, F1): camelCase toolName property present -> Copilot.
+    if ($InputObject.PSObject.Properties.Name -contains "toolName" -and
+        $null -ne $InputObject.toolName) {
+        return "Copilot"
+    }
+
+    # Signal 0: dsh field - unique to the DeepSeek Harness bridge (decisive)
     # The dsh-plugin-pretoolhook bridge wraps every intercepted tool call in a
     # Claude Code PreToolUse-shaped payload and stamps it with a `dsh` object
     # whose `harness` is exactly "DeepSeek Harness". No other IDE sends this
@@ -61,13 +82,16 @@ function Detect-IDE {
         }
     }
 
-    # Signal 0b: tool_use_id contains "__vscode-" ? VS Code Copilot (decisive)
-    # VS Code Copilot shares Claude Code's protocol (PascalCase, ISO timestamp,
-    # tool_use_id present) but its tool_use_id always ends with __vscode-<uuid>.
+    # Signal 0b: tool_use_id contains "__vscode-" -> VS Code Local agent (decisive)
+    # The deprecated VS Code Local harness shares Claude Code's protocol
+    # (PascalCase, ISO timestamp, tool_use_id present) but its tool_use_id
+    # always ends with __vscode-<uuid>. F1 (2026-11-14) relabels this "Local"
+    # (was "Copilot" pre-split) so the log suffix becomes ".local" and the
+    # workspace_roots gate keeps covering it (amendment 7.3.1).
     # This must fire BEFORE the Codex signals to avoid misdetection.
     if ($InputObject.PSObject.Properties.Name -contains "tool_use_id" -and
         $InputObject.tool_use_id -match '__vscode-') {
-        return "Copilot"
+        return "Local"
     }
 
     # Signal 5: turn_id field ? unique to Codex CLI (decisive)
@@ -109,7 +133,7 @@ function Detect-IDE {
         $signals.Copilot++
     }
 
-    # Signal 4: transcript_path ? decisive when present
+    # Signal 4: transcript_path - decisive when present
     # VS Code Copilot sets transcript_path to ...\GitHub.copilot-chat\transcripts\...
     # Claude Code sets it to ...\.claude\projects\...
     if ($InputObject.transcript_path) {
@@ -142,6 +166,155 @@ function Detect-IDE {
     }
     else {
         return "Copilot"
+    }
+}
+
+# =============================================================================
+# Boundary normalizer (quad-contract migration F1, 2026-11-14)
+#
+# The Copilot harness speaks camelCase (toolName/toolArgs/sessionId, and the
+# PascalCase-alias shape may also carry tool_use_id + ISO timestamp). Every
+# internal consumer (command extraction, tool gates, path policy, logging)
+# reads snake_case. ConvertTo-CanonicalPayload rewrites the PARSED payload
+# in place right after JSON parse (Hook.ps1 Step 3.5), so the rest of the
+# pipeline never sees camelCase field names. The tool NAME value stays raw
+# (kebabing applies to lookup keys only - see ConvertTo-ToolNameLookupKey).
+# snake_case payloads pass through untouched.
+# =============================================================================
+
+function ConvertTo-CanonicalPayload {
+    param([PSCustomObject]$InputObject)
+
+    if ($null -eq $InputObject) { return $null }
+
+    # camel -> snake field renames. 'timestamp' is deliberately NOT touched:
+    # detection reads only its presence/format, and ConvertFrom-Json already
+    # coerces it (ISO -> DateTime, epoch -> number).
+    $renames = [ordered]@{
+        toolName  = 'tool_name'
+        toolArgs  = 'tool_input'
+        sessionId = 'session_id'
+        turnId    = 'turn_id'   # defensive: camel alias of the Codex field
+    }
+    $props = $InputObject.PSObject.Properties
+    foreach ($camel in $renames.Keys) {
+        if (-not $props[$camel]) { continue }
+        $snake = $renames[$camel]
+        # Fail-closed on a mixed payload: an existing non-null snake field
+        # wins over the camel duplicate (the canonical spelling is authoritative).
+        if (-not $props[$snake] -or $null -eq $props[$snake].Value) {
+            $InputObject | Add-Member -MemberType NoteProperty -Name $snake -Value $props[$camel].Value -Force
+        }
+        $InputObject.PSObject.Properties.Remove($camel)
+    }
+    return $InputObject
+}
+
+function ConvertTo-ToolNameLookupKey {
+    <#
+    Kebab-cases a tool name for config LOOKUP only (intercept/ignore/gated
+    lists, tool_name_mapping, path_tool_mapping): camelCase boundaries become
+    '_-' splits and the result is lowercased (runInTerminal -> run_in_terminal,
+    Bash -> bash). Names already in snake_case (mcp__server__tool) pass
+    through lowercased. Log lines and records keep the RAW name.
+    #>
+    param([string]$ToolName)
+    if ([string]::IsNullOrWhiteSpace($ToolName)) { return $ToolName }
+    # -creplace: the boundary regex is case-SENSITIVE on purpose (-replace would
+    # treat [A-Z] as case-insensitive and split every letter pair).
+    return (($ToolName -creplace '([a-z0-9])([A-Z])', '$1_$2').ToLowerInvariant())
+}
+
+function Test-ToolNameListMatch {
+    <#
+    Membership test for intercept/ignore/gated tool lists (F1): matches the
+    RAW name OR its kebab'd lookup key, case-insensitively (-in). Raw-first
+    keeps every existing PascalCase config entry (Bash, Write, MultiEdit)
+    matching exactly as before; the kebab leg lets camelCase harness names
+    (runInTerminal) hit snake_case config entries (run_in_terminal).
+    #>
+    param([string]$ToolName, $List)
+    if (-not $List -or [string]::IsNullOrWhiteSpace($ToolName)) { return $false }
+    if ($ToolName -in $List) { return $true }
+    $key = ConvertTo-ToolNameLookupKey $ToolName
+    return ($key -ne $ToolName -and $key -in $List)
+}
+
+function Get-MappedToolNameField {
+    <#
+    Resolves the config mapping value (tool_name_mapping / path_tool_mapping)
+    for a tool name (F1): exact raw key first (case-insensitive, exactly the
+    pre-F1 '$mappingKeys -contains $toolName' test), then the kebab'd lookup
+    key. Returns $null when neither key is present.
+    #>
+    param([string]$ToolName, $Mapping)
+    if (-not $Mapping -or [string]::IsNullOrWhiteSpace($ToolName)) { return $null }
+    $names = @($Mapping.PSObject.Properties.Name)
+    if ($names -contains $ToolName) { return $Mapping.$ToolName }
+    $key = ConvertTo-ToolNameLookupKey $ToolName
+    if ($key -ne $ToolName -and $names -contains $key) { return $Mapping.$key }
+    return $null
+}
+
+# =============================================================================
+# Answer deadline (F3, quad-contract migration 2026-11-14)
+#
+# config answer_deadline_ms keeps our verdict BELOW the harness's own kill
+# timer so a produced verdict is never discarded. These helpers are the
+# testable seam; Hook.ps1 Steps 8a/8b/8c apply them.
+# =============================================================================
+
+function Get-AnswerDeadlineBudgetMs {
+    <#
+    Effective answer budget in ms for a detected harness: the configured
+    answer_deadline_ms entry for that harness, clamped to
+    min(deadline, llm timeout_ms + 2000) when the LLM wait is enabled
+    (the wait may not outlive the deadline). Returns 0 when no deadline
+    applies (key absent / harness not listed) - the harness timer governs.
+    #>
+    param($Config, [string]$IDE)
+    if (-not $Config) { return 0 }
+    $props = $Config.PSObject.Properties
+    if (-not $props['_answerDeadlines']) { return 0 }
+    $ad = $props['_answerDeadlines'].Value
+    if (-not $ad) { return 0 }
+    $adProps = $ad.PSObject.Properties
+    if (-not $adProps[$IDE]) { return 0 }
+    $budget = 0
+    try { $budget = [long]$adProps[$IDE].Value } catch { return 0 }
+    if ($budget -lt 1) { return 0 }
+    $llm = $null
+    if ($props['_compiled'] -and $props['_compiled'].Value -and
+        $props['_compiled'].Value.PSObject.Properties['llmSecondOpinion']) {
+        $llm = $props['_compiled'].Value.llmSecondOpinion
+    }
+    if ($llm -and $llm.Enabled) {
+        $wait = [long]$llm.TimeoutMs + 2000
+        if ($wait -lt $budget) { $budget = $wait }
+    }
+    return $budget
+}
+
+function New-AnswerDeadlineAskResult {
+    <#
+    Fail-closed Decision when the answer deadline passed before a verdict
+    was ready. Reason template is CONTRACTUAL (Update doc 7.3.3, pinned by
+    HC-24): 'LLM assessment incomplete (<N> ms <Harness> answer deadline) -
+    fail-closed'. ExitCode 0 - this is a Decision, not a Fatal failure.
+    #>
+    param([PSCustomObject]$ClassifyResult, [string]$IDE, [long]$BudgetMs)
+    $reason = "LLM assessment incomplete ($BudgetMs ms $IDE answer deadline) - fail-closed"
+    $base = if ($ClassifyResult) { $ClassifyResult } else { [PSCustomObject]@{} }
+    return [PSCustomObject]@{
+        Decision    = 'ask'
+        Reason      = $reason
+        ExitCode    = 0
+        IDE         = $IDE
+        ToolName    = $base.ToolName
+        Command     = $base.Command
+        SubResults  = @()
+        IsSkipped   = $false
+        IsUnknown   = $false
     }
 }
 
@@ -206,7 +379,7 @@ function Resolve-FieldPathLeaves {
 function Get-CommandFromInput {
     param([PSCustomObject]$RawInput, [PSCustomObject]$Config)
 
-    # Edge case: null RawInput ? return null immediately
+    # Edge case: null RawInput - return null immediately
     if ($null -eq $RawInput) {
         return $null
     }
@@ -214,7 +387,7 @@ function Get-CommandFromInput {
     $toolName = $RawInput.tool_name
     $mapping = $Config.tool_name_mapping
 
-    # Edge case: null/empty tool_name_mapping ? skip mapping lookup
+    # Edge case: null/empty tool_name_mapping - skip mapping lookup
     $mappingKeys = @()
     if ($mapping) {
         try {
@@ -225,9 +398,11 @@ function Get-CommandFromInput {
         }
     }
 
-    # Look up tool_name in config.tool_name_mapping (only if mapping has keys)
-    if ($mappingKeys.Count -gt 0 -and $toolName -and $mappingKeys -contains $toolName) {
-        $fieldPath = $mapping.$toolName
+    # Look up tool_name in config.tool_name_mapping (only if mapping has keys).
+    # F1: exact raw key first, then the kebab'd lookup key (runInTerminal ->
+    # the run_in_terminal mapping entry).
+    if ($mappingKeys.Count -gt 0 -and $toolName) {
+        $fieldPath = Get-MappedToolNameField -ToolName $toolName -Mapping $mapping
 
         # If fieldPath is null/empty, skip mapping and fall through to heuristic
         if ($fieldPath) {
@@ -245,7 +420,7 @@ function Get-CommandFromInput {
                 if ($trimmed.Length -gt 0) { return $trimmed }
             }
         }
-        # Fall through to heuristic ? mapping path didn't yield a usable string
+        # Fall through to heuristic - mapping path didn't yield a usable string
     }
 
     # Heuristic: walk the RawInput for any string field that looks like a command
@@ -307,33 +482,52 @@ function Get-CommandFromInput {
 function Format-Output {
     param([PSCustomObject]$ClassifyResult, [string]$IDE)
 
-    # Both Claude Code and VS Code Copilot (built on Claude Code) expect the
-    # hookSpecificOutput wrapper format.
-    #   { "hookSpecificOutput": { "hookEventName": "PreToolUse",
-    #       "permissionDecision": "<allow|ask>",
-    #       "permissionDecisionReason": "<reason>" } }
+    # Quad-contract output (F2, 2026-11-14): EVERY Decision carries BOTH
+    # envelopes so one payload satisfies all four harnesses:
+    #   nested:  { "hookSpecificOutput": { "hookEventName": "PreToolUse",
+    #              "permissionDecision": ..., "permissionDecisionReason": ... } }
+    #            (Claude / Codex / DSH / Local read this)
+    #   top-level: { "permissionDecision": ..., "permissionDecisionReason": ...,
+    #              ["systemMessage": ...] }
+    #            (the Copilot harness ignores the nested envelope and reads
+    #            ONLY these top-level fields; {} = no decision)
     #
-    # The DeepSeek Harness bridge (dsh-plugin-pretoolhook) consumes the SAME
+    # The DeepSeek Harness bridge (dsh-plugin-pretoolhook) consumes the nested
     # wrapper: it parses permissionDecision (allow|ask|deny) and the reason and
     # maps them onto DSH's tools/pre-execute decision. DSH supports ask natively
-    # (the approval seam routes it to the user), so ask stays ask ? only Codex
-    # maps ask?deny.
+    # (the approval seam routes it to the user), so ask stays ask - only Codex
+    # maps ask->deny.
     #
-    # Return PSCustomObject (NOT JSON string ? caller will ConvertTo-Json)
+    # Codex parses "ask" but marks the hook failed and lets the tool run
+    # (fail-open), so ask maps to deny there. The NESTED reason keeps the
+    # original text (pinned by test-cases.codex.ps1 2b); the TOP-LEVEL reason
+    # and the systemMessage carry the contractual mapping wording (Update doc
+    # 7.3.3, pinned by HC-14).
+    #
+    # Return PSCustomObject (NOT JSON string - caller will ConvertTo-Json)
 
-    # Map internal "ask" to "deny" for Codex (Codex parses "ask" but errors on it)
     $decision = $ClassifyResult.Decision
+    $topReason = $ClassifyResult.Reason
+    $systemMessage = $null
     if ($IDE -eq 'Codex' -and $decision -eq 'ask') {
-        $decision = 'deny'
+        $decision  = 'deny'
+        $topReason = "ask unsupported on Codex - denied fail-closed: $ClassifyResult.Reason"
+        $systemMessage = "PreToolUse hook DENIED (Codex has no ask): $ClassifyResult.Reason. Tell the agent to proceed if intentional."
     }
 
-    return [PSCustomObject]@{
+    $out = [PSCustomObject]@{
         hookSpecificOutput = [PSCustomObject]@{
             hookEventName            = "PreToolUse"
             permissionDecision       = $decision
             permissionDecisionReason = $ClassifyResult.Reason
         }
+        permissionDecision       = $decision
+        permissionDecisionReason = $topReason
     }
+    if ($null -ne $systemMessage) {
+        $out | Add-Member -MemberType NoteProperty -Name 'systemMessage' -Value $systemMessage
+    }
+    return $out
 }
 
 # -----------------------------------------------------------------------------
@@ -342,7 +536,7 @@ function Format-Output {
 # VS Code hands the hook a single cwd, but one window can open several folders.
 # The folders of the workspace the cwd belongs to are treated exactly like the
 # cwd by the path policy. No other IDE has this concept, so every entry point
-# below is gated on $IDE -eq 'Copilot'.
+# below is gated on $IDE -in @('Copilot','Local') (F1 amendment 7.3.1).
 # -----------------------------------------------------------------------------
 
 function ConvertFrom-VsCodeUri {
@@ -547,7 +741,11 @@ function Add-WorkspaceRoots {
 
     if (-not $Config) { return @() }
 
-    if ($IDE -ne 'Copilot') { return @() }
+    # F1 amendment 7.3.1: VS Code-origin payloads split into Copilot and Local
+    # (deprecated) harnesses; BOTH get workspace roots. Claude/Codex/DSH keep
+    # single-CWD semantics (a Claude-harness-in-VS-Code session is
+    # payload-indistinguishable from Claude Code CLI - accepted degradation).
+    if ($IDE -notin @('Copilot', 'Local')) { return @() }
 
     $props = $Config.PSObject.Properties
     $block = $null

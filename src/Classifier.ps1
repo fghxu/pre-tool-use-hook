@@ -54,11 +54,12 @@ function Get-ToolGatePaths {
 
     $paths = [System.Collections.Generic.List[string]]::new()
 
-    # 1) exact mapping
+    # 1) exact mapping (F1: raw key first, then kebab'd lookup key)
     if (Get-Member -InputObject $Config -Name 'path_tool_mapping' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
         $ptm = $Config.path_tool_mapping
-        if ($ptm -and ($ptm.PSObject.Properties.Name -contains $ToolName)) {
-            foreach ($p in @(Get-InputFieldValues -RawInput $RawInput -FieldPath $ptm.$ToolName)) {
+        $ptmField = Get-MappedToolNameField -ToolName $ToolName -Mapping $ptm
+        if ($ptmField) {
+            foreach ($p in @(Get-InputFieldValues -RawInput $RawInput -FieldPath $ptmField)) {
                 if ($p) { $paths.Add([string]$p) }
             }
         }
@@ -180,6 +181,10 @@ function Test-ToolNameFilter {
         [PSCustomObject]$Config
     )
 
+    # F1 (2026-11-14): list membership matches the RAW name OR its kebab'd
+    # lookup key (runInTerminal hits the run_in_terminal entry). The raw name
+    # flows through the rest of the pipeline and the logs unchanged.
+
     # -- Check ignore list (handle both "ignore_tool_name" and typo "ingore_tool_name") --
     $ignoreList = $null
     if ($Config.ignore_tool_name) {
@@ -189,7 +194,7 @@ function Test-ToolNameFilter {
         $ignoreList = $Config.ingore_tool_name
     }
 
-    if ($ignoreList -and $ToolName -in $ignoreList) {
+    if (Test-ToolNameListMatch -ToolName $ToolName -List $ignoreList) {
         return "skip"
     }
 
@@ -202,14 +207,14 @@ function Test-ToolNameFilter {
         $interceptList = $Config.intecept_tool_name
     }
 
-    if ($interceptList -and $ToolName -in $interceptList) {
+    if (Test-ToolNameListMatch -ToolName $ToolName -List $interceptList) {
         return "classify"
     }
 
     # -- Check strictness-gated list (strictness_gated_tool_name) --
     # v2 (2026-08-26): returns "gated" so Invoke-Classify can run the path-aware
     # gate (Resolve-ToolGate) with the raw payload. system_paths is absolute.
-    if ($Config.strictness_gated_tool_name -and $ToolName -in $Config.strictness_gated_tool_name) {
+    if (Test-ToolNameListMatch -ToolName $ToolName -List $Config.strictness_gated_tool_name) {
         return "gated"
     }
 
@@ -452,10 +457,15 @@ function Invoke-Classify {
     }
 
     if ($filterResult -eq "unknown") {
+        # F2 policy flip (2026-11-14, quad-contract migration Q3): an unknown
+        # tool name is a DECISION (ask), not a Fatal failure. Exit 0 so every
+        # harness parses the JSON verdict and prompts; exit 2 is reserved for
+        # Fatal failures (unparseable input, bad config, no extractable
+        # command). Codex maps the ask to deny+systemMessage in Format-Output.
         return (Repair-ResultProperties ([PSCustomObject]@{
             Decision    = "ask"
             Reason      = "unknown tool: $toolName - not in intercept or ignore list"
-            ExitCode    = 2
+            ExitCode    = 0
             IDE         = $IDE
             ToolName    = $toolName
             Command     = ""
@@ -473,8 +483,11 @@ function Invoke-Classify {
     if (Get-Member -InputObject $Config -Name 'path_tool_mapping' -MemberType NoteProperty -ErrorAction SilentlyContinue) {
         $pathMapping = $Config.path_tool_mapping
     }
-    if ($pathMapping -and ($pathMapping.PSObject.Properties.Name -contains $toolName)) {
-        $fieldPath = $pathMapping.$toolName
+    $fieldPath = $null
+    if ($pathMapping) {
+        $fieldPath = Get-MappedToolNameField -ToolName $toolName -Mapping $pathMapping
+    }
+    if ($fieldPath) {
         # Extract ALL target paths. A mapping segment may end with [*] to
         # enumerate a JSON array (multi_replace_string_in_file ->
         # tool_input.replacements[*].filePath); scalar dot-paths yield one path.

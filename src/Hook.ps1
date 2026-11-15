@@ -44,6 +44,23 @@ catch {
 }
 
 # ----------------------------------------------------
+# Step 3a: Detect the harness on the RAW payload shape (F1).
+# MUST run before normalization: the camelCase toolName signal is
+# decisive for Copilot and the normalizer removes that field.
+# (ClaudeCode, Copilot, Local, Codex, or DSH)
+# ----------------------------------------------------
+$ide = Detect-IDE -InputObject $parsedInput
+
+# ----------------------------------------------------
+# Step 3.5: Boundary normalization (F1, quad-contract migration).
+# The Copilot harness sends camelCase (toolName/toolArgs/sessionId);
+# every internal consumer reads snake_case. Rewrite the parsed object
+# in place so Step 4's tool_name check and the whole pipeline see the
+# canonical shape. snake_case payloads pass through untouched.
+# ----------------------------------------------------
+$parsedInput = ConvertTo-CanonicalPayload -InputObject $parsedInput
+
+# ----------------------------------------------------
 # Step 4: Validate required fields (post-parse sanity checks)
 # ----------------------------------------------------
 # Missing tool_name is fatal — we cannot classify without it
@@ -79,13 +96,12 @@ catch {
 }
 
 # ----------------------------------------------------
-# Step 7: Detect IDE (ClaudeCode, Copilot, Codex, or DSH)
+# Step 7: (IDE detection moved to Step 3a - must precede normalization)
 # ----------------------------------------------------
-$ide = Detect-IDE -InputObject $parsedInput
 
 # ----------------------------------------------------
 # Step 7b: Adopt the other folders of the VS Code workspace
-# (no-op unless workspace_roots.enabled; VS Code / Copilot only).
+# (no-op unless workspace_roots.enabled; Copilot/Local only).
 # They are treated exactly like the cwd by the path policy.
 # ----------------------------------------------------
 try {
@@ -101,13 +117,38 @@ catch {
 $classifyResult = Invoke-Classify -RawInput $parsedInput -IDE $ide -Config $config
 
 # ----------------------------------------------------
+# Step 8a (F3, 2026-11-14): answer deadline for the detected harness.
+# config answer_deadline_ms keeps the hook's verdict BELOW the harness's
+# own kill timer (Copilot/Local bare registrations: 30 s) so a verdict is
+# never discarded. Effective budget = min(deadline, timeout_ms + 2000)
+# when the LLM wait is enabled (Get-AnswerDeadlineBudgetMs). Checked
+# BEFORE the LLM wait and again after it; on deadline-before-verdict the
+# Decision is a fail-closed ask with the contractual reason template.
+# ----------------------------------------------------
+$deadlineBudgetMs = Get-AnswerDeadlineBudgetMs -Config $config -IDE $ide
+$deadlineExceeded = ($deadlineBudgetMs -gt 0 -and
+                     ((Get-Date) - $startTime).TotalMilliseconds -gt $deadlineBudgetMs)
+
+# ----------------------------------------------------
 # Step 8b: Second-opinion LLM cross-check (no-op unless
 # llm_second_opinion.enabled is true in config). The LLM can
 # only escalate an allow to ask - never downgrade.
+# Skipped when the answer deadline already passed (fail-closed:
+# a verdict that cannot arrive before the kill timer is not worth
+# the tokens; the ask below is emitted immediately). The LLM wait
+# is additionally clamped to the remaining deadline budget.
 # ----------------------------------------------------
 $llmLog = $null
-if ($config._compiled.llmSecondOpinion -and $config._compiled.llmSecondOpinion.Enabled) {
-    $llmOutcome = Invoke-LlmReview -ClassifyResult $classifyResult -Config $config
+if ($deadlineExceeded) {
+    # deadline-before-verdict: no LLM call, the forced ask follows Step 8c
+}
+elseif ($config._compiled.llmSecondOpinion -and $config._compiled.llmSecondOpinion.Enabled) {
+    $remainingMs = 0
+    if ($deadlineBudgetMs -gt 0) {
+        $remainingMs = [long]($deadlineBudgetMs - ((Get-Date) - $startTime).TotalMilliseconds)
+        if ($remainingMs -lt 1000) { $remainingMs = 1000 }   # IRM TimeoutSec floor
+    }
+    $llmOutcome = Invoke-LlmReview -ClassifyResult $classifyResult -Config $config -DeadlineMs $remainingMs
     $classifyResult = $llmOutcome.Result
     $llmLog = $llmOutcome.Log
 }
@@ -116,6 +157,20 @@ elseif ($config._compiled.llmThirdOpinion -and $config._compiled.llmThirdOpinion
     # No LLM calls; an explicit skip log object makes the state records-visible
     # (D13) and renders the dedicated 'LLM2 skipped' line in the .log.
     $llmLog = New-Llm2SkipLog -Config $config
+}
+
+# ----------------------------------------------------
+# Step 8c (F3): deadline-before-verdict -> fail-closed ask. Re-check the
+# budget AFTER the LLM path: either it was already spent before the wait
+# (Step 8a) or the bounded wait abandoned the LLM at the deadline. Either
+# way the verdict did not arrive in time, so ask NOW with the contractual
+# reason instead of risking a discarded response.
+# ----------------------------------------------------
+if (-not $deadlineExceeded -and $deadlineBudgetMs -gt 0) {
+    $deadlineExceeded = ((Get-Date) - $startTime).TotalMilliseconds -gt $deadlineBudgetMs
+}
+if ($deadlineExceeded) {
+    $classifyResult = New-AnswerDeadlineAskResult -ClassifyResult $classifyResult -IDE $ide -BudgetMs $deadlineBudgetMs
 }
 
 # ----------------------------------------------------

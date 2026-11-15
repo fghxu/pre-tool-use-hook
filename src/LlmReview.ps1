@@ -627,11 +627,18 @@ function Complete-LlmHttpCall {
         the main thread adds no timeout of its own; EndInvoke order LLM1 then
         LLM2 makes the total wait max(t1,t2), bounded by LLM1's budget, D11),
         parses the worker's JSON envelope, disposes the runspace.
-        Returns @{ Raw; Error }.
+        F3 (2026-11-14): -WaitBudgetMs > 0 bounds the MAIN-THREAD wait with
+        AsyncWaitHandle.WaitOne; on expiry the runspace is abandoned (disposed,
+        EndInvoke skipped) and the Error reports the deadline - the verdict
+        becomes 'down' and the caller's answer-deadline check turns it into
+        the fail-closed ask. Returns @{ Raw; Error }.
     #>
-    param([hashtable]$Call)
+    param([hashtable]$Call, [long]$WaitBudgetMs = 0)
     $raw = ''; $err = $null
     try {
+        if ($WaitBudgetMs -gt 0 -and -not $Call.Handle.AsyncWaitHandle.WaitOne([int]$WaitBudgetMs)) {
+            return @{ Raw = ''; Error = "answer deadline (${WaitBudgetMs} ms) exceeded before the LLM responded" }
+        }
         $out = @($Call.Ps.EndInvoke($Call.Handle))
         if ($out.Count -gt 0) {
             try { $env2 = $out[0] | ConvertFrom-Json } catch { $env2 = $null }
@@ -882,7 +889,8 @@ function Get-LlmPairVerdicts {
         [Parameter(Mandatory = $true)][PSCustomObject]$Llm1,
         [Parameter(Mandatory = $true)][PSCustomObject]$Llm2,
         [Parameter(Mandatory = $true)][string]$Command,
-        [string[]]$SubCommands = @()
+        [string[]]$SubCommands = @(),
+        [long]$WaitBudgetMs = 0
     )
     $subCount = @($SubCommands).Count
     $mock1 = $env:PRETOOLHOOK_LLMREVIEW_MOCK
@@ -900,12 +908,20 @@ function Get-LlmPairVerdicts {
 
     if ($mock1) { $verdict1 = New-MockVerdict -Token $mock1 -SubCount $subCount -VarName 'PRETOOLHOOK_LLMREVIEW_MOCK' }
     else {
-        $r1 = Complete-LlmHttpCall -Call $c1; $c1.Sw.Stop()
+        $r1 = Complete-LlmHttpCall -Call $c1 -WaitBudgetMs $WaitBudgetMs; $c1.Sw.Stop()
         $verdict1 = Get-LlmRunspaceVerdict -R $r1 -Sw $c1.Sw -SubCount $subCount
     }
     if ($mock2) { $verdict2 = New-MockVerdict -Token $mock2 -SubCount $subCount -VarName 'PRETOOLHOOK_LLMREVIEW_MOCK2' }
     else {
-        $r2 = Complete-LlmHttpCall -Call $c2; $c2.Sw.Stop()
+        # F3: the second wait gets only the REMAINING budget (both calls ran in
+        # parallel, so the pair's wall clock is bounded by WaitBudgetMs total).
+        $budget2 = 0
+        if ($WaitBudgetMs -gt 0) {
+            $spent = if ($c1) { $c1.Sw.ElapsedMilliseconds } else { 0 }
+            $budget2 = $WaitBudgetMs - $spent
+            if ($budget2 -lt 1) { $budget2 = 1 }
+        }
+        $r2 = Complete-LlmHttpCall -Call $c2 -WaitBudgetMs $budget2; $c2.Sw.Stop()
         $verdict2 = Get-LlmRunspaceVerdict -R $r2 -Sw $c2.Sw -SubCount $subCount
     }
     return [PSCustomObject]@{ Verdict1 = $verdict1; Verdict2 = $verdict2 }
@@ -925,7 +941,8 @@ function Get-LlmReviewVerdict {
     param(
         [Parameter(Mandatory = $true)][string]$Command,
         [Parameter(Mandatory = $true)][PSCustomObject]$LlmConfig,
-        [string[]]$SubCommands = @()
+        [string[]]$SubCommands = @(),
+        [long]$DeadlineMs = 0
     )
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $result = [PSCustomObject]@{ Verdict = 'down'; Raw = ''; LatencyMs = 0; Recovered = $false; Error = $null; Indices = $null; Mocked = $false }
@@ -960,6 +977,29 @@ function Get-LlmReviewVerdict {
     # New-LlmRequestBody (two-parameter form; here LLM1 supplies BOTH
     # prompt/sampling and transport - byte-identical payload to before).
     $payload = New-LlmRequestBody -Command $Command -Llm1Config $LlmConfig -EndpointConfig $LlmConfig -SubCommands $SubCommands
+
+    # F3 (2026-11-14): with an answer-deadline budget active, run the SAME
+    # HTTP call through the pair's runspace-abandon mechanism so the main
+    # thread never waits past the deadline (Complete-LlmHttpCall bounds the
+    # wait and abandons the runspace on expiry). Without a deadline the
+    # synchronous IRM path below stays byte-identical.
+    if ($DeadlineMs -gt 0) {
+        $call = Start-LlmHttpCall -Payload $payload
+        $r = Complete-LlmHttpCall -Call $call -WaitBudgetMs $DeadlineMs
+        $sw.Stop(); $result.LatencyMs = $sw.ElapsedMilliseconds
+        if ($r.Error) {
+            $result.Verdict = 'down'
+            $result.Error   = $r.Error
+            return $result
+        }
+        $result.Raw = "$($r.Raw)"
+        $parsed = ConvertTo-LlmVerdict -RawContent $result.Raw -SubCommandCount $subCount
+        $result.Verdict   = $parsed.Verdict
+        $result.Recovered = $parsed.Recovered
+        $result.Indices   = $parsed.Indices
+        return $result
+    }
+
     try {
         $irmParams = @{
             Uri         = $payload.Uri
@@ -1069,7 +1109,8 @@ function Invoke-LlmReview {
     #>
     param(
         [Parameter(Mandatory = $true)][PSCustomObject]$ClassifyResult,
-        [Parameter(Mandatory = $true)][PSCustomObject]$Config
+        [Parameter(Mandatory = $true)][PSCustomObject]$Config,
+        [long]$DeadlineMs = 0
     )
     $llm = $Config._compiled.llmSecondOpinion
     if (-not $llm) { return [PSCustomObject]@{ Result = $ClassifyResult; Log = $null } }
@@ -1185,13 +1226,16 @@ function Invoke-LlmReview {
     # LLM1 path, byte-identical. Armed: parallel PAIR - identical prompt +
     # sampling for both endpoints (D2), transport per endpoint, LLM2's
     # timeout clamped (D11).
+    # F3 (2026-11-14): -DeadlineMs > 0 bounds the wait to the remaining
+    # answer-deadline budget (pair: runspace-abandon via Complete-LlmHttpCall;
+    # sync: IRM TimeoutSec clamp inside Get-LlmReviewVerdict). 0 = unchanged.
     # ----------------------------------------------------------------
     if (-not $pairArmed) {
-        $verdict = Get-LlmReviewVerdict -Command $ClassifyResult.Command -LlmConfig $llm -SubCommands $subTexts
+        $verdict = Get-LlmReviewVerdict -Command $ClassifyResult.Command -LlmConfig $llm -SubCommands $subTexts -DeadlineMs $DeadlineMs
         $verdict2 = $null
     }
     else {
-        $pair = Get-LlmPairVerdicts -Llm1 $llm -Llm2 $llm2 -Command $ClassifyResult.Command -SubCommands $subTexts
+        $pair = Get-LlmPairVerdicts -Llm1 $llm -Llm2 $llm2 -Command $ClassifyResult.Command -SubCommands $subTexts -WaitBudgetMs $DeadlineMs
         $verdict = $pair.Verdict1
         $verdict2 = $pair.Verdict2
     }
