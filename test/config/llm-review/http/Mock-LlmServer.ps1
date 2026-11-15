@@ -30,6 +30,7 @@
 #   ... make the HTTP call under test ...
 #   $srv.State.RequestCount             # how many requests arrived
 #   $srv.State.LastBody / LastMethod / LastPath / LastContentType / LastAuth
+#   $srv.State.LastHeaders              # lower-cased header map
 #   Stop-MockLlmServer $srv             # always stop at the end
 #
 # IMPLEMENTATION NOTES
@@ -59,7 +60,7 @@ function New-MockLlmServer {
     # Per-model override:    BodyByModel[model] -> response body (pair tests;
     #                        falls back to Body when the model is not listed)
     # Request capture:       RequestCount / LastMethod / LastPath /
-    #                        LastContentType / LastAuth / LastBody
+    #                        LastContentType / LastAuth / LastHeaders / LastBody
     #                        + Requests (full per-request log, pair tests)
     # Lifecycle:             Stop (set to $true to end the loop)
     $state = [hashtable]::Synchronized(@{
@@ -74,6 +75,7 @@ function New-MockLlmServer {
         LastPath         = ''
         LastContentType  = ''
         LastAuth         = $null
+        LastHeaders      = @{}
         LastBody         = ''
     })
 
@@ -110,6 +112,11 @@ function New-MockLlmServer {
                 $State.LastContentType  = $req.ContentType
                 $State.LastAuth         = $req.Headers['Authorization']
                 $State.LastBody         = $bodyText
+                # All headers, lower-cased keys (Anthropic Messages uses
+                # x-api-key + anthropic-version instead of Authorization).
+                $hdrMap = @{}
+                foreach ($hk in $req.Headers.AllKeys) { $hdrMap[$hk.ToLowerInvariant()] = $req.Headers[$hk] }
+                $State.LastHeaders      = $hdrMap
 
                 # Pair tests (2026-09-30): parse body.model (best-effort) and
                 # keep a full per-request log so the runner can assert WHICH

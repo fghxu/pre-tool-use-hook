@@ -477,7 +477,10 @@ function New-LlmRequestBody {
         parameters (LlmResponseMaxTokens, AttributedVerdicts,
         JsonMode, TimeoutMs -> default TimeoutSec); $EndpointConfig supplies
         ONLY transport identity (BaseUri, Model, ApiKey).
-        Returns @{ Uri; BodyJson; TimeoutSec; ApiKey }.
+        Returns @{ Uri; BodyJson; TimeoutSec; ApiKey; Headers; ApiStyle }.
+        Headers carries the transport auth/version headers chosen from the
+        BaseUri dialect (Bearer for OpenAI-compatible, x-api-key +
+        anthropic-version for the Anthropic Messages API).
     #>
     param(
         [Parameter(Mandatory = $true)][string]$Command,
@@ -508,29 +511,75 @@ function New-LlmRequestBody {
 
     $baseUri = $EndpointConfig.BaseUri.TrimEnd('/')
 
-    $body = [ordered]@{
-        model       = $EndpointConfig.Model
-        messages    = @(
+    # Two transport dialects (2026-11-15):
+    #   openai    - OpenAI chat-completions. Base URLs seen in the wild:
+    #               http://127.0.0.1:3030, .../v1,
+    #               https://bedrock-runtime.{region}.amazonaws.com/openai/v1
+    #   anthropic - Anthropic Messages API. Bedrock serves it on the
+    #               .../anthropic route as POST {base}/v1/messages with the
+    #               Anthropic wire format and x-api-key + anthropic-version
+    #               headers (no Bearer token, no seed, system prompt top-level).
+    # A full .../anthropic/v1/messages or api.anthropic.com/v1/messages base
+    # URI - and the bare https://api.anthropic.com SDK base - is accepted as-is.
+    $apiStyle = 'openai'
+    if ($baseUri -match '/v1/messages$') {
+        $apiStyle = 'anthropic'; $requestUri = $baseUri
+    }
+    elseif ($baseUri -match '/anthropic(/v1)?$') {
+        $apiStyle = 'anthropic'
+        $requestUri = if ($baseUri -match '/v1$') { "$baseUri/messages" } else { "$baseUri/v1/messages" }
+    }
+    elseif ($baseUri -match '^https?://api\.anthropic\.com$') {
+        $apiStyle = 'anthropic'; $requestUri = "$baseUri/v1/messages"
+    }
+    elseif ($baseUri -match '/v1$') {
+        $requestUri = "$baseUri/chat/completions"
+    }
+    else {
+        $requestUri = "$baseUri/v1/chat/completions"
+    }
+
+    $body = [ordered]@{}
+    if ($apiStyle -eq 'anthropic') {
+        # Messages API: the system prompt is a TOP-LEVEL field (there is no
+        # system role), max_tokens is REQUIRED, and seed/response_format do not
+        # exist (an unknown field is a 400). json_mode is therefore OpenAI-only.
+        $body['model']      = $EndpointConfig.Model
+        $body['max_tokens'] = $Llm1Config.LlmResponseMaxTokens
+        $body['system']     = $sysPrompt
+        $body['messages']   = @(@{ role = 'user'; content = $userPrompt })
+    }
+    else {
+        $body['model']    = $EndpointConfig.Model
+        $body['messages'] = @(
             @{ role = 'system'; content = $sysPrompt },
             @{ role = 'user';   content = $userPrompt }
         )
-    }
-    # gpt-6.x on Bedrock rejects max-token and requires max_completion_tokens.
-    $tokenKey = if ($EndpointConfig.Model -match 'gpt-6') {'max_completion_tokens'} else {'max_tokens'}
-    $body[$tokenKey] = $Llm1Config.LlmResponseMaxTokens
-    $body['seed'] = 0
+        # gpt-6.x on Bedrock rejects max-token and requires max_completion_tokens.
+        $tokenKey = if ($EndpointConfig.Model -match 'gpt-6') {'max_completion_tokens'} else {'max_tokens'}
+        $body[$tokenKey] = $Llm1Config.LlmResponseMaxTokens
+        $body['seed'] = 0
 
-    # JSON mode (config json_mode, default off): constrain the response to be
-    # valid JSON at the API level (response_format: json_object). Attributed
-    # calls only - the V1 contract is a bare token, which is not JSON. This is
-    # the hard fix for reasoning-leaning models that ignore the output
-    # contract and answer with analysis prose (observed 2026-08-03 on BOTH
-    # GLM-5.2 and deepseek-v4-flash -> unusable -> fail-closed ask).
-    if ($attributed -and $Llm1Config.PSObject.Properties['JsonMode'] -and $Llm1Config.JsonMode) {
-        $body['response_format'] = @{ type = 'json_object' }
+        # JSON mode (config json_mode, default off): constrain the response to be
+        # valid JSON at the API level (response_format: json_object). Attributed
+        # calls only - the V1 contract is a bare token, which is not JSON. This is
+        # the hard fix for reasoning-leaning models that ignore the output
+        # contract and answer with analysis prose (observed 2026-08-03 on BOTH
+        # GLM-5.2 and deepseek-v4-flash -> unusable -> fail-closed ask).
+        if ($attributed -and $Llm1Config.PSObject.Properties['JsonMode'] -and $Llm1Config.JsonMode) {
+            $body['response_format'] = @{ type = 'json_object' }
+        }
     }
-    $completionPath = if ($baseUri.EndsWith('/v1', [System.StringComparison]::OrdinalIgnoreCase)) { '/chat/completions' } else { '/v1/chat/completions' }
-    $requestUri = "$baseUri$completionPath"
+
+    $headers = @{}
+    if ($apiStyle -eq 'anthropic') {
+        $headers['anthropic-version'] = '2023-06-01'
+        if ($EndpointConfig.ApiKey) { $headers['x-api-key'] = "$($EndpointConfig.ApiKey)" }
+    }
+    elseif ($EndpointConfig.ApiKey) {
+        $headers['Authorization'] = "Bearer $($EndpointConfig.ApiKey)"
+    }
+
     $bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
     $timeoutSec = [int][math]::Ceiling($Llm1Config.TimeoutMs / 1000.0)
     return @{
@@ -538,6 +587,8 @@ function New-LlmRequestBody {
         BodyJson   = $bodyJson
         TimeoutSec = $timeoutSec
         ApiKey     = "$($EndpointConfig.ApiKey)"
+        Headers    = $headers
+        ApiStyle   = $apiStyle
     }
 }
 
@@ -607,13 +658,26 @@ function Start-LlmHttpCall {
     #>
     param([hashtable]$Payload)
     $workerScript = @'
-param([string]$Uri, [string]$BodyJson, [int]$TimeoutSec, [string]$ApiKey)
+param([string]$Uri, [string]$BodyJson, [int]$TimeoutSec, [string]$ApiKey, [hashtable]$Headers)
 try {
     $irmParams = @{ Uri = $Uri; Method = 'Post'; Body = $BodyJson; ContentType = 'application/json'; TimeoutSec = $TimeoutSec; ErrorAction = 'Stop' }
-    if ($ApiKey) { $irmParams['Headers'] = @{ Authorization = "Bearer $ApiKey" } }
+    if ($Headers -and $Headers.Count -gt 0) { $irmParams['Headers'] = $Headers }
+    elseif ($ApiKey) { $irmParams['Headers'] = @{ Authorization = "Bearer $ApiKey" } }
     $response = Invoke-RestMethod @irmParams
     $raw = ''
     if ($response.choices -and $response.choices[0].message) { $raw = [string]$response.choices[0].message.content }
+    elseif ($null -ne $response.content) {
+        # Anthropic Messages: content is a list of typed blocks; only text
+        # blocks carry .text (thinking blocks are not part of the answer).
+        if ($response.content -is [string]) { $raw = [string]$response.content }
+        else {
+            $parts = @()
+            foreach ($blk in @($response.content)) {
+                if ($null -ne $blk.PSObject.Properties['text']) { $parts += [string]$blk.text }
+            }
+            $raw = ($parts -join "`n")
+        }
+    }
     return @{ raw = $raw; error = $null } | ConvertTo-Json -Compress
 }
 catch {
@@ -624,7 +688,33 @@ catch {
     $null = $ps.AddScript($workerScript)
     $null = $ps.AddArgument($Payload.Uri); $null = $ps.AddArgument($Payload.BodyJson)
     $null = $ps.AddArgument($Payload.TimeoutSec); $null = $ps.AddArgument($Payload.ApiKey)
+    $null = $ps.AddArgument($Payload.Headers)
     return @{ Ps = $ps; Handle = $ps.BeginInvoke(); Sw = [System.Diagnostics.Stopwatch]::StartNew() }
+}
+
+function Get-LlmResponseText {
+    <#
+    .SYNOPSIS
+        Extracts the model's raw answer from an HTTP response (2026-11-15).
+        Handles both envelopes: OpenAI chat-completions
+        (choices[0].message.content) and Anthropic Messages (content[] typed
+        blocks - text blocks are concatenated, thinking blocks dropped).
+        Returns $null when the response carries neither shape.
+    #>
+    param($Response)
+    if ($null -eq $Response) { return $null }
+    if ($Response.choices -and $Response.choices[0].message) {
+        return [string]$Response.choices[0].message.content
+    }
+    if ($Response.PSObject.Properties['content'] -and $null -ne $Response.content) {
+        if ($Response.content -is [string]) { return [string]$Response.content }
+        $parts = @()
+        foreach ($blk in @($Response.content)) {
+            if ($blk.PSObject.Properties['text']) { $parts += [string]$blk.text }
+        }
+        return ($parts -join "`n")
+    }
+    return $null
 }
 
 function Complete-LlmHttpCall {
@@ -939,7 +1029,8 @@ function Get-LlmReviewVerdict {
     .SYNOPSIS
         Returns the LLM verdict for a command. Checks the
         PRETOOLHOOK_LLMREVIEW_MOCK short-circuit FIRST (test-only), then makes
-        the OpenAI-compatible chat-completions call. When
+        the LLM call (OpenAI-compatible chat-completions, or the Anthropic
+        Messages API when the BaseUri points at an /anthropic route). When
         $LlmConfig.AttributedVerdicts is on, the V2 prompt is used and the
         numbered -SubCommands are appended as <sub_commands>; the parser
         returns Indices with the verdict. Result fields: Verdict, Raw,
@@ -1016,13 +1107,11 @@ function Get-LlmReviewVerdict {
             TimeoutSec  = $payload.TimeoutSec
             ErrorAction = 'Stop'
         }
-        if ($payload.ApiKey) { $irmParams['Headers'] = @{ Authorization = "Bearer $($payload.ApiKey)" } }
+        if ($payload.Headers -and $payload.Headers.Count -gt 0) { $irmParams['Headers'] = $payload.Headers }
+        elseif ($payload.ApiKey) { $irmParams['Headers'] = @{ Authorization = "Bearer $($payload.ApiKey)" } }
         $response = Invoke-RestMethod @irmParams
 
-        $raw = $null
-        if ($response.choices -and $response.choices[0].message) {
-            $raw = [string]$response.choices[0].message.content
-        }
+        $raw = Get-LlmResponseText -Response $response
         $result.Raw = "$raw"
         $parsed = ConvertTo-LlmVerdict -RawContent $raw -SubCommandCount $subCount
         $result.Verdict   = $parsed.Verdict

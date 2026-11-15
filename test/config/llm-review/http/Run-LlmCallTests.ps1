@@ -19,7 +19,8 @@
 #       pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1
 #       # or just one file:
 #       pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1 -XmlPath test/config/llm-review/http/test-llm-call-core.xml
-#   Exit 0 = all green (25 checks: 5 core + 20 matrix). Exit 1 = failures.
+#   Exit 0 = all green (38 checks: 5 core + 24 matrix + 6 anthropic + 3 pair).
+#   Exit 1 = failures.
 #
 # HOW TO READ THE OUTPUT
 #   Same convention as the parent suite: silence = passing; failures print as
@@ -35,7 +36,10 @@
 #   name              unique check name (printed on failure)
 #   server            canned server behavior (default 'true'):
 #                       true | false | garbage | upper-true | spaced-false |
-#                       json-verdict | ramble-true | http500 | slow3000 | dead
+#                       json-verdict | ramble-true | http500 | slow3000 | dead |
+#                       anthropic-true | anthropic-false | anthropic-json |
+#                       anthropic-garbage (Anthropic Messages envelopes - use
+#                       with an /anthropic base URI)
 #                     ('dead' = nothing listens on the port; drives the
 #                      connection-refused -> 'down' path)
 #   mode              direct (default: call Get-LlmReviewVerdict in-process) |
@@ -50,7 +54,11 @@
 #   api-key           value for the block's ApiKey (default empty)
 #   model             value for the block's Model (default 'glm-5.2')
 #   base-uri-path     path appended to the mock server's base URI, e.g. '/v1'
-#                     (default empty) - drives the endpoint-suffix cases
+#                     or '/anthropic' (default empty) - drives the endpoint
+#                     variants (OpenAI /v1 suffix, Bedrock Anthropic route)
+#   deadline-ms       when > 0, call Get-LlmReviewVerdict with -DeadlineMs so
+#                     the case runs through the parallel runspace HTTP path
+#                     (default 0 = the synchronous Invoke-RestMethod path)
 #   check             semicolon-separated request assertions (optional):
 #                       method-post      - HTTP method was POST
 #                       path-completions - URL path was /v1/chat/completions
@@ -71,6 +79,13 @@
 #                       truncated to exactly 8000 'x' chars by the payload guard
 #                       (the attributed suffix adds ~80 chars to the user content,
 #                       so this asserts the truncation, not a fixed total)
+#                       path-messages    - URL path was /anthropic/v1/messages
+#                       anthropic-headers- x-api-key == api-key, anthropic-version
+#                       2023-06-01, and NO Authorization header
+#                       anthropic-body   - system prompt top-level (>100 chars),
+#                       exactly one user message, max_tokens == 16, and no
+#                       seed / response_format (Anthropic Messages dialect)
+#                       anthropic-cmd-text - messages[0] content carries the command
 #   command           via <copilot-command> child (default 'Get-Date');
 #                     the token {{X9000}} expands to 9000 'x' characters
 #                     (drives the payload-truncation case)
@@ -130,6 +145,7 @@ if ($XmlPath) {
 else {
     $xmlFiles += Join-Path $httpDir "test-llm-call-core.xml"
     $xmlFiles += Join-Path $httpDir "test-llm-call-matrix.xml"
+    $xmlFiles += Join-Path $httpDir "test-llm-call-anthropic.xml"
     $xmlFiles += Join-Path $httpDir "test-llm-pair.xml"
 }
 
@@ -166,6 +182,18 @@ function Get-CannedResponse {
     function Envelope([string]$content) {
         return (@{ choices = @(@{ message = @{ content = $content } }) } | ConvertTo-Json -Depth 6 -Compress)
     }
+    # Helper: wrap raw model text into the Anthropic Messages envelope.
+    #   {"type":"message","role":"assistant","content":[{"type":"text","text":"..."}]}
+    function AnthropicEnvelope([string]$content) {
+        return (@{
+            id      = 'msg_mock'
+            type    = 'message'
+            role    = 'assistant'
+            model   = 'mock-anthropic'
+            content = @(@{ type = 'text'; text = $content })
+            stop_reason = 'end_turn'
+        } | ConvertTo-Json -Depth 6 -Compress)
+    }
     switch ($Token) {
         'true'         { return @{ Status = 200; Body = (Envelope 'true');  DelayMs = 0 } }
         'false'        { return @{ Status = 200; Body = (Envelope 'false'); DelayMs = 0 } }
@@ -176,6 +204,11 @@ function Get-CannedResponse {
         'ramble-true'  { return @{ Status = 200; Body = (Envelope "reasoning about the command`ntrue"); DelayMs = 0 } }
         'http500'      { return @{ Status = 500; Body = '{"error":{"message":"boom"}}'; DelayMs = 0 } }
         'slow3000'     { return @{ Status = 200; Body = (Envelope 'true');  DelayMs = 3000 } }
+        # Anthropic Messages envelopes (2026-11-15).
+        'anthropic-true'    { return @{ Status = 200; Body = (AnthropicEnvelope 'true');  DelayMs = 0 } }
+        'anthropic-false'   { return @{ Status = 200; Body = (AnthropicEnvelope 'false'); DelayMs = 0 } }
+        'anthropic-json'    { return @{ Status = 200; Body = (AnthropicEnvelope '{"modifying":[2]}'); DelayMs = 0 } }
+        'anthropic-garbage' { return @{ Status = 200; Body = (AnthropicEnvelope 'I would rather not answer that.'); DelayMs = 0 } }
         default        { throw "Get-CannedResponse: unknown server token '$Token'" }
     }
 }
@@ -225,6 +258,26 @@ function Invoke-RequestChecks {
             'truncated-8000'   { $len = ($bodyObj.messages[1].content).Length; $xc = ([regex]::Matches([string]$bodyObj.messages[1].content, 'x')).Count; $ok = ($bodyObj -and $xc -eq 8000 -and $len -lt 9000); $why = "user content length=$len x-count=$xc (want the 9000-char command truncated to 8000)" }
             'subcmds-tags'   { $c = $bodyObj.messages[1].content; $ok = ($bodyObj -and $c.Contains('<sub_commands>') -and $c.Contains('</sub_commands>') -and $c.Contains('1. ')); $why = "user content missing numbered <sub_commands> block" }
             'nosubcmds-tags' { $c = $bodyObj.messages[1].content; $ok = ($bodyObj -and -not $c.Contains('<sub_commands>')); $why = "user content unexpectedly contains <sub_commands>" }
+            # ----- Anthropic Messages dialect (2026-11-15) -----
+            'path-messages'  { $ok = ($State.LastPath -eq '/anthropic/v1/messages');                      $why = "path=$($State.LastPath)" }
+            'anthropic-headers' {
+                $h = $State.LastHeaders
+                $verOk    = ($h -and "$($h['anthropic-version'])" -eq '2023-06-01')
+                $keyOk    = ($h -and $ApiKey -and "$($h['x-api-key'])" -eq $ApiKey)
+                $noBearer = ($h -and -not $h.ContainsKey('authorization'))
+                $ok = ($verOk -and $keyOk -and $noBearer)
+                $why = "anthropic-version=$($h['anthropic-version']) x-api-key=$($h['x-api-key']) authorization=$($h['authorization'])"
+            }
+            'anthropic-body' {
+                $sysOk    = ($bodyObj -and ($bodyObj.system -is [string]) -and $bodyObj.system.Length -gt 100)
+                $msgCount = if ($bodyObj) { @($bodyObj.messages).Count } else { -1 }
+                $userOk   = ($bodyObj -and $msgCount -eq 1 -and $bodyObj.messages[0].role -eq 'user')
+                $maxOk    = ($bodyObj -and $bodyObj.max_tokens -and [int]$bodyObj.max_tokens -ge 1)
+                $noExtra  = ($bodyObj -and -not $bodyObj.PSObject.Properties['seed'] -and -not $bodyObj.PSObject.Properties['response_format'])
+                $ok = ($sysOk -and $userOk -and $maxOk -and $noExtra)
+                $why = "system-len=$(($bodyObj.system).Length) messages=$msgCount role=$($bodyObj.messages[0].role) max_tokens=$($bodyObj.max_tokens) seed=$($bodyObj.seed) response_format=$($bodyObj.response_format)"
+            }
+            'anthropic-cmd-text' { $ok = ($bodyObj -and ($bodyObj.messages[0].content).Contains($Command)); $why = "user content does not carry the command" }
             default            { $ok = $false;                                                             $why = "unknown check token '$t'" }
         }
         if (-not $ok) { return @($false, "check '$t' failed: $why") }
@@ -266,6 +319,7 @@ try {
         $apiKey          = if ($tc.HasAttribute('api-key'))          { $tc.GetAttribute('api-key') }          else { '' }
         $modelName       = if ($tc.HasAttribute('model'))            { $tc.GetAttribute('model') }            else { 'glm-5.2' }
         $baseUriPath     = if ($tc.HasAttribute('base-uri-path'))    { $tc.GetAttribute('base-uri-path') }    else { '' }
+        $deadlineMs      = if ($tc.HasAttribute('deadline-ms'))      { [long]$tc.GetAttribute('deadline-ms') } else { 0 }
         $checkSpec       = if ($tc.HasAttribute('check'))            { $tc.GetAttribute('check') }            else { '' }
         $attrVerdicts    = if ($tc.HasAttribute('attributed'))       { [bool]::Parse($tc.GetAttribute('attributed')) } else { $true }
         $pair            = if ($tc.HasAttribute('pair'))             { [bool]::Parse($tc.GetAttribute('pair')) } else { $false }
@@ -296,6 +350,7 @@ try {
             $server.State.LastPath     = ''
             $server.State.LastBody     = ''
             $server.State.LastAuth     = $null
+            $server.State.LastHeaders  = @{}
             # Pair cases (2026-09-30): per-model response scripting + fresh
             # request log. The two canned responses are keyed by the model
             # names the pair will send ('glm-5.2' / 'mock2-model').
@@ -376,6 +431,12 @@ try {
                     $ok = ($server.State.RequestCount -eq $expectHit)
                     if (-not $ok) { $detail += " | server hits expected $expectHit got $($server.State.RequestCount)" }
                 }
+                # Request-shape assertions also apply to fullpipe cases.
+                if ($ok -and $checkSpec -and $serverToken -ne 'dead') {
+                    $cr = Invoke-RequestChecks -CheckSpec $checkSpec -State $server.State -Command $command -Model $modelName -ApiKey $apiKey
+                    $ok = $cr[0]
+                    if (-not $ok) { $detail += " | $($cr[1])" }
+                }
                 # Pair dispatch proof (2026-09-30): every named model must have
                 # arrived at the ONE endpoint (LLM1 + LLM2, order-insensitive).
                 if ($ok -and $expectModels) {
@@ -400,7 +461,12 @@ try {
         # ==================================================================
         $verdict = $null
         try {
-            $verdict = Get-LlmReviewVerdict -Command $command -LlmConfig $llmCfg -SubCommands $subCmds
+            if ($deadlineMs -gt 0) {
+                $verdict = Get-LlmReviewVerdict -Command $command -LlmConfig $llmCfg -SubCommands $subCmds -DeadlineMs $deadlineMs
+            }
+            else {
+                $verdict = Get-LlmReviewVerdict -Command $command -LlmConfig $llmCfg -SubCommands $subCmds
+            }
         }
         catch {
             Record-Result -Ok $false -Name $name -Detail "threw: $($_.Exception.Message)"

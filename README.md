@@ -61,8 +61,8 @@ prompt only when strictness is `strict`.
 ## LLM Second Opinion (`llm_second_opinion`)
 
 An optional second pair of eyes: **in-scope** command blocks are also classified
-by an LLM via an OpenAI-compatible local gateway, and the two verdicts are
-reconciled. The LLM can only ever *escalate* (force a prompt) — it never
+by an LLM via an OpenAI-compatible gateway (or a Bedrock Anthropic Messages
+endpoint), and the two verdicts are reconciled. The LLM can only ever *escalate* (force a prompt) — it never
 downgrades a local prompt to an auto-allow, so prompt injection cannot create an
 allow the local engine didn't already produce.
 
@@ -89,6 +89,15 @@ allow the local engine didn't already produce.
 - **Fail closed**: unreachable/timeout → `*** LLM-DOWN ***` prompt; unparseable
   or out-of-range answer → `*** LLM-UNUSABLE ***` prompt. Both wordings tell
   you the feature is on and how to disable it.
+- **Endpoint dialects** (2026-11-15): `base_uri` selects the wire format. An
+  ordinary URL keeps the OpenAI chat-completions shape
+  (`{base_uri}/v1/chat/completions`, `Authorization: Bearer …`); a Bedrock
+  Anthropic Messages base such as
+  `https://bedrock-runtime.{region}.amazonaws.com/anthropic` posts to
+  `{base_uri}/v1/messages` with `x-api-key` + `anthropic-version: 2023-06-01`,
+  the system prompt as a top-level field and no `seed`/`response_format`, and
+  unwraps the answer from the `content[]` text blocks. Prompts, verdict
+  contract and parser are identical across dialects.
 - **Reconciliation logging**: every check writes a four-line block to the
   `.log` (`LLM-SENT` numbered list → `LLM-RECV` raw response → `LLM-LOCAL`
   decision + tiers → `LLM-RECONCILE` flagged/suppressed/veto → FINAL, with

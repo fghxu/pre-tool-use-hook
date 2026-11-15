@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- LLM-CALL ANTHROPIC SUITE (2026-11-15) - the Anthropic Messages dialect.
+     Bedrock serves the Messages API on the .../anthropic route, so a base_uri
+     ending in /anthropic must produce a DIFFERENT request than the OpenAI
+     chat-completions one: POST {base}/v1/messages, x-api-key +
+     anthropic-version headers (no Authorization), the system prompt as a
+     TOP-LEVEL field, one user message, max_tokens required, and no
+     seed / response_format. The answers come back as content[] text blocks,
+     which the parser must unwrap into the same raw token/JSON contract.
+     All cases run against the local mock server (no quota, no AWS creds).
+     Run:
+       pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1 -XmlPath test/config/llm-review/http/test-llm-call-anthropic.xml -->
+<commands>
+  <category-group name="LlmCallAnthropic">
+
+    <!-- ===== Outgoing request shape ===== -->
+
+    <test-case name="A-Bedrock-Path-Headers-Body" server="anthropic-true"
+               base-uri-path="/anthropic" model="us.anthropic.claude-sonnet-5"
+               api-key="bedrock-key" expect-verdict="modifying"
+               check="method-post;path-messages;ct-json;anthropic-headers;anthropic-body;anthropic-cmd-text;maxtok-16;model">
+      <description>base_uri .../anthropic => POST /anthropic/v1/messages with x-api-key + anthropic-version, top-level system, one user message, max_tokens=16, no seed/response_format</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="A-V2-Indices" server="anthropic-json"
+               base-uri-path="/anthropic" model="us.anthropic.claude-sonnet-5"
+               api-key="bedrock-key" subcommands="Get-Date;Get-ChildItem c:\temp"
+               expect-verdict="modifying" check="anthropic-body;anthropic-cmd-text">
+      <description>attributed mode: Anthropic content[].text carrying {"modifying":[2]} parses through the real V2 parser => modifying (system prompt is still the V2 one)</description>
+      <copilot-command><![CDATA[Get-Date ; Get-ChildItem c:\temp]]></copilot-command>
+    </test-case>
+
+    <!-- ===== Response handling ===== -->
+
+    <test-case name="A-Resp-ReadOnly" server="anthropic-false"
+               base-uri-path="/anthropic" model="us.anthropic.claude-sonnet-5"
+               expect-verdict="read-only">
+      <description>Anthropic envelope with content[0].text='false' => read-only</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="A-Resp-GarbageUnusable" server="anthropic-garbage"
+               base-uri-path="/anthropic" model="us.anthropic.claude-sonnet-5"
+               expect-verdict="unusable">
+      <description>Anthropic envelope with prose-only text => unusable (fail-closed, unchanged parser)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <!-- ===== Parallel runspace path (pair/deadline transport) ===== -->
+
+    <test-case name="A-Runspace-Deadline" server="anthropic-true"
+               base-uri-path="/anthropic" model="us.anthropic.claude-sonnet-5"
+               api-key="bedrock-key" deadline-ms="5000" expect-verdict="modifying"
+               check="path-messages;anthropic-headers;anthropic-body">
+      <description>-DeadlineMs routes the call through Start-LlmHttpCall (the pair runspace worker): same Anthropic URI, headers and body, answer unwrapped from content[]</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <!-- ===== Full pipe: config -> Hook.ps1 -> HTTP ===== -->
+
+    <test-case name="A-Fullpipe-Allow" mode="fullpipe" server="anthropic-false"
+               base-uri-path="/anthropic" expect-hit="1" expect-decision="allow"
+               check="method-post;path-messages;anthropic-body">
+      <description>real Hook.ps1 child with llm_second_opinion.base_uri ending in /anthropic: request lands on /anthropic/v1/messages in the Anthropic shape and the read-only answer keeps the decision allow</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+  </category-group>
+</commands>

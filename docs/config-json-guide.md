@@ -361,14 +361,28 @@ two verdicts are compared. The LLM can only ever **escalate** an `allow` to
 |-------|---------|
 | `enabled` | Master switch (bool). When true, `base_uri` and `model` are required (loader throws otherwise). |
 | `level` | `all` = check every command · `complex_commands` = check only blocks with ≥ `complex_min_subcommands` decomposed sub-commands (a pipe implies 2+) · `complex_remote` = the `complex_commands` rule AND a `remote_indicators` match. Unknown value → loader throws (fail-closed). |
-| `base_uri` / `model` | OpenAI-compatible gateway; the hook POSTs to `{base_uri}/v1/chat/completions`. |
-| `api_key` | Optional; sent as `Authorization: Bearer …` only when non-empty. Empty for a local gateway. |
+| `base_uri` / `model` | LLM endpoint. The transport dialect is picked from `base_uri` (see below): an OpenAI-compatible gateway POSTs to `{base_uri}/v1/chat/completions`; a Bedrock Anthropic Messages base URI POSTs to `{base_uri}/v1/messages`. |
+| `api_key` | Optional; OpenAI-compatible endpoints get `Authorization: Bearer …`, Anthropic endpoints get `x-api-key: …` (plus `anthropic-version: 2023-06-01`). Nothing is sent when empty — fine for a local gateway. |
 | `timeout_ms` | LLM wait budget (default 12000). When the feature is enabled, the hook's hard cap becomes `timeout_ms + 2000` (3000 ms otherwise). |
 | `temperature` / `max_tokens` | Sampling parameters (defaults 0.0 / 64 — raised from 16 in phase II because attributed JSON answers are longer; a token cap is never a target, a well-behaved model stops after the closing `}`). |
 | `complex_min_subcommands` | Integer ≥ 1 (default 2). What "complex" means for the two complex levels. |
 | `attributed_verdicts` | Bool (default true; non-bool → loader throws). Phase II: the LLM also receives the numbered sub-command list and answers `{"modifying":[indices]}`; see the suppression table below. `false` restores the phase-I binary prompt/veto. |
 | `json_mode` | Bool (default false; non-bool → loader throws). Phase III (2026-08-03): send `response_format: {"type":"json_object"}` on **attributed** calls, constraining the model to emit valid JSON — the hard fix for reasoning-leaning models that ignore the output contract and answer with analysis prose (→ unusable → fail-closed ask). Requires gateway support (the local gateway documents it). Ignored for the V1 binary contract (a bare token is not JSON). Pair with the hardened V2 prompt (negative example + first-character rule). |
 | `remote_indicators` | Optional array of regex (case-insensitive), matched against every sub-command AND the full original command text. Defaults: `\baws\b`, `\bkubectl\b`, `\bhelm\b`, `\bterraform\b`, `\bssh\b`, `\bscp\b`, `\bsftp\b`, `\bdocker\b`, `\bcurl\b`, `\bwget\b`, `\bInvoke-RestMethod\b`, `\birm\b`, `\bInvoke-WebRequest\b`, `\biwr\b`, `\bEnter-PSSession\b`, `\bNew-PSSession\b`, `Invoke-Command.*-ComputerName`. **git is deliberately absent (local).** |
+
+**Transport dialects** (2026-11-15) — the request shape is chosen from
+`base_uri`, so no extra config key is needed:
+
+| `base_uri` shape | POST target | Wire format |
+|---|---|---|
+| anything else (e.g. `http://127.0.0.1:3030`, `.../openai/v1`) | `{base_uri}/v1/chat/completions` | OpenAI chat-completions: `messages` carries the system prompt, body has `seed` and—unless the model rejects it—`max_tokens` (`gpt-6.x` gets `max_completion_tokens`); `json_mode` adds `response_format` |
+| `.../anthropic` (Bedrock Messages API, e.g. `https://bedrock-runtime.us-east-1.amazonaws.com/anthropic`) | `{base_uri}/v1/messages` | Anthropic Messages: `system` is a **top-level** field, one `user` message, `max_tokens` required, no `seed` / `response_format`; headers `x-api-key` + `anthropic-version: 2023-06-01` |
+| `.../anthropic/v1/messages`, `.../anthropic/v1`, `https://api.anthropic.com` | that base (with `/messages` appended where needed) | same as above |
+
+The prompts, the response contract (raw `true`/`false`, attributed JSON) and the
+parser are identical across dialects; for Anthropic the answer is read from the
+`content[]` text blocks of the response instead of `choices[0].message.content`.
+`api_key` is required by Bedrock (use a Bedrock API key / bearer token).
 
 **Outcome matrix** (in-scope results only; all forced asks keep exit code 0):
 
