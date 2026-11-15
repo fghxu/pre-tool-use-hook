@@ -13,18 +13,5 @@
   "enabledMcpjsonServers": [
     "brave-search",
     "ddg-search"
-  ],
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "pwsh -NoProfile -NonInteractive -File C:/git/cc/pretoolhook/src/Hook.ps1"
-          }
-        ]
-      }
-    ]
-  }
+  ]
 }
