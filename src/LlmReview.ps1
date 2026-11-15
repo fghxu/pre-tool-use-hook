@@ -506,15 +506,20 @@ function New-LlmRequestBody {
         $userPrompt += "`nReply with the JSON object only. The first character of your response must be '{'."
     }
 
+    $baseUri = $EndpointConfig.BaseUri.TrimEnd('/')
+
     $body = [ordered]@{
         model       = $EndpointConfig.Model
         messages    = @(
             @{ role = 'system'; content = $sysPrompt },
             @{ role = 'user';   content = $userPrompt }
         )
-        max_tokens  = $Llm1Config.LlmResponseMaxTokens
-        seed        = 0
     }
+    # gpt-6.x on Bedrock rejects max-token and requires max_completion_tokens.
+    $tokenKey = if ($EndpointConfig.Model -match 'gpt-6') {'max_completion_tokens'} else {'max_tokens'}
+    $body[$tokenKey] = $Llm1Config.LlmResponseMaxTokens
+    $body['seed'] = 0
+
     # JSON mode (config json_mode, default off): constrain the response to be
     # valid JSON at the API level (response_format: json_object). Attributed
     # calls only - the V1 contract is a bare token, which is not JSON. This is
@@ -524,10 +529,12 @@ function New-LlmRequestBody {
     if ($attributed -and $Llm1Config.PSObject.Properties['JsonMode'] -and $Llm1Config.JsonMode) {
         $body['response_format'] = @{ type = 'json_object' }
     }
+    $completionPath = if ($baseUri.EndsWith('/v1', [System.StringComparison]::OrdinalIgnoreCase)) { '/chat/completions' } else { '/v1/chat/completions' }
+    $requestUri = "$baseUri$completionPath"
     $bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
     $timeoutSec = [int][math]::Ceiling($Llm1Config.TimeoutMs / 1000.0)
     return @{
-        Uri        = "$($EndpointConfig.BaseUri)/v1/chat/completions"
+        Uri        = $requestUri
         BodyJson   = $bodyJson
         TimeoutSec = $timeoutSec
         ApiKey     = "$($EndpointConfig.ApiKey)"

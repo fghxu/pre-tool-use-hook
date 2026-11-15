@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- LLM-CALL MATRIX SUITE - 20 cases pinning the exact request the hook sends
+<!-- LLM-CALL MATRIX SUITE - 22 cases pinning the exact request the hook sends
      and the response/failure handling of Get-LlmReviewVerdict, all against the
-     local mock server (no quota). Cases 1-14 assert properties of the outgoing
-     request (method, path, headers, JSON body fields, payload guard); 15-18
-     assert response-parsing variants; 19-20 assert failure paths.
+     local mock server (no quota). Cases 1-16 assert properties of the outgoing
+     request (method, path, headers, JSON body fields, payload guard, Bedrock
+     endpoint variants); the rest assert response-parsing variants and failure
+     paths.
      Run:
        pwsh -NoProfile -File test/config/llm-review/http/Run-LlmCallTests.ps1 -XmlPath test/config/llm-review/http/test-llm-call-matrix.xml -->
 <commands>
@@ -63,6 +64,18 @@
 
     <test-case name="M-Seed-Zero" server="true" expect-verdict="modifying" check="seed-0">
       <description>body.seed is 0 (fixed seed)</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <!-- ===== Bedrock endpoint variants (2026-11-15) ===== -->
+
+    <test-case name="M-BaseUri-V1Suffix" server="true" base-uri-path="/v1" expect-verdict="modifying" check="path-completions;seed-0">
+      <description>base_uri already ending in /v1 is not doubled: path stays /v1/chat/completions</description>
+      <copilot-command><![CDATA[Get-Date]]></copilot-command>
+    </test-case>
+
+    <test-case name="M-Bedrock-Gpt6-MaxCompletionTokens" server="true" model="openai.gpt-6.2" base-uri-path="/v1" expect-verdict="modifying" check="maxtok-completion-16;model">
+      <description>gpt-6.x on Bedrock gets max_completion_tokens (no max_tokens) at .../v1/chat/completions</description>
       <copilot-command><![CDATA[Get-Date]]></copilot-command>
     </test-case>
 

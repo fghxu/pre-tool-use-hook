@@ -48,6 +48,9 @@
 #   reason-contains   substring asserted on the reason (fullpipe mode)
 #   timeout-ms        LLM wait budget for this case (default 5000)
 #   api-key           value for the block's ApiKey (default empty)
+#   model             value for the block's Model (default 'glm-5.2')
+#   base-uri-path     path appended to the mock server's base URI, e.g. '/v1'
+#                     (default empty) - drives the endpoint-suffix cases
 #   check             semicolon-separated request assertions (optional):
 #                       method-post      - HTTP method was POST
 #                       path-completions - URL path was /v1/chat/completions
@@ -59,6 +62,8 @@
 #                       cmd-text         - user content carries the exact command
 #                       temp-absent      - body has no temperature field
 #                       maxtok-16        - body.max_tokens == 16
+#                       maxtok-completion-16 - body.max_completion_tokens == 16
+#                       AND no max_tokens (gpt-6.x / Bedrock token field)
 #                       seed-0           - body.seed == 0
 #                       auth-present     - Authorization: Bearer <api-key> arrived
 #                       auth-absent      - no Authorization header arrived
@@ -208,6 +213,12 @@ function Invoke-RequestChecks {
             'cmd-text'         { $ok = ($bodyObj -and ($bodyObj.messages[1].content).Contains($Command));  $why = "user content does not carry the command" }
             'temp-absent'      { $ok = ($bodyObj -and -not $bodyObj.PSObject.Properties['temperature']);   $why = "body contains temperature=$($bodyObj.temperature)" }
             'maxtok-16'        { $ok = ($bodyObj -and [int]$bodyObj.max_tokens -eq 16);                    $why = "max_tokens=$($bodyObj.max_tokens)" }
+            'maxtok-completion-16' {
+                $hasCompletion = ($bodyObj -and $bodyObj.PSObject.Properties['max_completion_tokens'])
+                $hasClassic    = ($bodyObj -and $bodyObj.PSObject.Properties['max_tokens'])
+                $ok = ($hasCompletion -and [int]$bodyObj.max_completion_tokens -eq 16 -and -not $hasClassic)
+                $why = "max_completion_tokens=$($bodyObj.max_completion_tokens) max_tokens=$($bodyObj.max_tokens) (want 16 on max_completion_tokens and NO max_tokens)"
+            }
             'seed-0'           { $ok = ($bodyObj -and [int]$bodyObj.seed -eq 0);                           $why = "seed=$($bodyObj.seed)" }
             'auth-present'     { $ok = ($State.LastAuth -eq "Bearer $ApiKey");                             $why = "Authorization=$($State.LastAuth)" }
             'auth-absent'      { $ok = [string]::IsNullOrEmpty($State.LastAuth);                           $why = "Authorization=$($State.LastAuth)" }
@@ -253,6 +264,8 @@ try {
         $reasonContains  = if ($tc.HasAttribute('reason-contains'))  { $tc.GetAttribute('reason-contains') }  else { $null }
         $timeoutMs       = if ($tc.HasAttribute('timeout-ms'))       { [int]$tc.GetAttribute('timeout-ms') }  else { 5000 }
         $apiKey          = if ($tc.HasAttribute('api-key'))          { $tc.GetAttribute('api-key') }          else { '' }
+        $modelName       = if ($tc.HasAttribute('model'))            { $tc.GetAttribute('model') }            else { 'glm-5.2' }
+        $baseUriPath     = if ($tc.HasAttribute('base-uri-path'))    { $tc.GetAttribute('base-uri-path') }    else { '' }
         $checkSpec       = if ($tc.HasAttribute('check'))            { $tc.GetAttribute('check') }            else { '' }
         $attrVerdicts    = if ($tc.HasAttribute('attributed'))       { [bool]::Parse($tc.GetAttribute('attributed')) } else { $true }
         $pair            = if ($tc.HasAttribute('pair'))             { [bool]::Parse($tc.GetAttribute('pair')) } else { $false }
@@ -270,7 +283,7 @@ try {
         if ($command -eq '{{X9000}}') { $command = 'x' * 9000 }
 
         # ----- Point the case at the mock server (or at a dead port) -----
-        $baseUri = $server.BaseUri
+        $baseUri = "$($server.BaseUri)$baseUriPath"
         if ($serverToken -eq 'dead') { $baseUri = "http://127.0.0.1:$(New-DeadPort)" }
         else {
             # Reset the shared server: zero captures, program the next response.
@@ -299,7 +312,7 @@ try {
             Enabled               = $true
             Level                 = 'all'
             BaseUri               = $baseUri
-            Model                 = 'glm-5.2'
+            Model                 = $modelName
             ApiKey                = $apiKey
             TimeoutMs             = $timeoutMs
             Temperature           = 0.0
