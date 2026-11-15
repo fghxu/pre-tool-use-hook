@@ -10,8 +10,8 @@
       <description>ClaudeCode: rm -rf (modifying, exit 0)</description>
       <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"rm -rf /srv/build"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:01.123Z","tool_use_id":"call_test002","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
-    <test-case expected-decision="ask" expected-exit="2" expected-reason="unknown tool" category="CC-FullPipe-Unknown">
-      <description>ClaudeCode: unknown tool (exit 2, genuine error)</description>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="unknown tool" category="CC-FullPipe-Unknown">
+      <description>ClaudeCode: unknown tool (ask, exit 0 - F2 2026-11-14: unknown tool is a Decision, not a Fatal failure)</description>
       <hook-input><![CDATA[{"tool_name":"SomeUnknownTool","tool_input":{"command":"whatever"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:02.123Z","tool_use_id":"call_test003","transcript_path":"/home/user/.claude/projects/test/session.jsonl"}]]></hook-input>
     </test-case>
     <test-case expected-decision="ask" expected-exit="2" expected-reason="could not extract command" category="CC-FullPipe-NoCommand">
@@ -57,8 +57,8 @@
       <description>Copilot: docker stop (modifying, exit 0)</description>
       <hook-input><![CDATA[{"tool_name":"run_in_terminal","tool_input":{"command":"docker stop my-container"},"hook_event_name":"preToolUse","timestamp":"1715568003"}]]></hook-input>
     </test-case>
-    <test-case expected-decision="ask" expected-exit="2" expected-reason="unknown tool" category="CP-FullPipe-Unknown">
-      <description>Copilot: unknown tool (exit 2, genuine error)</description>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="unknown tool" category="CP-FullPipe-Unknown">
+      <description>Copilot: unknown tool (ask, exit 0 - F2 2026-11-14: Decision, not Fatal)</description>
       <hook-input><![CDATA[{"tool_name":"made_up_tool","tool_input":{"command":"foo"},"hook_event_name":"preToolUse","timestamp":"1715568004"}]]></hook-input>
     </test-case>
     <test-case expected-decision="ask" expected-exit="0" expected-reason="Stop-Process" category="CP-FullPipe-VSCode-NoTranscript">
@@ -96,8 +96,8 @@
       <description>Codex: kubectl delete pod (modifying, deny, exit 0)</description>
       <hook-input><![CDATA[{"tool_name":"Bash","tool_input":{"command":"kubectl delete pod my-pod -n default"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:05.123Z","tool_use_id":"call_cx006","turn_id":"turn_pqr678"}]]></hook-input>
     </test-case>
-    <test-case expected-decision="deny" expected-exit="2" expected-reason="unknown tool" category="CX-FullPipe-Unknown">
-      <description>Codex: unknown tool (exit 2, genuine error — Format-Output maps all ask→deny including errors)</description>
+    <test-case expected-decision="deny" expected-exit="0" expected-reason="unknown tool" category="CX-FullPipe-Unknown">
+      <description>Codex: unknown tool (ask Decision mapped to deny, exit 0 - F2 2026-11-14: Decision, not Fatal; Format-Output maps ask→deny)</description>
       <hook-input><![CDATA[{"tool_name":"SomeUnknownTool","tool_input":{"command":"whatever"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:06.123Z","tool_use_id":"call_cx007","turn_id":"turn_stu901"}]]></hook-input>
     </test-case>
     <test-case expected-decision="deny" expected-exit="0" expected-reason="system path" category="CX-FullPipe-FileToolSystem">
@@ -136,8 +136,8 @@
       <description>DSH: Write to editable path via Write tool (allow, exit 0)</description>
       <hook-input><![CDATA[{"tool_name":"create_file","tool_input":{"filePath":"C:\\temp\\notes.txt","content":"x"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:05.123Z","tool_use_id":"call_dsh006","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh006","root_call_id":"call_dsh006"}}]]></hook-input>
     </test-case>
-    <test-case expected-decision="ask" expected-exit="2" expected-reason="unknown tool" category="DSH-FullPipe-Unknown">
-      <description>DSH: unknown tool (exit 2, genuine error — bridge treats exit 2 as fail-closed deny)</description>
+    <test-case expected-decision="ask" expected-exit="0" expected-reason="unknown tool" category="DSH-FullPipe-Unknown">
+      <description>DSH: unknown tool (ask, exit 0 - F2 2026-11-14: Decision, not Fatal; the bridge prompts on ask)</description>
       <hook-input><![CDATA[{"tool_name":"SomeUnknownTool","tool_input":{"command":"whatever"},"hook_event_name":"PreToolUse","timestamp":"2026-06-15T14:30:06.123Z","tool_use_id":"call_dsh007","session_id":"session-aaa111","dsh":{"harness":"DeepSeek Harness","call_id":"call_dsh007","root_call_id":"call_dsh007"}}]]></hook-input>
     </test-case>
     <test-case expected-decision="allow" expected-exit="0" expected-reason="ignored tool" category="DSH-FullPipe-Skip">

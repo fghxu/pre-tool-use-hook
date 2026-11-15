@@ -71,11 +71,13 @@ $vscodeRead = New-Payload @'
 '@
 Assert-Equal "VS Code Read tool payload -> Copilot" "Copilot" (Detect-IDE -InputObject $vscodeRead)
 
-# 1c: older VS Code Copilot shape (tool_use_id __vscode- + copilot-chat transcript)
+# 1c: older VS Code shape (tool_use_id __vscode- + copilot-chat transcript).
+#     F1 (2026-11-14): the __vscode- fingerprint is the deprecated VS Code
+#     Local harness, not the Copilot harness -> labelled "Local" (.local.log).
 $vscodeOld = New-Payload @'
 {"hook_event_name":"PreToolUse","tool_name":"run_in_terminal","tool_input":{"command":"ls"},"tool_use_id":"toolu_bdrk_abc__vscode-1111-2222","timestamp":"2026-06-15T14:30:00.123Z","transcript_path":"c:\\Users\\fghxu\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ce8aeb6b\\GitHub.copilot-chat\\transcripts\\4c5a4d02.jsonl"}
 '@
-Assert-Equal "VS Code legacy payload (__vscode- tool_use_id) -> Copilot" "Copilot" (Detect-IDE -InputObject $vscodeOld)
+Assert-Equal "VS Code legacy payload (__vscode- tool_use_id) -> Local" "Local" (Detect-IDE -InputObject $vscodeOld)
 
 # 1d: legacy camelCase preToolUse + epoch timestamp (pre-Claude-protocol Copilot)
 $vscodeCamel = New-Payload @'

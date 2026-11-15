@@ -247,6 +247,25 @@ Invoke-Case "HC-19 Copilot deadline >= 30000 throws at load" {
     Assert-True "HC-19 over-30s deadline rejected" $threw
 }
 
+# F3 enforcement pins (added at GREEN time per the ambiguity rule: the
+# reason template is contractual per Update doc 7.3.3, so it gets pinned).
+Invoke-Case "HC-24 deadline ask reason template + exit 0 (unit)" {
+    $base = [PSCustomObject]@{ Decision = 'allow'; Reason = 'read-only'; ExitCode = 0; ToolName = 'Bash'; Command = 'Get-Date' }
+    $r = New-AnswerDeadlineAskResult -ClassifyResult $base -IDE 'Copilot' -BudgetMs 28000
+    Assert-Equal "HC-24a decision ask" "ask" $r.Decision
+    Assert-Equal "HC-24b exit 0" "0" "$($r.ExitCode)"
+    Assert-Equal "HC-24c exact reason template" `
+        "LLM assessment incomplete (28000 ms Copilot answer deadline) - fail-closed" $r.Reason
+}
+
+Invoke-Case "HC-25 budget = min(deadline, llm timeout+2000), 0 when absent" {
+    $cfg = Load-Config -Path (Join-Path $suiteDir 'config.deadline.json')
+    Assert-Equal "HC-25a Copilot budget 28000 (LLM off)" 28000 (Get-AnswerDeadlineBudgetMs -Config $cfg -IDE 'Copilot')
+    Assert-Equal "HC-25b ClaudeCode no entry -> 0" 0 (Get-AnswerDeadlineBudgetMs -Config $cfg -IDE 'ClaudeCode')
+    $cfgPlain = Load-Config -Path (Join-Path $suiteDir 'config.json')
+    Assert-Equal "HC-25c no answer_deadline_ms key -> 0" 0 (Get-AnswerDeadlineBudgetMs -Config $cfgPlain -IDE 'Copilot')
+}
+
 # =============================================================================
 # Part 7 (F4): fullpipe - spawn the real Hook.ps1 per payload shape
 # =============================================================================
@@ -259,9 +278,14 @@ $null = New-Item -ItemType Directory -Path $logDir -Force
 $hookPath = Join-Path $repoRoot 'src\Hook.ps1'
 $todayLog = (Get-Date).ToString('yyyy-MM-dd')
 
-function Invoke-HookSpawn([string]$Json) {
+function Invoke-HookSpawn([string]$Json, [string]$ConfigFile = 'config.json') {
+    # Each spawn case asserts log-file PRESENCE and ABSENCE (HC-21c: NOT
+    # .copilot.log), so the shared log dir must be fresh per spawn - clearing
+    # it once at suite start would leak the previous case's files.
+    if (Test-Path $logDir) { Remove-Item $logDir -Recurse -Force }
+    $null = New-Item -ItemType Directory -Path $logDir -Force
     $prev = $env:PRETOOLHOOK_CONFIG_PATH
-    $env:PRETOOLHOOK_CONFIG_PATH = Join-Path $suiteDir 'config.json'
+    $env:PRETOOLHOOK_CONFIG_PATH = Join-Path $suiteDir $ConfigFile
     try {
         $out = $Json | & pwsh -NoProfile -NonInteractive -File $hookPath 2>$null
         return [PSCustomObject]@{ Code = $LASTEXITCODE; Stdout = ($out -join "`n") }
@@ -297,12 +321,24 @@ Invoke-Case "HC-23 Codex payload (pin)" {
     Assert-True "HC-23b wrote .codex.log" (Test-Path (Join-Path $logDir "$todayLog.codex.log"))
 }
 
+# F3 enforcement end-to-end pin: the tiny deadline (1 ms) is blown before the
+# verdict lands, so the hook must fail closed with the contractual ask.
+Invoke-Case "HC-26 deadline-before-verdict -> fail-closed ask end-to-end" {
+    $r = Invoke-HookSpawn '{"hook_event_name":"preToolUse","toolName":"runInTerminal","toolArgs":{"command":"Get-Date"},"sessionId":"s1","timestamp":"1790000000000","cwd":"c:\\git"}' 'config.deadline-tiny.json'
+    Assert-Equal "HC-26a exit code 0" "0" "$($r.Code)"
+    $j = $null; try { $j = $r.Stdout | ConvertFrom-Json } catch { }
+    Assert-True  "HC-26b stdout is JSON" ($null -ne $j)
+    Assert-Equal "HC-26c top-level ask" "ask" $j.permissionDecision
+    Assert-True  "HC-26d contractual reason" ($j.permissionDecisionReason -like 'LLM assessment incomplete (* ms Copilot answer deadline) - fail-closed')
+}
+
 # =============================================================================
-# Summary (machine-parseable)
+# Summary (machine-parseable: Run-AllTests.ps1 extrasuites loop matches
+# unanchored "Total: N / Passed: N / Failed: N", same shape as llm-review)
 # =============================================================================
 Write-Host ""
-Write-Host "SUMMARY: total=$total passed=$passed failed=$failed" -ForegroundColor $(if ($failed -eq 0) { 'Green' } else { 'Yellow' })
+Write-Host "Total: $total  Passed: $passed  Failed: $failed" -ForegroundColor $(if ($failed -eq 0) { 'Green' } else { 'Yellow' })
 if ($failed -gt 0) {
-    Write-Host "RED expected until F1-F4 land (see docs/Updates/Update-2026-11-14-copilot-harness-migration.md)." -ForegroundColor Yellow
+    Write-Host "Contract violation - see docs/Updates/Update-2026-11-14-copilot-harness-migration.md." -ForegroundColor Yellow
 }
 exit $(if ($failed -gt 0) { 1 } else { 0 })

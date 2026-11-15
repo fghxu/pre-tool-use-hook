@@ -91,7 +91,8 @@ $copilotInput = [PSCustomObject]@{
 }
 Assert-Equal "Copilot detected via camelCase + epoch" "Copilot" (Detect-IDE -InputObject $copilotInput)
 
-# 1f: VS Code Copilot via transcript_path (shares Claude Code protocol but has copilot-chat path)
+# 1f: VS Code Local agent via transcript_path (F1 2026-11-14: __vscode- payloads
+#     are the deprecated Local harness, labelled "Local" not "Copilot")
 $vscodeCopilotInput = [PSCustomObject]@{
     hook_event_name = "PreToolUse"
     tool_name       = "run_in_terminal"
@@ -100,9 +101,9 @@ $vscodeCopilotInput = [PSCustomObject]@{
     transcript_path = "C:\Users\frank\GitHub.copilot-chat\transcripts\session.jsonl"
     tool_input      = [PSCustomObject]@{ command = "ls" }
 }
-Assert-Equal "VS Code Copilot detected via transcript_path" "Copilot" (Detect-IDE -InputObject $vscodeCopilotInput)
+Assert-Equal "VS Code Local detected via __vscode- (transcript present)" "Local" (Detect-IDE -InputObject $vscodeCopilotInput)
 
-# 1g: VS Code Copilot via __vscode- without transcript_path (bug fix — was logging to claude.log)
+# 1g: VS Code Local agent via __vscode- without transcript_path (bug fix — was logging to claude.log)
 $vscodeCopilotNoTranscript = [PSCustomObject]@{
     hook_event_name = "PreToolUse"
     tool_name       = "run_in_terminal"
@@ -110,7 +111,7 @@ $vscodeCopilotNoTranscript = [PSCustomObject]@{
     timestamp       = "2026-06-15T14:30:00.123Z"
     tool_input      = [PSCustomObject]@{ command = "Get-Process" }
 }
-Assert-Equal "VS Code Copilot detected via __vscode- without transcript_path" "Copilot" (Detect-IDE -InputObject $vscodeCopilotNoTranscript)
+Assert-Equal "VS Code Local detected via __vscode- without transcript_path" "Local" (Detect-IDE -InputObject $vscodeCopilotNoTranscript)
 
 # 1h: Edge case — null input defaults to ClaudeCode
 Assert-Equal "Null input defaults to ClaudeCode" "ClaudeCode" (Detect-IDE -InputObject $null)

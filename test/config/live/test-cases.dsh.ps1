@@ -111,7 +111,8 @@ $copilotInput = [PSCustomObject]@{
 }
 Assert-Equal "Copilot still detected via camelCase + epoch" "Copilot" (Detect-IDE -InputObject $copilotInput)
 
-# 1g: Regression — VS Code Copilot via __vscode- still detected
+# 1g: Regression — VS Code Local agent via __vscode- still detected
+#     (F1 2026-11-14: relabelled Copilot -> Local, the deprecated VS Code harness)
 $vscodeInput = [PSCustomObject]@{
     hook_event_name = "PreToolUse"
     tool_name       = "run_in_terminal"
@@ -119,7 +120,7 @@ $vscodeInput = [PSCustomObject]@{
     timestamp       = "2026-06-15T14:30:00.123Z"
     tool_input      = [PSCustomObject]@{ command = "Get-Process" }
 }
-Assert-Equal "VS Code Copilot still detected via __vscode-" "Copilot" (Detect-IDE -InputObject $vscodeInput)
+Assert-Equal "VS Code Local still detected via __vscode-" "Local" (Detect-IDE -InputObject $vscodeInput)
 
 # 1h: Regression — Codex still detected via turn_id
 $codexInput = [PSCustomObject]@{

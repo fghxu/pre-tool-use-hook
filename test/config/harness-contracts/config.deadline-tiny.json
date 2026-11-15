@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "description": "TEST FIXTURE variant for F3 enforcement (HC-26): answer_deadline_ms.Copilot = 1 ms forces the deadline-before-verdict path deterministically (local classification always takes longer). The hook must emit the fail-closed ask with the contractual reason template, exit 0.",
+
+  "global_modifying_strictness": "normal",
+  "log_file_path": "c:\\temp\\pretoolhook-harness-contracts-testlogs\\",
+  "ask_notification": { "enabled": false },
+  "llm_second_opinion": { "enabled": false },
+
+  "answer_deadline_ms": { "Copilot": 1 },
+
+  "trusted_pattern": [],
+  "untrusted_pattern": [],
+  "intercept_tool_name": [ "Bash", "run_in_terminal", "PowerShell" ],
+  "ignore_tool_name": [ "Read" ],
+  "tool_name_mapping": { "Bash": "tool_input.command", "run_in_terminal": "tool_input.command", "PowerShell": "tool_input.command" },
+  "path_tool_mapping": {},
+
+  "commands": {
+    "PowerShell": {
+      "modifying_strictness": "normal",
+      "read_only_verbs": [ "Get-*" ],
+      "modifying_verbs": { "high": [ "Remove-*" ], "medium": [], "low": [] },
+      "read_only": [
+        { "name": "Get-Date", "patterns": [ "Get-Date" ], "description": "Read-only date" }
+      ],
+      "modifying": [
+        { "name": "Remove-Item", "patterns": [ "Remove-Item *" ], "risk": "high", "description": "Remove files" }
+      ]
+    },
+    "Linux": {
+      "modifying_strictness": "normal",
+      "read_only": [
+        { "name": "echo", "patterns": [ "echo *", "echo" ], "description": "Print text" }
+      ],
+      "modifying": [
+        { "name": "rm", "patterns": [ "rm *" ], "risk": "high", "description": "Remove files" }
+      ]
+    }
+  }
+}
